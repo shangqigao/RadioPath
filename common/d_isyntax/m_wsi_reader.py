@@ -409,7 +409,7 @@ class IsyntaxReader(WSIReader):
         ds = self.level_downsamples[level]
         x_start *= ds
         y_start *= ds
-        tile_w, tile_h = tile_size, tile_size
+        tile_w, tile_h = tile_size
         x_end, y_end = x_start + (tile_w-1)*ds, y_start + (tile_h-1)*ds
         view_range = [x_start, x_end, y_start, y_end, level]
         regions = self._view.request_regions([view_range],
@@ -419,7 +419,8 @@ class IsyntaxReader(WSIReader):
         tile = np.empty(np.prod(tile_size)*4, dtype=np.uint8)
         region.get(tile)
         tile.shape = (tile_h, tile_w, 4)
-        return tile[:,:,:3], tile[:,:,3] > 0
+        # return tile[:,:,:3], tile[:,:,3] > 0
+        return tile[:,:,:3]
 
     @property
     def level_dimensions(self):

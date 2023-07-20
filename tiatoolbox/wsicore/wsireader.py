@@ -13,7 +13,7 @@ from numbers import Number
 from typing import Iterable, List, Optional, Tuple, Union
 
 import numpy as np
-import openslide
+# import openslide
 import pandas as pd
 import tifffile
 import zarr
@@ -2103,7 +2103,7 @@ class IsyntaxWSIReader(WSIReader):
     ) -> None:
         super().__init__(input_img=input_img, mpp=mpp, power=power)
         from common.d_isyntax.m_wsi_reader import IsyntaxReader
-        self.isyntax_wsi = IsyntaxReader(filename=str(self.input_path))
+        self.isyntax_wsi = IsyntaxReader(slide_path=str(self.input_path))
 
     def read_rect(
         self,

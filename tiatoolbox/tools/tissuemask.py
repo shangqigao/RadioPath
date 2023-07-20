@@ -146,7 +146,7 @@ class OtsuTissueMasker(TissueMasker):
             mask = (grey < self.threshold).astype(bool)
             masks.append(mask)
 
-        return [masks]
+        return masks
 
 
 class MorphologicalMasker(OtsuTissueMasker):

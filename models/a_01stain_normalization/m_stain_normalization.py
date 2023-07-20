@@ -1,3 +1,6 @@
+import sys
+sys.path.append('../')
+
 from tiatoolbox import data
 from tiatoolbox.wsicore.wsireader import WSIReader
 from tiatoolbox.tools import stainnorm
@@ -36,21 +39,23 @@ def plot(source, normed_source, target):
     plt.imshow(target)
     plt.title("Target Image")
     plt.axis("off")
-    plt.show()
+    plt.savefig("a_01stain_normalization/stain_normalization.jpg")
 
 
 if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--slide_path', default="/well/rittscher/shared")
-    parser.add_argument('--tile_location', default=[0, 0], type=list)
-    parser.add_argument('--level', default=1, type=int)
+    parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/1019_19/1019_19_2_L2_HE.isyntax")
+    parser.add_argument('--tile_location', default=[40000, 50000], type=list)
+    parser.add_argument('--level', default=0, type=int)
     parser.add_argument('--tile_size', default=[1024, 1024], type=list)
-    parser.add_argument('--stain_method', default='vahadane', help='method of stain normalization')
+    parser.add_argument('--stain_method', default='reinhard', help='method of stain normalization')
     args = parser.parse_args()
 
     ## read a WSI from isyntax
     wsi = WSIReader.open(args.slide_path)
+    print(wsi.info.as_dict())
     source = wsi.read_region(args.tile_location, args.level, args.tile_size)
+    # source = wsi.slide_thumbnail(resolution=1.25, units="power")
     source, normed_source, target = wsi_stain_normalization(args.stain_method, source)
     plot(source, normed_source, target)

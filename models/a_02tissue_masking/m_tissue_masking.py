@@ -1,3 +1,6 @@
+import sys
+sys.path.append('../')
+
 import matplotlib.pyplot as plt
 import argparse
 
@@ -13,13 +16,13 @@ def plot(image, mask):
     plt.imshow(mask)
     plt.title("Mask")
     plt.axis("off")
-    plt.show()
+    plt.savefig("a_02tissue_masking/tissue_masking.jpg")
 
 
 if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--slide_path', default="/well/rittscher/shared")
+    parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/1019_19/1019_19_2_L2_HE.isyntax")
     parser.add_argument('--tile_location', default=[0, 0], type=list)
     parser.add_argument('--level', default=1, type=int)
     parser.add_argument('--tile_size', default=[1024, 1024], type=list)
