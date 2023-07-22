@@ -692,7 +692,7 @@ class NucleusInstanceSegmentor(SemanticSegmentor):
             sel = self.filter_coordinates(mask_reader, patch_outputs, **resolution)
             patch_outputs = patch_outputs[sel]
             patch_inputs = patch_inputs[sel]
-
+  
         # assume to be in [top_left_x, top_left_y, bot_right_x, bot_right_y]
         geometries = [shapely_box(*bounds) for bounds in patch_outputs]
         spatial_indexer = STRtree(geometries)

@@ -21,7 +21,6 @@ import cv2
 import xml.etree.ElementTree as ET
 import re
 from fractions import Fraction
-from tiatoolbox.wsicore.wsireader import VirtualWSIReader
 
 
 class WSIReader:
@@ -463,18 +462,3 @@ def get_reader_impl(slide_path):
         return OpenSlideReader
     else:
         return TiffReader
-    
-def virutal_wsi_reader(slide_path, level):
-    """
-    args:
-        slide path (str): path of a isyntax file
-        level (int): level of downsample
-    Return:
-        virtual_reader (VirtaulWSIReader): a virtual wsi reader
-    """
-    reader = get_reader_impl(slide_path)
-    slide = reader(slide_path)
-    slide_dim = (np.array(slide.level_dimensions[level])).astype("int")
-    region = slide.read_region([0,0], level, slide_dim)
-    virtual_reader = VirtualWSIReader(region[0])
-    return virtual_reader

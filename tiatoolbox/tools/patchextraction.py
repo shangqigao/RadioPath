@@ -324,8 +324,8 @@ class PatchExtractor(PatchExtractorABC):
         patch_input_shape: Union[Tuple[int, int], np.ndarray] = None,
         patch_output_shape: Union[Tuple[int, int], np.ndarray] = None,
         stride_shape: Union[Tuple[int, int], np.ndarray] = None,
-        input_within_bound: bool = False,
-        output_within_bound: bool = False,
+        input_within_bound: bool = True,
+        output_within_bound: bool = True,
     ):
         """Calculate patch tiling coordinates.
 

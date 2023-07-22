@@ -9,7 +9,13 @@ from tiatoolbox.utils.visualization import overlay_prediction_contours
 
 import numpy as np
 import matplotlib.pyplot as plt
-import os, glob, argparse, joblib, random, cv2
+import os, glob, argparse, joblib, random, cv2, shutil
+
+def rmdir(dir_path: str):
+    """Remove a directory."""
+    if os.path.isdir(dir_path):
+        shutil.rmtree(dir_path)
+    return
 
 def wsi_nucleus_segmentation(wsi_path, save_dir, pretrained_model, tissue_masking):
     """
@@ -30,12 +36,13 @@ def wsi_nucleus_segmentation(wsi_path, save_dir, pretrained_model, tissue_maskin
         verbose=False,
     )
 
+    rmdir(save_dir)
     wsi_output = inst_segmentor.predict(
         [wsi_path],
         masks=None,
         save_dir=save_dir,
         mode='wsi',
-        on_gpu=True,
+        on_gpu=False,
         crash_on_exception=True,
     )
     return wsi_output
@@ -107,13 +114,14 @@ if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/1019_19/1019_19_2_L2_HE.isyntax")
-    parser.add_argument('--save_dir', default="a_04feature_extraction/", type=str)
+    parser.add_argument('--save_dir', default="a_04feature_extraction/wsi_nucleus_results", type=str)
     parser.add_argument('--pretrained_model', default="hovernet_fast-pannuke", type=str)
     parser.add_argument('--tissue_masking', default=True, type=bool)
     args = parser.parse_args()
 
     ## read a WSI from isyntax
     wsi = WSIReader.open(args.slide_path)
+    print(wsi.info.as_dict())
     wsi_overview = wsi.slide_thumbnail(resolution=1.25, units="power")
     wsi_output = wsi_nucleus_segmentation(args.slide_path, args.save_dir, args.pretrained_model, args.tissue_masking)
     plot_wsi(wsi_overview, wsi_output)
