@@ -4,8 +4,11 @@ sys.path.append('../')
 from tiatoolbox import data
 from tiatoolbox.wsicore.wsireader import WSIReader
 from tiatoolbox.tools import stainnorm
+from pprint import pprint
 import matplotlib.pyplot as plt
 import argparse
+import faulthandler
+faulthandler.enable()
 
 def wsi_stain_normalization(method, source, target=None):
     """
@@ -45,8 +48,8 @@ def plot(source, normed_source, target):
 if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/1019_19/1019_19_2_L2_HE.isyntax")
-    parser.add_argument('--tile_location', default=[40000, 50000], type=list)
+    parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/3923_21/3923_21_G_HE.isyntax")
+    parser.add_argument('--tile_location', default=[50000, 50000], type=list)
     parser.add_argument('--level', default=0, type=int)
     parser.add_argument('--tile_size', default=[1024, 1024], type=list)
     parser.add_argument('--stain_method', default='reinhard', help='method of stain normalization')
@@ -54,7 +57,7 @@ if __name__ == "__main__":
 
     ## read a WSI from isyntax
     wsi = WSIReader.open(args.slide_path)
-    print(wsi.info.as_dict())
+    pprint(wsi.info.as_dict())
     source = wsi.read_region(args.tile_location, args.level, args.tile_size)
     # source = wsi.slide_thumbnail(resolution=1.25, units="power")
     source, normed_source, target = wsi_stain_normalization(args.stain_method, source)

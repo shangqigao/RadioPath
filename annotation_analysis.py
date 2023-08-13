@@ -4,8 +4,8 @@ import os
 import math
 import matplotlib.pyplot as plt
 
-csv_dir = "/Users/shangqigao/Nutstore Files/University-of-Oxford/computational-pathology/Datasets/KiBla"
-csv_path = os.path.join(csv_dir, "Kidney/Annotations/Exported_Annotations_KIBLA_Kidney_B1.csv")
+csv_dir = "/well/rittscher/shared/datasets/KiBla/data"
+csv_path = os.path.join(csv_dir, "KIBLA_Bladder_B4_Clare_Annotations_2023_07_31_16_04.csv")
 # csv_path = os.path.join(csv_dir, "Bladder/Annotations/Exported_Annotations_KIBLA_Bladder_B1.csv")
 json_path = "output.json"
 tile_size = 256
@@ -40,14 +40,14 @@ def visualize_class(data):
         values.append(int(sum(v)))
     plt.figure()
     plt.subplot(211)
-    plt.bar(keys[1:], values[1:])
+    plt.bar(keys, values)
     plt.ylabel('Number of tiles')
     plt.title('Kidney bar')
     plt.xticks()
     plt.subplot(212)
-    plt.pie(values[1:], labels=keys[1:], autopct='%.2f%%')
+    plt.pie(values, labels=keys, autopct='%.2f%%')
     plt.title('Kidney pie')
-    plt.show()
+    plt.savefig("annotation_analysis.jpg")
     return
 
 def main():

@@ -9,6 +9,7 @@ import joblib
 import numpy as np
 import torch
 import tqdm
+import logging
 from shapely.geometry import box as shapely_box
 from shapely.strtree import STRtree
 
@@ -711,6 +712,7 @@ class NucleusInstanceSegmentor(SemanticSegmentor):
 
         for set_idx, (set_bounds, set_flags) in enumerate(tile_info_sets):
             for tile_idx, tile_bounds in enumerate(set_bounds):
+                logging.info("processing tile: {}/{} ...".format(tile_idx + 1, len(set_bounds)))
                 tile_flag = set_flags[tile_idx]
 
                 # select any patches that have their output

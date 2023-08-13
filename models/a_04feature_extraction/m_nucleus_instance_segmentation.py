@@ -2,14 +2,23 @@ import sys
 sys.path.append('../')
 
 from tiatoolbox.models.engine.nucleus_instance_segmentor import NucleusInstanceSegmentor
-from tiatoolbox.utils.misc import imread
+from tiatoolbox.utils.misc import imwrite
 from tiatoolbox.wsicore.wsireader import WSIReader
-
+from tiatoolbox.tools.stainnorm import get_normalizer
+from tiatoolbox.data import stain_norm_target
 from tiatoolbox.utils.visualization import overlay_prediction_contours
-
+from pprint import pprint
 import numpy as np
 import matplotlib.pyplot as plt
-import os, glob, argparse, joblib, random, cv2, shutil
+import os, argparse, joblib, random, cv2, shutil
+
+target_image = stain_norm_target()
+stain_normaliser = get_normalizer("reinhard")
+stain_normaliser.fit(target_image)
+
+
+def stain_norm_func(img):
+    return stain_normaliser.transform(img)
 
 def rmdir(dir_path: str):
     """Remove a directory."""
@@ -17,13 +26,14 @@ def rmdir(dir_path: str):
         shutil.rmtree(dir_path)
     return
 
-def wsi_nucleus_segmentation(wsi_path, save_dir, pretrained_model, tissue_masking):
+def wsi_nucleus_segmentation(wsi_path, save_dir, pretrained_model, tissue_masking, mode):
     """
     Args:
         wsi_path (str): path of wsi file
         save_dir (str): dir of saving segmentations
         pretrained_model (str): name of pretrained model
         tissue_masking (bool): if true, do tissue masking before patch extraction
+        mode (str): "tile" or "wsi"
     Returns:
         wsi_output (list): a list of (wsi_path, output_path)
     """
@@ -31,18 +41,19 @@ def wsi_nucleus_segmentation(wsi_path, save_dir, pretrained_model, tissue_maskin
         pretrained_model=pretrained_model,
         num_loader_workers=4,
         num_postproc_workers=4,
-        batch_size=8,
+        batch_size=32,
         auto_generate_mask=tissue_masking,
         verbose=False,
     )
+    inst_segmentor.model.preproc_func = stain_norm_func
 
     rmdir(save_dir)
     wsi_output = inst_segmentor.predict(
         [wsi_path],
         masks=None,
         save_dir=save_dir,
-        mode='wsi',
-        on_gpu=False,
+        mode=mode,
+        on_gpu=True,
         crash_on_exception=True,
     )
     return wsi_output
@@ -67,15 +78,20 @@ def plot_wsi(wsi_overview, wsi_output):
         line_thickness=4,
     )
 
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(14, 5))
     plt.subplot(1,2,1)
     plt.imshow(wsi_overview)
     plt.axis("off")
     plt.title("WSI Overview")
-    plt.subplot(1,2,2)
+    ax = plt.subplot(1,2,2)
     plt.imshow(overlaid_predictions)
     plt.axis("off")
     plt.title("Nucleus Segmentation")
+
+    labels = [value[0] for value in color_dict.values()]
+    colors = ["#%02x%02x%02x" % value[1] for value in color_dict.values()]
+    markers = [plt.Line2D([0,0],[0,0],color=c, marker='o', linestyle='') for c in colors]
+    ax.legend(markers, labels, fontsize="8", loc="center left", bbox_to_anchor=(1, 0.5))
     plt.savefig("a_04feature_extraction/wsi_nucleus_segmentation.jpg")
 
 def plot_patches(wsi, wsi_output, bb=128):
@@ -113,16 +129,29 @@ def plot_patches(wsi, wsi_output, bb=128):
 if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/1019_19/1019_19_2_L2_HE.isyntax")
+    parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/3923_21/3923_21_G_HE.isyntax")
+    parser.add_argument('--tile_location', default=[50000, 50000], type=list)
+    parser.add_argument('--level', default=0, type=int)
+    parser.add_argument('--tile_size', default=[1024, 1024], type=list)
     parser.add_argument('--save_dir', default="a_04feature_extraction/wsi_nucleus_results", type=str)
     parser.add_argument('--pretrained_model', default="hovernet_fast-pannuke", type=str)
     parser.add_argument('--tissue_masking', default=True, type=bool)
+    parser.add_argument('--mode', default="tile", type=str)
     args = parser.parse_args()
 
     ## read a WSI from isyntax
     wsi = WSIReader.open(args.slide_path)
-    print(wsi.info.as_dict())
-    wsi_overview = wsi.slide_thumbnail(resolution=1.25, units="power")
-    wsi_output = wsi_nucleus_segmentation(args.slide_path, args.save_dir, args.pretrained_model, args.tissue_masking)
-    plot_wsi(wsi_overview, wsi_output)
-    plot_patches(wsi, wsi_output)
+    pprint(wsi.info.as_dict())
+    if args.mode == "tile":
+        tile = wsi.read_region(args.tile_location, args.level, args.tile_size)
+        tile_save_path = os.path.join("a_04feature_extraction", 'tile_sample.png')
+        imwrite(tile_save_path, tile)
+        tile_output = wsi_nucleus_segmentation(tile_save_path, args.save_dir, args.pretrained_model, args.tissue_masking, args.mode)
+        plot_wsi(tile, tile_output)
+    elif args.mode == "wsi":
+        wsi_overview = wsi.slide_thumbnail(resolution=1.25, units="power")
+        wsi_output = wsi_nucleus_segmentation(args.slide_path, args.save_dir, args.pretrained_model, args.tissue_masking, args.mode)
+        plot_wsi(wsi_overview, wsi_output)
+        plot_patches(wsi, wsi_output)
+    else:
+        raise ValueError(f"Invalid mode: {args.mode}")

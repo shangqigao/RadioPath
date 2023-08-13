@@ -262,13 +262,13 @@ class ReinhardNormalizer:
         chan1, chan2, chan3 = self.lab_split(img)
         means, stds = self.get_mean_std(img)
         norm1 = (
-            (chan1 - means[0]) * (self.target_stds[0] / stds[0])
+            (chan1 - means[0]) * (self.target_stds[0] / (stds[0] + 1e-10))
         ) + self.target_means[0]
         norm2 = (
-            (chan2 - means[1]) * (self.target_stds[1] / stds[1])
+            (chan2 - means[1]) * (self.target_stds[1] / (stds[1] + 1e-10))
         ) + self.target_means[1]
         norm3 = (
-            (chan3 - means[2]) * (self.target_stds[2] / stds[2])
+            (chan3 - means[2]) * (self.target_stds[2] / (stds[2] + 1e-10))
         ) + self.target_means[2]
         return self.merge_back(norm1, norm2, norm3)
 

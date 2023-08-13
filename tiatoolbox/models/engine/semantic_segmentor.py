@@ -1327,6 +1327,7 @@ class SemanticSegmentor:
         # ? what will happen if this crash midway?
         # => may not be able to retrieve the result dict
         for wsi_idx, img_path in enumerate(imgs):
+            logging.info("processing wsi: {}/{}...".format(wsi_idx + 1, len(imgs)))
             self._predict_wsi_handle_exception(
                 imgs, wsi_idx, img_path, mode, ioconfig, save_dir, crash_on_exception
             )

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import argparse
 import numpy as np
 
+from pprint import pprint
 from tiatoolbox.wsicore.wsireader import WSIReader
 from tiatoolbox.tools import patchextraction
 
@@ -56,8 +57,8 @@ def plot(patches):
 if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/1019_19/1019_19_2_L2_HE.isyntax")
-    parser.add_argument('--tile_location', default=[40000, 50000], type=list)
+    parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/3923_21/3923_21_G_HE.isyntax")
+    parser.add_argument('--tile_location', default=[50000, 50000], type=list)
     parser.add_argument('--level', default=0, type=int)
     parser.add_argument('--tile_size', default=[1024, 1024], type=list)
     parser.add_argument('--patch_size', default=[64, 64], type=list)
@@ -66,6 +67,8 @@ if __name__ == "__main__":
 
     ## read a WSI from isyntax file
     wsi = WSIReader.open(args.slide_path)
+    pprint(wsi.info.as_dict())
     image = wsi.read_region(args.tile_location, args.level, args.tile_size)
     patches = wsi_patch_extraction(args.extract_method, image, args.patch_size)
     plot(patches)
+    wsi.close()

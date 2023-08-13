@@ -430,6 +430,10 @@ class WSIReader:
         """
         self._m_info = meta
 
+    def close(self):
+        """Close wsi reader"""
+        raise NotImplementedError
+
     def _info(self) -> WSIMeta:
         """WSI metadata internal getter used to update info property.
 
@@ -2105,6 +2109,9 @@ class IsyntaxWSIReader(WSIReader):
         from common.d_isyntax.m_wsi_reader import IsyntaxReader
         self.isyntax_wsi = IsyntaxReader(slide_path=str(self.input_path))
 
+    def close(self):
+        self.isyntax_wsi.close()
+
     def read_rect(
         self,
         location,
@@ -3115,6 +3122,9 @@ class VirtualWSIReader(WSIReader):
 
         if info is not None:
             self._m_info = info
+
+    def close(self):
+        delattr(self, 'img')
 
     def _info(self):
         """Visual Field metadata getter.

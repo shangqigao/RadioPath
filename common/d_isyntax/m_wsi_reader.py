@@ -404,22 +404,36 @@ class IsyntaxReader(WSIReader):
         return self._tile_dimensions
         
     def _read_region(self, x_y, level, tile_size):
-        x_start, y_start = x_y
+        if x_y[0] >= 0 and x_y[1] >= 0:
+            x_start, y_start = x_y
+            tile_w, tile_h = tile_size
+            padding = ((0, 0), (0, 0), (0, 0))
+        elif x_y[0] >= 0 and x_y[1] < 0:
+            x_start, y_start = x_y[0], 0
+            tile_w, tile_h = tile_size[0], tile_size[1] + x_y[1]
+            padding = ((0, 0), (-x_y[1], 0), (0, 0))
+        elif x_y[0] < 0 and x_y[1] >= 0:
+            x_start, y_start = 0, x_y[1]
+            tile_w, tile_h = tile_size[0] + x_y[0], tile_size[1]
+            padding = ((-x_y[0], 0), (0, 0), (0, 0))
+        else:
+            x_start, y_start = 0, 0
+            tile_w, tile_h = tile_size[0] + x_y[0], tile_size[1] + x_y[1]
+            padding = ((-x_y[0], 0), (-x_y[1], 0), (0, 0))
         ds = self.level_downsamples[level]
         x_start *= ds
         y_start *= ds
-        tile_w, tile_h = tile_size
         x_end, y_end = x_start + (tile_w-1)*ds, y_start + (tile_h-1)*ds
         view_range = [x_start, x_end, y_start, y_end, level]
         regions = self._view.request_regions([view_range],
                             self._view.data_envelopes(level),
                             True, [255,255,255], self._pe.BufferType(1))
         region, = self._pe.wait_any(regions)
-        tile = np.empty(np.prod(tile_size)*4, dtype=np.uint8)
+        tile = np.empty(tile_w*tile_h*4, dtype=np.uint8)
         region.get(tile)
         tile.shape = (tile_h, tile_w, 4)
         # return tile[:,:,:3], tile[:,:,3] > 0
-        return tile[:,:,:3]
+        return np.pad(tile[:,:,:3], padding, 'constant')
 
     @property
     def level_dimensions(self):
@@ -462,3 +476,79 @@ def get_reader_impl(slide_path):
         return OpenSlideReader
     else:
         return TiffReader
+
+class IsyntaxReaderO(WSIReader):
+    def __init__(self, slide_path):
+        self.slide_path = slide_path
+        self._pe = PixelEngine(SoftwareRenderBackend(), SoftwareRenderContext())
+        self._pe['in'].open(str(slide_path), 'ficom')
+        self._view = self._pe['in']['WSI'].source_view
+        trunc_bits = {0: [0, 0, 0]}
+        self._view.truncation(False, False, trunc_bits)
+        
+    def close(self):
+        self.slide_path = None
+        self._pe['in'].close()
+        if hasattr(self, '_tile_dimensions'):
+            delattr(self, '_tile_dimensions')
+        if hasattr(self, '_level_dimensions'):
+            delattr(self, '_level_dimensions')
+        if hasattr(self, '_level_downsamples'):
+            delattr(self, '_level_downsamples')
+        
+    @property
+    def tile_dimensions(self):
+        if not hasattr(self, '_tile_dimensions'):
+            self._tile_dimensions = [tuple(self._pe['in']['WSI'].block_size()[:2])] * self.level_count
+        return self._tile_dimensions
+        
+    def _read_region(self, x_y, level, tile_size):
+        x_start, y_start = x_y
+        ds = self.level_downsamples[level]
+        x_start *= ds
+        y_start *= ds
+        tile_w, tile_h = tile_size
+        x_end, y_end = x_start + (tile_w-1)*ds, y_start + (tile_h-1)*ds
+        view_range = [x_start, x_end, y_start, y_end, level]
+        regions = self._view.request_regions([view_range],
+                            self._view.data_envelopes(level),
+                            True, [255,255,255], self._pe.BufferType(1))
+        region, = self._pe.wait_any(regions)
+        tile = np.empty(np.prod(tile_size)*4, dtype=np.uint8)
+        region.get(tile)
+        tile.shape = (tile_h, tile_w, 4)
+        return tile[:,:,:3], tile[:,:,3] > 0
+
+    @property
+    def level_dimensions(self):
+        if not hasattr(self, '_level_dimensions'):
+            self._level_dimensions = []
+            for level in range(self.level_count):
+                x_step, x_end = self._view.dimension_ranges(level)[0][1:]
+                y_step, y_end = self._view.dimension_ranges(level)[1][1:]
+                range_x = (x_end + 1) // x_step
+                range_y = (y_end + 1) // y_step
+                self._level_dimensions.append((range_x, range_y))
+        return self._level_dimensions
+        
+    @property
+    def level_count(self):
+        return self._view.num_derived_levels + 1
+        
+    @property
+    def mpp(self):
+        return self._view.scale[0], self._view.scale[1]
+        
+    @property
+    def dtype(self):
+        return np.dtype(np.uint8)
+        
+    @property
+    def n_channels(self):
+        return 3
+        
+    @property
+    def level_downsamples(self):
+        if not hasattr(self, '_level_downsamples'):
+            self._level_downsamples = [self._view.dimension_ranges(level)[0][1] for level in range(self.level_count)]
+        return self._level_downsamples
