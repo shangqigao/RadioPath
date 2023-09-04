@@ -39,26 +39,27 @@ def load_json(path: str):
 def construct_graph(wsi_name, wsi_feature_dir, save_path):
     positions = np.load(f"{wsi_feature_dir}/{wsi_name}.position.npy")
     features = np.load(f"{wsi_feature_dir}/{wsi_name}.features.npy")
-    graph_dict = SlideGraphConstructor.build(positions[:, :2], features, feature_range_thresh=None,)
+    graph_dict = SlideGraphConstructor.build(positions[:, :2], features, feature_range_thresh=None)
     with save_path.open("w") as handle:
-        graph_dict = {k: v.tolist() for k, v in graph_dict.items()}
-        json.dump(graph_dict, handle)
+        new_graph_dict = {k: v.tolist() for k, v in graph_dict.items() if k != "cluster_points"}
+        new_graph_dict.update({"cluster_points": graph_dict["cluster_points"]})
+        json.dump(new_graph_dict, handle)
 
-def visualize_graph(wsi_path, graph_path, label_path=None, resolution=0.25, units="mpp"):
+def visualize_graph(wsi_path, graph_path, label=None, resolution=0.25, units="mpp"):
     NODE_RESOLUTION = {"resolution": resolution, "units": units}
-    PLOT_RESOLUTION = {"resolution": 8*resolution, "units": units}
+    PLOT_RESOLUTION = {"resolution": 4*resolution, "units": units}
     NODE_SIZE = 24
     EDGE_SIZE = 4
     graph_dict = load_json(graph_path)
-    graph_dict = {k: np.array(v) for k, v in graph_dict.items()}
+    graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
     graph = Data(**graph_dict)
 
-    if label_path is not None:
-        node_activations = np.load(label_path)
-
+    if isinstance(label, pathlib.Path):
+        node_activations = np.load(label)
+    elif isinstance(label, np.ndarray):
+        node_activations = np.argmax(label, axis=1)
     else:
-        # node_activations = np.max(graph.x, axis=1)
-        node_activations = np.std(graph.x, axis=1)
+        node_activations = np.argmax(graph.x, axis=1)
 
     cmap = get_cmap("viridis")
     norm_node_activations = (node_activations - node_activations.min()) / (node_activations.max() - node_activations.min() + 1e-10)
@@ -78,7 +79,7 @@ def visualize_graph(wsi_path, graph_path, label_path=None, resolution=0.25, unit
     node_resolution = reader.slide_dimensions(**NODE_RESOLUTION)
     plot_resolution = reader.slide_dimensions(**PLOT_RESOLUTION)
     fx = np.array(node_resolution) / np.array(plot_resolution)
-    node_coordinates = np.array(graph.coordinates) / fx
+    node_coordinates = (np.array(graph.coordinates) + 112) / fx
     edges = np.array(graph.edge_index.T)
 
     thumb = reader.slide_thumbnail(**PLOT_RESOLUTION)
@@ -117,7 +118,7 @@ if __name__ == "__main__":
     parser.add_argument('--tile_size', default=[10240, 10240], type=list)
     parser.add_argument('--save_dir', default="a_05feature_aggregation/wsi_features", type=str)
     parser.add_argument('--mode', default="tile", type=str)
-    parser.add_argument('--feature_mode', default="cnn", type=str)
+    parser.add_argument('--feature_mode', default="composition", type=str)
     parser.add_argument('--pre_generated', default=False, type=bool)
     parser.add_argument('--resolution', default=0.25, type=float)
     parser.add_argument('--units', default="mpp", type=str)

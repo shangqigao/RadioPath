@@ -10,9 +10,11 @@ import joblib
 import argparse
 
 import numpy as np
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig, NucleusInstanceSegmentor
-from tiatoolbox.models.architecture.vanilla import CNNBackbone
+from tiatoolbox.models.architecture.vanilla import CNNBackbone, CNNModel
 from tiatoolbox.tools.stainnorm import get_normalizer
 from tiatoolbox.data import stain_norm_target
 from tiatoolbox.wsicore.wsireader import WSIReader
@@ -43,22 +45,63 @@ def rmdir(dir_path: str):
         shutil.rmtree(dir_path)
     return
 
+class CNNClassifier(CNNModel):
+    def __init__(self, backbone, num_classes=1):
+        super().__init__(backbone, num_classes)
+        self._transform = self.transform()
+    
+    def forward(self, imgs):
+        feat = self.feat_extract(imgs)
+        gap_feat = self.pool(feat)
+        return torch.flatten(gap_feat, 1)
+
+    @staticmethod
+    def infer_batch(model, batch_data, on_gpu):
+        device = "cuda" if on_gpu else "cpu"
+        image = batch_data.to(device).type(torch.float32)
+        model.eval()
+        with torch.inference_mode():
+            output = model(image)
+        return [output.cpu().numpy()]
+ 
+    def postproc_func(self, output: np.ndarray):
+        return output
+    
+    def preproc_func(self, image: np.ndarray):
+        return self._transform(image=image)["image"]
+        
+
+    def load(self, feature_path, classifier_path):
+        feature_state_dict = torch.load(feature_path)
+        self.feat_extract.load_state_dict(feature_state_dict)
+        classifier_state_dict = torch.load(classifier_path)
+        self.classifier.load_state_dict(classifier_state_dict)
+
+    def transform(self):
+        TS = A.Compose([A.Normalize(), ToTensorV2()])
+        return TS
+
 def extract_deep_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25, units="mpp"):
     ioconfig = IOSegmentorConfig(
         input_resolutions=[{"units": units, "resolution": resolution},],
         output_resolutions=[{"units": units, "resolution": resolution},],
-        patch_input_shape=[512, 512],
-        patch_output_shape=[512, 512],
-        stride_shape=[512, 512],
+        patch_input_shape=[224, 224],
+        patch_output_shape=[224, 224],
+        stride_shape=[224, 224],
         save_resolution={"units": "mpp", "resolution": 8.0}
     )
-    model = CNNBackbone("resnet50")
+    
+    # model = CNNBackbone("resnet50")
+    model = CNNClassifier(backbone="resnet50", num_classes=4)
+    feature_path = "a_04feature_extraction/tile_bladder_models/cnn/00/epoch=049.extractor.weights.pth"
+    classifier_path = "a_04feature_extraction/tile_bladder_models/cnn/00/epoch=049.classifier.weights.pth"
+    pretrained = [feature_path, classifier_path]
+    model.load(*pretrained)
     extractor = DeepFeatureExtractor(
         batch_size=32, 
         model=model, 
         num_loader_workers=8, 
     )
-    extractor.model.preproc_func = stain_norm_func
 
     rmdir(save_dir)
     output_map_list = extractor.predict(
@@ -130,7 +173,7 @@ def get_cell_compositions(
         mask_path,
         inst_pred_path,
         save_dir,
-        num_types = 6,
+        num_types = 2,
         patch_input_shape = (512, 512),
         stride_shape = (512, 512),
         resolution = 0.25,
@@ -172,9 +215,9 @@ def get_cell_compositions(
         bounds_ = shapely_box(*bounds)
         indices = [geo for geo in spatial_indexer.query(bounds_) if bounds_.contains(geometries[geo])]
         insts = [inst_pred[v]["type"] for v in indices]
-        uids, freqs = np.unique(insts, return_counts=True)
+        _, freqs = np.unique(insts, return_counts=True)
         holder = np.zeros(num_types, dtype=np.int16)
-        holder[uids.astype(int)] = freqs
+        holder[0] = freqs.sum()
         bounds_compositions.append(holder)
     bounds_compositions = np.array(bounds_compositions)
 
@@ -187,13 +230,13 @@ if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument('--slide_path', default="/well/rittscher/shared/datasets/KiBla/cases/3923_21/3923_21_G_HE.isyntax")
-    parser.add_argument('--mask_method', default='morphological', help='method of tissue masking')
+    parser.add_argument('--mask_method', default='otsu', help='method of tissue masking')
     parser.add_argument('--tile_location', default=[50000, 50000], type=list)
     parser.add_argument('--level', default=0, type=int)
     parser.add_argument('--tile_size', default=[1024, 1024], type=list)
     parser.add_argument('--save_dir', default="a_04feature_extraction/wsi_features", type=str)
     parser.add_argument('--mode', default="tile", type=str)
-    parser.add_argument('--feature_mode', default="composition", type=str)
+    parser.add_argument('--feature_mode', default="cnn", type=str)
     args = parser.parse_args()
 
     wsi = WSIReader.open(args.slide_path)
@@ -227,6 +270,7 @@ if __name__ == "__main__":
             [wsi_path],
             [msk_path],
             wsi_feature_dir,
+            args.mode,
         )
     else:
         raise ValueError(f"Invalid feature mode: {args.feature_mode}")

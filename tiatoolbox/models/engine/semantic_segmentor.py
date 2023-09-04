@@ -350,6 +350,7 @@ class WSIStreamDataset(torch_data.Dataset):
             slide_dimensions=np.array(img.shape[:2][::-1]),
             level_downsamples=[1.0],
             level_dimensions=[np.array(img.shape[:2][::-1])],
+            raw={"xml": None}
         )
         return VirtualWSIReader(
             img,

@@ -37,4 +37,3 @@ if __name__ == "__main__":
     mask = wsi.tissue_mask(method=args.mask_method, resolution=1.25, units="power")
     mask_thumb = mask.slide_thumbnail(resolution=1.25, units="power")
     plot(wsi_thumb, mask_thumb)
-    wsi.close()

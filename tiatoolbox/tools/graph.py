@@ -377,12 +377,15 @@ class SlideGraphConstructor:  # noqa: PIE798
 
         # Finding the xy centroid and average features for each cluster
         unique_clusters = list(set(clusters))
+        cluster_points = []
         point_centroids = []
         feature_centroids = []
         for c in unique_clusters:
             (idx,) = np.where(clusters == c)
             # Find the xy and feature space averages of the cluster
-            point_centroids.append(np.round(points[idx, :].mean(axis=0)))
+            same_cluster = points[idx, :]
+            cluster_points.append(same_cluster.tolist())
+            point_centroids.append(np.round(same_cluster.mean(axis=0)))
             feature_centroids.append(features[idx, :].mean(axis=0))
         point_centroids = np.array(point_centroids)
         feature_centroids = np.array(feature_centroids)
@@ -397,6 +400,7 @@ class SlideGraphConstructor:  # noqa: PIE798
             "x": feature_centroids,
             "edge_index": edge_index.astype(np.int64),
             "coordinates": point_centroids,
+            "cluster_points": cluster_points,
         }
 
     @classmethod

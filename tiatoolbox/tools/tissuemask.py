@@ -89,7 +89,7 @@ class OtsuTissueMasker(TissueMasker):
         super().__init__()
         self.threshold = None
 
-    def fit(self, images: np.ndarray, masks=None) -> None:
+    def fit(self, images: list, masks=None) -> None:
         """Find a binary threshold using Otsu's method.
 
         Args:
@@ -100,19 +100,20 @@ class OtsuTissueMasker(TissueMasker):
                 Unused here, for API consistency.
 
         """
-        images_shape = np.shape(images)
-        if len(images_shape) != 4:
+        images_shape = np.shape(images[0])
+        if len(images_shape) != 3:
             raise ValueError(
-                "Expected 4 dimensional input shape (N, height, width, 3)"
+                "Expected 3 dimensional input shape (height, width, 3)"
                 f" but received shape of {images_shape}."
             )
 
         # Convert RGB images to greyscale
         grey_images = [x[..., 0] for x in images]
         if images_shape[-1] == 3:
-            grey_images = np.zeros(images_shape[:-1], dtype=np.uint8)
-            for n, image in enumerate(images):
-                grey_images[n] = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            grey_images = []
+            for image in images:
+                grey_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                grey_images.append(grey_image.astype(np.uint8))
 
         pixels = np.concatenate([np.array(grey).flatten() for grey in grey_images])
 

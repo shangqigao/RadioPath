@@ -15,6 +15,7 @@ def count_annotated_tiles():
     with open(csv_path) as csvfile:
         csv_reader = csv.DictReader(csvfile)
         for i, row in enumerate(csv_reader):
+            print(i, row["Image"])
             dict_ann = json.loads(row["Annotation"])
             layers = dict_ann["annotation"]["layers"]
             for layer in layers:

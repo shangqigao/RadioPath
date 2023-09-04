@@ -1,9 +1,12 @@
 import csv
 import json
 import os
+import sys
 import pathlib
 from pathlib import Path
 import matplotlib.pyplot as plt
+
+csv.field_size_limit(sys.maxsize)
 
 def mkdir(dir_path: Path):
     """Create a directory if it does not exist."""
@@ -54,9 +57,13 @@ def csv_to_json(csv_path, save_json_dir):
 
 def main():
     csv_dir = "/well/rittscher/shared/datasets/KiBla/data"
-    csv_path = os.path.join(csv_dir, "KIBLA_Bladder_B4_Clare_Annotations_2023_07_31_16_04.csv")
-    save_json_dir = "a_06semantic_segmentation/wsi_bladder_annotations"
-    csv_to_json(csv_path, save_json_dir)
+    keyword = "Bladder"
+    save_json_dir = f"a_06semantic_segmentation/wsi_{keyword.lower()}_annotations"
+    csv_paths = pathlib.Path(csv_dir).glob("*.csv")
+    for csv_path in csv_paths:
+        csv_name = csv_path.stem
+        if keyword in csv_name and "B1" not in csv_name:
+            csv_to_json(csv_path, save_json_dir)
     return
 
 if __name__ == "__main__":

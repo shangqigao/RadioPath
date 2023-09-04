@@ -12,6 +12,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os, argparse, joblib, random, cv2, shutil
 
+from models.a_01stain_normalization.m_stain_normalization import wsi_stain_normalization
+
 target_image = stain_norm_target()
 stain_normaliser = get_normalizer("reinhard")
 stain_normaliser.fit(target_image)
@@ -144,10 +146,11 @@ if __name__ == "__main__":
     pprint(wsi.info.as_dict())
     if args.mode == "tile":
         tile = wsi.read_region(args.tile_location, args.level, args.tile_size)
+        _, norm_tile, _ = wsi_stain_normalization("reinhard", tile)
         tile_save_path = os.path.join("a_04feature_extraction", 'tile_sample.png')
         imwrite(tile_save_path, tile)
         tile_output = wsi_nucleus_segmentation(tile_save_path, args.save_dir, args.pretrained_model, args.tissue_masking, args.mode)
-        plot_wsi(tile, tile_output)
+        plot_wsi(norm_tile, tile_output)
     elif args.mode == "wsi":
         wsi_overview = wsi.slide_thumbnail(resolution=1.25, units="power")
         wsi_output = wsi_nucleus_segmentation(args.slide_path, args.save_dir, args.pretrained_model, args.tissue_masking, args.mode)

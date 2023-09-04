@@ -8,6 +8,7 @@ import numpy as np
 from pprint import pprint
 from tiatoolbox.wsicore.wsireader import WSIReader
 from tiatoolbox.tools import patchextraction
+from models.a_01stain_normalization.m_stain_normalization import wsi_stain_normalization
 
 def wsi_patch_extraction(method, image, size, locations=None):
     """
@@ -43,7 +44,7 @@ def wsi_patch_extraction(method, image, size, locations=None):
 
 def plot(patches):
     i = 1
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(5, 5))
     for patch in patches:
         plt.subplot(4, 4, i)
         plt.imshow(patch)
@@ -69,6 +70,6 @@ if __name__ == "__main__":
     wsi = WSIReader.open(args.slide_path)
     pprint(wsi.info.as_dict())
     image = wsi.read_region(args.tile_location, args.level, args.tile_size)
+    _, image, _ = wsi_stain_normalization("reinhard", image)
     patches = wsi_patch_extraction(args.extract_method, image, args.patch_size)
     plot(patches)
-    wsi.close()

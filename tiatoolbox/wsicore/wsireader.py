@@ -2547,6 +2547,7 @@ class IsyntaxWSIReader(WSIReader):
         level_downsamples = self.isyntax_wsi.level_downsamples
         mpp = self.isyntax_wsi.mpp
         vendor = "Philips Isyntax"
+        raw = {"xml": None}
 
         # Fallback to calculating objective power from mpp
         if objective_power is None:
@@ -2569,7 +2570,8 @@ class IsyntaxWSIReader(WSIReader):
             level_dimensions=level_dimensions,
             level_downsamples=level_downsamples,
             vendor=vendor,
-            mpp=mpp
+            mpp=mpp,
+            raw=raw
         )
 
 
