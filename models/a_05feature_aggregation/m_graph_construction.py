@@ -23,7 +23,7 @@ from tiatoolbox.tools.graph import SlideGraphConstructor
 from tiatoolbox.utils.visualization import plot_graph
 from tiatoolbox.utils.misc import imwrite
 
-from models.a_04feature_extraction.m_feature_extraction import extract_deep_features, extract_composition_features
+from models.a_04feature_extraction.m_feature_extraction import extract_cnn_features, extract_composition_features
 torch.multiprocessing.set_sharing_strategy("file_system")
 
 SEED = 5
@@ -79,7 +79,7 @@ def visualize_graph(wsi_path, graph_path, label=None, resolution=0.25, units="mp
     node_resolution = reader.slide_dimensions(**NODE_RESOLUTION)
     plot_resolution = reader.slide_dimensions(**PLOT_RESOLUTION)
     fx = np.array(node_resolution) / np.array(plot_resolution)
-    node_coordinates = (np.array(graph.coordinates) + 112) / fx
+    node_coordinates = np.array(graph.coordinates) / fx
     edges = np.array(graph.edge_index.T)
 
     thumb = reader.slide_thumbnail(**PLOT_RESOLUTION)
@@ -158,7 +158,7 @@ if __name__ == "__main__":
                 args.units,
             )
         elif args.feature_mode == "cnn":
-            output_list = extract_deep_features(
+            output_list = extract_cnn_features(
                 [wsi_path],
                 [msk_path],
                 wsi_feature_dir,

@@ -5,8 +5,8 @@ import math
 import matplotlib.pyplot as plt
 
 csv_dir = "/well/rittscher/shared/datasets/KiBla/data"
-csv_path = os.path.join(csv_dir, "KIBLA_Bladder_B4_Clare_Annotations_2023_07_31_16_04.csv")
-# csv_path = os.path.join(csv_dir, "Bladder/Annotations/Exported_Annotations_KIBLA_Bladder_B1.csv")
+# csv_path = os.path.join(csv_dir, "KIBLA_Bladder_B4_Clare_Annotations_2023_07_31_16_04.csv")
+csv_path = os.path.join(csv_dir, "Exported_Annotations_KIBLA_Kidney_B1.csv")
 json_path = "output.json"
 tile_size = 256
 
@@ -39,14 +39,17 @@ def visualize_class(data):
     for k, v in data.items():
         keys.append(k)
         values.append(int(sum(v)))
-    plt.figure()
-    plt.subplot(211)
-    plt.bar(keys, values)
+    nkeys = [k.replace(" ", "\n ") for k in keys]
+    plt.figure(figsize=(15,7))
+    plt.subplot(121)
+    plt.bar(nkeys[1:], values[1:])
     plt.ylabel('Number of tiles')
     plt.title('Kidney bar')
     plt.xticks()
-    plt.subplot(212)
-    plt.pie(values, labels=keys, autopct='%.2f%%')
+    plt.subplot(122)
+    patches, labels, texts = plt.pie(values[1:], labels=keys[1:], autopct='%.2f%%', rotatelabels=45)
+    for label, text in zip(labels, texts):
+        text.set_rotation(label.get_rotation())
     plt.title('Kidney pie')
     plt.savefig("annotation_analysis.jpg")
     return

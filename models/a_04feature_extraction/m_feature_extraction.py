@@ -8,6 +8,9 @@ import os
 import pathlib
 import joblib
 import argparse
+import json
+import pathlib
+from pathlib import Path
 
 import numpy as np
 import albumentations as A
@@ -15,6 +18,7 @@ from albumentations.pytorch import ToTensorV2
 
 from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig, NucleusInstanceSegmentor
 from tiatoolbox.models.architecture.vanilla import CNNBackbone, CNNModel
+from tiatoolbox.models.architecture.hipt import get_vit256
 from tiatoolbox.tools.stainnorm import get_normalizer
 from tiatoolbox.data import stain_norm_target
 from tiatoolbox.wsicore.wsireader import WSIReader
@@ -44,6 +48,90 @@ def rmdir(dir_path: str):
     if os.path.isdir(dir_path):
         shutil.rmtree(dir_path)
     return
+
+def load_json(path: str):
+    path = pathlib.Path(path)
+    with path.open() as fptr:
+        return json.load(fptr)
+
+def recur_find_ext(root_dir: Path, exts):
+    """Recursively find files with an extension in `exts`.
+
+    This is much faster than glob if the folder
+    hierachy is complicated and contain > 1000 files.
+
+    Args:
+        root_dir (Path):
+            Root directory for searching.
+        exts (list):
+            List of extensions to match.
+
+    Returns:
+        List of full paths with matched extension in sorted order.
+
+    """
+    assert isinstance(exts, list)
+    file_path_list = []
+    for cur_path, _dir_list, file_list in os.walk(root_dir):
+        for file_name in file_list:
+            file_ext = Path(file_name).suffix
+            if file_ext in exts:
+                full_path = f"{cur_path}/{file_name}"
+                file_path_list.append(full_path)
+    file_path_list.sort()
+    return file_path_list
+
+def select_checkpoints(
+    stat_file_path: str,
+    top_k: int = 2,
+    metric: str = "infer-valid-auprc",
+    epoch_range = None,
+):
+    """Select checkpoints basing on training statistics.
+
+    Args:
+        stat_file_path (str): Path pointing to the .json
+            which contains the statistics.
+        top_k (int): Number of top checkpoints to be selected.
+        metric (str): The metric name saved within .json to perform
+            selection.
+        epoch_range (list): The range of epochs for checking, denoted
+            as [start, end] . Epoch x that is `start <= x <= end` is
+            kept for further selection.
+
+    Returns:
+        paths (list): List of paths or info tuple where each point
+            to the correspond check point saving location.
+        stats (list): List of corresponding statistics.
+
+    """
+    if epoch_range is None:
+        epoch_range = [0, 1000]
+    stats_dict = load_json(stat_file_path)
+    # k is the epoch counter in this case
+    stats_dict = {
+        k: v
+        for k, v in stats_dict.items()
+        if int(k) >= epoch_range[0] and int(k) <= epoch_range[1]
+    }
+    stats = [[int(k), v[metric], v] for k, v in stats_dict.items()]
+    # sort epoch ranking from largest to smallest
+    stats = sorted(stats, key=lambda v: v[1], reverse=True)
+    # stats = stats[::-1]
+    chkpt_stats_list = stats[:top_k]  # select top_k
+
+    model_dir = Path(stat_file_path).parent
+    epochs = [v[0] for v in chkpt_stats_list]
+    paths = [
+        (
+            f"{model_dir}/epoch={epoch:03d}.extractor.weights.pth",
+            f"{model_dir}/epoch={epoch:03d}.classifier.weights.pth",
+        )
+        for epoch in epochs
+    ]
+    chkpt_stats_list = [[v[0], v[2]] for v in chkpt_stats_list]
+    print(paths)  # noqa: T201
+    return paths, chkpt_stats_list
 
 class CNNClassifier(CNNModel):
     def __init__(self, backbone, num_classes=1):
@@ -81,7 +169,7 @@ class CNNClassifier(CNNModel):
         TS = A.Compose([A.Normalize(), ToTensorV2()])
         return TS
 
-def extract_deep_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25, units="mpp"):
+def extract_cnn_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25, units="mpp"):
     ioconfig = IOSegmentorConfig(
         input_resolutions=[{"units": units, "resolution": resolution},],
         output_resolutions=[{"units": units, "resolution": resolution},],
@@ -92,11 +180,90 @@ def extract_deep_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25,
     )
     
     # model = CNNBackbone("resnet50")
-    model = CNNClassifier(backbone="resnet50", num_classes=4)
-    feature_path = "a_04feature_extraction/tile_bladder_models/cnn/00/epoch=049.extractor.weights.pth"
-    classifier_path = "a_04feature_extraction/tile_bladder_models/cnn/00/epoch=049.classifier.weights.pth"
-    pretrained = [feature_path, classifier_path]
-    model.load(*pretrained)
+    model = CNNClassifier(backbone="resnet50", num_classes=1)
+    pretrained_dir = "a_04feature_extraction/tile_bladder_models/cnn/00"
+    stat_files = recur_find_ext(f"{pretrained_dir}/", [".json"])
+    stat_files = [v for v in stat_files if ".old.json" not in v]
+    assert len(stat_files) == 1
+    pretrained, _ = select_checkpoints(
+        stat_files[0],
+        top_k=1,
+        metric="infer-valid-A-auroc",
+    )
+    model.load(*pretrained[0])
+    extractor = DeepFeatureExtractor(
+        batch_size=32, 
+        model=model, 
+        num_loader_workers=8, 
+    )
+
+    rmdir(save_dir)
+    output_map_list = extractor.predict(
+        wsi_paths,
+        msk_paths,
+        mode=mode,
+        ioconfig=ioconfig,
+        on_gpu=True,
+        crash_on_exception=True,
+        save_dir=save_dir,
+    )
+    
+    for input_path, output_path in output_map_list:
+        input_name = pathlib.Path(input_path).stem
+        output_parent_dir = pathlib.Path(output_path).parent
+
+        src_path = pathlib.Path(f"{output_path}.position.npy")
+        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.position.npy")
+        src_path.rename(new_path)
+
+        src_path = pathlib.Path(f"{output_path}.features.0.npy")
+        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.features.npy")
+        src_path.rename(new_path)
+
+    return output_map_list
+
+class ViT(torch.nn.Module):
+    def __init__(self, model256_path):
+        super().__init__()
+        self._transform = self.transform()
+        self.model256 = get_vit256(pretrained_weights=model256_path)
+    
+    def forward(self, imgs):
+        feat = self.model256(imgs)
+        return torch.flatten(feat, 1)
+
+    @staticmethod
+    def infer_batch(model, batch_data, on_gpu):
+        device = "cuda" if on_gpu else "cpu"
+        image = batch_data.to(device).type(torch.float32)
+        model.eval()
+        with torch.inference_mode():
+            output = model(image)
+        return [output.cpu().numpy()]
+ 
+    def postproc_func(self, output: np.ndarray):
+        return output
+    
+    def preproc_func(self, image: np.ndarray):
+        return self._transform(image=image)["image"]
+
+    def transform(self):
+        TS = A.Compose([A.Normalize(), ToTensorV2()])
+        return TS
+    
+def extract_vit_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25, units="mpp"):
+    ioconfig = IOSegmentorConfig(
+        input_resolutions=[{"units": units, "resolution": resolution},],
+        output_resolutions=[{"units": units, "resolution": resolution},],
+        patch_input_shape=[256, 256],
+        patch_output_shape=[256, 256],
+        stride_shape=[256, 256],
+        save_resolution={"units": "mpp", "resolution": 8.0}
+    )
+    
+    # model = CNNBackbone("resnet50")
+    pretrained_path = "/well/rittscher/projects/shangqi-workspace/data/projects/HIPT/HIPT_4K/Checkpoints/vit256_small_dino.pth"
+    model = ViT(pretrained_path)
     extractor = DeepFeatureExtractor(
         batch_size=32, 
         model=model, 
@@ -266,7 +433,7 @@ if __name__ == "__main__":
             args.mode,
         )
     elif args.feature_mode == "cnn":
-        output_list = extract_deep_features(
+        output_list = extract_cnn_features(
             [wsi_path],
             [msk_path],
             wsi_feature_dir,

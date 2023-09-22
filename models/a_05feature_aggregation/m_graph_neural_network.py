@@ -9,17 +9,20 @@ import torch.nn.functional as F
 
 from torch.nn import BatchNorm1d, Linear, ReLU
 from torch_geometric.data import Batch, Data, Dataset
+from torch_geometric.utils import subgraph
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATConv
 
 
 class SlideGraphDataset(Dataset):
     """loading graph data from disk
     """
-    def __init__(self, info_list, mode="train", preproc=None):
+    def __init__(self, info_list, mode="train", preproc=None, subgraph=False, PN=None):
         super().__init__()
         self.info_list = info_list
         self.mode = mode
         self.preproc = preproc
+        self.subgraph = subgraph
+        self.PN = PN
     
     def get(self, idx):
         info = self.info_list[idx]
@@ -38,7 +41,21 @@ class SlideGraphDataset(Dataset):
 
         graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items()}
         if any(v in self.mode for v in ["train", "valid"]):
+            if self.subgraph:
+                positive = label.squeeze() > 0  # 0 is unlabeled
+                # graph_dict["x"] = graph_dict["x"][positive]
+                edge_index, _ = subgraph(positive, graph_dict["edge_index"], relabel_nodes=False)
+                graph_dict["edge_index"] = edge_index
+                # label = label[positive]
             graph_dict.update({"y": label})
+        else:
+            if self.subgraph:
+                assert len(self.PN[idx]) == len(graph_dict["x"]), "Must be one-to-one labels"
+                positive = torch.tensor(self.PN[idx]).squeeze() > 0
+                # graph_dict["x"] = graph_dict["x"][positive]
+                edge_index, _ = subgraph(positive, graph_dict["edge_index"], relabel_nodes=False)
+                graph_dict["edge_index"] = edge_index
+
         graph = Data(**graph_dict)
         return graph
     
@@ -145,7 +162,7 @@ class SlideGraphArch(nn.Module):
         return feature
     
     @staticmethod
-    def train_batch(model, batch_data, on_gpu, loss, optimizer, probs=None, tau=1):
+    def train_batch(model, batch_data, on_gpu, loss, kl, optimizer, probs=None, tau=1):
         device = "cuda" if on_gpu else "cpu"
         wsi_graphs = batch_data.to(device)
 
@@ -170,7 +187,7 @@ class SlideGraphArch(nn.Module):
         return [loss, wsi_outputs, wsi_labels]
     
     @staticmethod
-    def infer_batch(model, batch_data, on_gpu):
+    def infer_batch(model, batch_data, on_gpu, mode):
         device = "cuda" if on_gpu else "cpu"
         wsi_graphs = batch_data.to(device)
         wsi_graphs.x = wsi_graphs.x.type(torch.float32)
@@ -181,13 +198,22 @@ class SlideGraphArch(nn.Module):
         wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
         if wsi_graphs.y is not None:
             wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
-            postive = wsi_labels > 0
-            if wsi_outputs.ndim == 1:
+
+            ## convert outputs and labels based given mode
+            if mode in ["PN", "uPU", "nnPU"]:
                 wsi_outputs = wsi_outputs
-                wsi_labels = np.array(postive, dtype=np.int32)
-            else:
-                wsi_outputs = wsi_outputs[postive, :]
+                wsi_labels = np.array(wsi_labels > 0, dtype=np.int32)
+            elif mode == "PCE":
+                postive = wsi_labels > 0
+                wsi_outputs = wsi_outputs[postive]
                 wsi_labels = wsi_labels[postive] - 1
+            elif mode == "LHCE":
+                low = wsi_labels == 1
+                high = wsi_labels == 3
+                low_outputs, low_labels = wsi_outputs[low], wsi_labels[low] - 1
+                high_outputs, high_labels = wsi_outputs[high], wsi_labels[high] - 2
+                wsi_outputs = np.concatenate([low_outputs, high_outputs], axis=0)
+                wsi_labels = np.concatenate([low_labels, high_labels], axis=0)
             return [wsi_outputs, wsi_labels]
         return [wsi_outputs]
     
@@ -252,3 +278,40 @@ class PULoss(nn.Module):
             return positive_risk + negative_risk
         else:
             raise ValueError(f"{self.mode} is not supported!")
+        
+class PCELoss(nn.Module):
+    """wrapper of loss function for positive samples"""
+
+    def __init__(self):
+        super(PCELoss, self).__init__()
+        self.unlabeled = 0
+        self.CrossEntropy = nn.CrossEntropyLoss()
+    
+    def forward(self, input, target):   
+        positive = target > self.unlabeled
+        ## loss only for postive samples
+        input = input[positive]
+        target = target[positive] - 1
+        return self.CrossEntropy(input, target)
+    
+
+class LHCELoss(nn.Module):
+    """wrapper of loss function for low-grade and high-grade learning"""
+
+    def __init__(self):
+        super(LHCELoss, self).__init__()
+        self.lowgrade = 1
+        self.highgrade = 3
+        self.CrossEntropy = nn.CrossEntropyLoss()
+    
+    def forward(self, input, target):   
+        lowgrade = target == self.lowgrade
+        highgrade = target == self.highgrade
+        ## loss only for postive samples
+        input_lowgrade = input[lowgrade]
+        input_highgrade = input[highgrade]
+        target_lowgrade = target[lowgrade] - 1
+        target_highgrade = target[highgrade] - 2
+        input = torch.concat([input_lowgrade, input_highgrade])
+        target = torch.concat([target_lowgrade, target_highgrade])
+        return self.CrossEntropy(input, target)

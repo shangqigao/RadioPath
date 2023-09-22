@@ -62,7 +62,8 @@ def main():
     csv_paths = pathlib.Path(csv_dir).glob("*.csv")
     for csv_path in csv_paths:
         csv_name = csv_path.stem
-        if keyword in csv_name and "B1" not in csv_name:
+        # if keyword in csv_name and "B1" not in csv_name:
+        if keyword in csv_name and "Exported" in csv_name:
             csv_to_json(csv_path, save_json_dir)
     return
 
