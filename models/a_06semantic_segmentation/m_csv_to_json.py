@@ -1,10 +1,8 @@
 import csv
 import json
-import os
 import sys
 import pathlib
 from pathlib import Path
-import matplotlib.pyplot as plt
 
 csv.field_size_limit(sys.maxsize)
 

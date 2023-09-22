@@ -7,8 +7,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import torchbnn as bnn
+
 from torch.nn import BatchNorm1d, Linear, ReLU
-from torch_geometric.data import Batch, Data, Dataset
+from torch_geometric.data import Data, Dataset
 from torch_geometric.utils import subgraph
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATConv
 
@@ -216,7 +218,162 @@ class SlideGraphArch(nn.Module):
                 wsi_labels = np.concatenate([low_labels, high_labels], axis=0)
             return [wsi_outputs, wsi_labels]
         return [wsi_outputs]
+
+class SlideBayesGraphArch(nn.Module):
+    """define SlideBayesGraph architecture
+    """
+    def __init__(
+            self, 
+            dim_features, 
+            dim_target,
+            layers=None,
+            dropout=0.0,
+            conv="GINConv",
+            **kwargs,
+    ):
+        super().__init__()
+        if layers is None:
+            layers = [6, 6]
+        self.dropout = dropout
+        self.embedding_dims = layers
+        self.num_layers = len(self.embedding_dims)
+        self.convs = nn.ModuleList()
+        self.linears = nn.ModuleList()
+        self.conv_name = conv
+
+        conv_dict = {
+            "MLP": [None, 1],
+            "GCNConv": [GCNConv, 1],
+            "GATConv": [GATConv, 1],
+            "GINConv": [GINConv, 1], 
+            "EdgeConv": [EdgeConv, 2]
+        }
+        if self.conv_name not in conv_dict:
+            raise ValueError(f"Not support conv={conv}.")
+        
+        def create_block(in_dims, out_dims):
+            return nn.Sequential(
+                bnn.BayesLinear(0, 0.1, in_dims, out_dims),
+                BatchNorm1d(out_dims),
+                ReLU(),
+            )
+        
+        input_emb_dim = dim_features
+        out_emb_dim = self.embedding_dims[0]
+        self.head = create_block(input_emb_dim, out_emb_dim)
+        self.tail = {
+            "MLP": bnn.BayesLinear(0, 0.1, self.embedding_dims[-1], dim_target),
+            "GCNConv": GCNConv(self.embedding_dims[-1], dim_target),
+            "GATConv": GATConv(self.embedding_dims[-1], dim_target),
+            "GINConv": bnn.BayesLinear(0, 0.1, self.embedding_dims[-1], dim_target),
+            "EdgeConv": bnn.BayesLinear(0, 0.1, self.embedding_dims[-1], dim_target)
+        }[self.conv_name]
+
+        input_emb_dim = out_emb_dim
+        for out_emb_dim in self.embedding_dims[1:]:
+            conv_class, alpha = conv_dict[self.conv_name]
+            if self.conv_name in ["GINConv", "EdgeConv"]:
+                block = create_block(alpha * input_emb_dim, out_emb_dim)
+                subnet = conv_class(block, **kwargs)
+                self.convs.append(subnet)
+                self.linears.append(bnn.BayesLinear(0, 0.1, out_emb_dim, out_emb_dim))
+            elif self.conv_name in ["GCNConv", "GATConv"]:
+                subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
+                self.convs.append(subnet)
+                self.linears.append(create_block(out_emb_dim, out_emb_dim))
+            else:
+                subnet = create_block(alpha * input_emb_dim, out_emb_dim)
+                self.convs.append(subnet)
+                self.linears.append(nn.Sequential())
+                
+            input_emb_dim = out_emb_dim
+
+        self.aux_model = {}
+
+    def save(self, path, aux_path):
+        state_dict = self.state_dict()
+        torch.save(state_dict, path)
+        joblib.dump(self.aux_model, aux_path)
+
+    def load(self, path, aux_path):
+        state_dict = torch.load(path)
+        self.load_state_dict(state_dict)
+        self.aux_model = joblib.load(aux_path)
+
+    def forward(self, data):
+        feature, edge_index, batch = data.x, data.edge_index, data.batch
+
+        feature = self.head(feature)
+        for layer in range(1, self.num_layers):
+            feature = F.dropout(feature, p=self.dropout, training=self.training)
+            if self.conv_name in ["MLP"]:
+                feature = self.convs[layer - 1](feature)
+            else:
+                feature = self.convs[layer - 1](feature, edge_index)
+            feature = self.linears[layer - 1](feature)
+        if self.conv_name in ["MLP", "GINConv", "EdgeConv"]:
+            feature = self.tail(feature)
+        else:
+            feature = self.tail(feature, edge_index)
+        return feature
     
+    @staticmethod
+    def train_batch(model, batch_data, on_gpu, loss, kl, optimizer, probs=None, tau=1):
+        device = "cuda" if on_gpu else "cpu"
+        wsi_graphs = batch_data.to(device)
+
+        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
+
+        model.train()
+        optimizer.zero_grad()
+        wsi_outputs = model(wsi_graphs)
+        ## using logit ajusted cross-entropy
+        if probs is not None:
+            shift = tau * torch.log(torch.tensor(probs) + 1e-12)
+            wsi_outputs = wsi_outputs + shift.to(device)
+        wsi_outputs = wsi_outputs.squeeze()
+        wsi_labels = wsi_graphs.y.squeeze()
+        loss = loss(wsi_outputs, wsi_labels)
+        kl_loss, kl_weight = kl["loss"](model), kl["weight"]
+        loss = loss + kl_weight * kl_loss
+        loss.backward()
+        optimizer.step()
+
+        loss = loss.detach().cpu().numpy()
+        assert not np.isnan(loss)
+        wsi_labels = wsi_labels.cpu().numpy()
+        return [loss, wsi_outputs, wsi_labels]
+    
+    @staticmethod
+    def infer_batch(model, batch_data, on_gpu, mode):
+        device = "cuda" if on_gpu else "cpu"
+        wsi_graphs = batch_data.to(device)
+        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
+
+        model.eval()
+        with torch.inference_mode():
+            wsi_outputs = model(wsi_graphs)
+        wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
+        if wsi_graphs.y is not None:
+            wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
+
+            ## convert outputs and labels based given mode
+            if mode in ["PN", "uPU", "nnPU"]:
+                wsi_outputs = wsi_outputs
+                wsi_labels = np.array(wsi_labels > 0, dtype=np.int32)
+            elif mode == "PCE":
+                postive = wsi_labels > 0
+                wsi_outputs = wsi_outputs[postive]
+                wsi_labels = wsi_labels[postive] - 1
+            elif mode == "LHCE":
+                low = wsi_labels == 1
+                high = wsi_labels == 3
+                low_outputs, low_labels = wsi_outputs[low], wsi_labels[low] - 1
+                high_outputs, high_labels = wsi_outputs[high], wsi_labels[high] - 2
+                wsi_outputs = np.concatenate([low_outputs, high_outputs], axis=0)
+                wsi_labels = np.concatenate([low_labels, high_labels], axis=0)
+            return [wsi_outputs, wsi_labels]
+        return [wsi_outputs]
 
 class ScalarMovingAverage:
     """Class to calculate running average."""

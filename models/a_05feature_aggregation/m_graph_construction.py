@@ -1,7 +1,14 @@
 import sys
 sys.path.append('../')
 
-import random
+import os
+import pathlib
+import logging
+import json
+import torch
+import joblib
+import argparse
+import numpy as np
 import torch
 import os
 import pathlib
@@ -10,31 +17,21 @@ import argparse
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap, Normalize
+from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable, get_cmap
 from torch_geometric.data import Data
-from skimage.exposure import equalize_hist
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
 from pprint import pprint
+from common.m_utils import mkdir, load_json
 
-from tiatoolbox.wsicore.wsireader import WSIReader
+from tiatoolbox.wsicore.wsireader import WSIReader, VirtualWSIReader
 from tiatoolbox.tools.graph import SlideGraphConstructor
 from tiatoolbox.utils.visualization import plot_graph
 from tiatoolbox.utils.misc import imwrite
 
+from models.a_02tissue_masking.m_tissue_masking import generate_wsi_tissue_mask
+from models.a_03patch_extraction.m_patch_extraction import prepare_annotation_reader
 from models.a_04feature_extraction.m_feature_extraction import extract_cnn_features, extract_composition_features
 torch.multiprocessing.set_sharing_strategy("file_system")
-
-SEED = 5
-random.seed(SEED)
-rng = np.random.default_rng(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed(SEED)
-
-def load_json(path: str):
-    with path.open() as fptr:
-        return json.load(fptr)
 
 def construct_graph(wsi_name, wsi_feature_dir, save_path):
     positions = np.load(f"{wsi_feature_dir}/{wsi_name}.position.npy")
@@ -44,6 +41,150 @@ def construct_graph(wsi_name, wsi_feature_dir, save_path):
         new_graph_dict = {k: v.tolist() for k, v in graph_dict.items() if k != "cluster_points"}
         new_graph_dict.update({"cluster_points": graph_dict["cluster_points"]})
         json.dump(new_graph_dict, handle)
+
+def construct_wsi_graph(wsi_paths, save_dir):
+    """construct graph for wsi
+    Args:
+        wsi_paths (list): a list of wsi paths
+        save_dir (str): directory of reading feature and saving graph
+    """
+    def _construct_graph(idx, wsi_path):
+        wsi_name = pathlib.Path(wsi_path).stem
+        graph_path = pathlib.Path(f"{save_dir}/{wsi_name}.json")
+        logging.info("constructing graph: {}/{}...".format(idx + 1, len(wsi_paths)))
+        construct_graph(wsi_name, save_dir, graph_path)
+        return
+    
+    # construct graphs in parallel
+    joblib.Parallel(n_jobs=8)(
+        joblib.delayed(_construct_graph)(idx, wsi_path)
+        for idx, wsi_path in enumerate(wsi_paths)
+    )    
+    return 
+
+def generate_label_from_annotation(
+        wsi_path,
+        wsi_ann_path, 
+        wsi_graph_path, 
+        tissue_masker,
+        lab_dict, 
+        node_size,
+        min_ann_ratio, 
+        resolution=0.25, 
+        units="mpp"
+    ):
+    """generate label for each graph node according to annotation
+    Args:
+        wsi_path (str): path of a wsi
+        wsi_ann_path (str): path of the annotation of given wsi
+        wsi_graph_path (str): path of the graph of given wsi
+        tissue_masker (Class): object of masking tissue
+        lab_dict (dict): a dict defines the label names and values, the label names should be the same
+            as that in annotation file
+        node_size (int): the bounding box size for computing ratio of annotated area.
+        min_ann_ratio (float): the required minimal annotation ratio of a node, should be 0 to 1
+        resolution (int): the resolution of reading annotation, should be the same the resolution of node
+        units (str): the units of resolution, e.g., mpp
+    Returns:
+        Array of labels of nodes
+        Number of nodes
+    """
+    wsi_name = pathlib.Path(wsi_path).stem
+    wsi_reader, ann_readers, _ = prepare_annotation_reader(
+        wsi_path=wsi_path, 
+        wsi_ann_path=wsi_ann_path, 
+        lab_dict=lab_dict,
+        resolution=resolution,
+        units=units
+    )
+    wsi_thumb = wsi_reader.slide_thumbnail(resolution=0, units="level")
+    msk_thumb = tissue_masker.transform([wsi_thumb])[0]
+    msk_reader = VirtualWSIReader(msk_thumb.astype(np.uint8), info=wsi_reader.info, mode="bool")
+    # imwrite(f"{wsi_name}_tissue_mask.jpg".replace("/", ""), msk_thumb.astype(np.uint8)*255)
+
+    def _bbox_to_label(bbox):
+        # bbox at given ann resolution
+        bbox = bbox.astype(np.int32).tolist()
+        if len(ann_readers) > 0:
+            for k, ann_reader in ann_readers.items():
+                bbox_ann = ann_reader.read_bounds(bbox, resolution, units, coord_space="resolution")
+                bbox_msk = msk_reader.read_bounds(bbox, resolution, units, coord_space="resolution")
+                anno = bbox_ann * bbox_msk
+                if np.sum(anno) / np.prod(anno.shape) > min_ann_ratio:
+                    label = lab_dict[k]
+                    break
+                else:
+                    label = lab_dict["Background"]
+        else:
+            label = lab_dict["Background"]
+        return label
+
+    # generate label in parallel
+    graph_dict = load_json(wsi_graph_path)
+    xy = np.array(graph_dict["coordinates"])
+    ## node size should be consistent with the output patch size of local feature extraction
+    ## e.g., 164 for 
+    node_bboxes = np.concatenate((xy, xy + node_size), axis=1)
+    labels = joblib.Parallel(n_jobs=8)(
+        joblib.delayed(_bbox_to_label)(bbox) for bbox in node_bboxes
+        )
+    if np.sum(np.array(labels) > 0) == 0:
+        logging.warning(f"The nodes of {wsi_name} are all background!")
+    return np.array(labels), len(xy)
+
+def generate_node_label(
+        wsi_paths, 
+        wsi_annot_paths, 
+        wsi_graph_paths,
+        lab_dict,  
+        save_lab_dir, 
+        node_size=164, 
+        min_ann_ratio=1e-4,
+        resolution=0.25, 
+        units="mpp"
+    ):
+    """generate node label for a list of graphs
+    Args:
+        wsi_paths (list): a list of wsi paths
+        wsi_annot_paths (list): a list of annotation paths
+        lab_dict (dict): a dict defines the label names and values, the label names should be the same
+            as that in annotation file
+        save_lab_dir (str): directory of saving labels
+        node_size (int): the bounding box size for computing ratio of annotated area.
+        min_ann_ratio (float): the required minimal annotation ratio of a node, should be 0 to 1
+        resolution (int): the resolution of reading annotation, should be the same the resolution of node
+        units (str): the units of resolution, e.g., mpp
+    """
+    save_lab_dir = pathlib.Path(save_lab_dir)
+    mkdir(save_lab_dir)
+    # finding threshold of masking tissue from all is better than each
+    tissue_masker = generate_wsi_tissue_mask(
+        wsi_paths=wsi_paths, 
+        method="otsu", 
+        resolution=16*resolution, 
+        units=units
+    )
+    count_nodes = 0
+    for idx, (wsi_path, annot_path, graph_path) in enumerate(zip(wsi_paths, wsi_annot_paths, wsi_graph_paths)):
+        logging.info("annotating nodes of graph: {}/{}...".format(idx + 1, len(wsi_graph_paths)))
+        wsi_name = pathlib.Path(wsi_path).stem
+        patch_labels, num_nodes = generate_label_from_annotation(
+            wsi_path=wsi_path, 
+            wsi_ann_path=annot_path, 
+            wsi_graph_path=graph_path, 
+            tissue_masker=tissue_masker,
+            lab_dict=lab_dict, 
+            node_size=node_size, 
+            min_ann_ratio=min_ann_ratio, 
+            resolution=resolution, 
+            units=units
+        )
+        count_nodes += num_nodes
+        save_lab_path = f"{save_lab_dir}/{wsi_name}.label.npy"
+        logging.info(f"Saving node label {wsi_name}.label.npy")
+        np.save(save_lab_path, patch_labels)
+    logging.info(f"Totally {count_nodes} nodes in {len(wsi_graph_paths)} graphs!")
+    return
 
 def visualize_graph(wsi_path, graph_path, label=None, resolution=0.25, units="mpp"):
     NODE_RESOLUTION = {"resolution": resolution, "units": units}

@@ -231,7 +231,7 @@ class CNNBackbone(ModelABC):
         img_patches_device = batch_data.to(select_device(on_gpu)).type(
             torch.float32
         )  # to NCHW
-        img_patches_device = img_patches_device.permute(0, 3, 1, 2).contiguous()
+        # img_patches_device = img_patches_device.permute(0, 3, 1, 2).contiguous()
 
         # Inference mode
         model.eval()
