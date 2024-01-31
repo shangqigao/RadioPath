@@ -56,12 +56,12 @@ def csv_to_json(csv_path, save_json_dir):
 def main():
     csv_dir = "/well/rittscher/shared/datasets/KiBla/data"
     keyword = "Bladder"
-    save_json_dir = f"a_06semantic_segmentation/wsi_{keyword.lower()}_annotations"
+    save_json_dir = f"a_06semantic_segmentation/wsi_{keyword.lower()}_test_tumour_annotations"
     csv_paths = pathlib.Path(csv_dir).glob("*.csv")
     for csv_path in csv_paths:
         csv_name = csv_path.stem
         # if keyword in csv_name and "B1" not in csv_name:
-        if keyword in csv_name and "Exported" in csv_name:
+        if keyword in csv_name and "Tumour_13" in csv_name:
             csv_to_json(csv_path, save_json_dir)
     return
 

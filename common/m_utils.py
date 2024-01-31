@@ -129,8 +129,8 @@ def select_checkpoints(
     }
     stats = [[int(k), v[metric], v] for k, v in stats_dict.items()]
     # sort epoch ranking from largest to smallest
-    stats = sorted(stats, key=lambda v: v[1], reverse=True)
-    # stats = stats[::-1]
+    # stats = sorted(stats, key=lambda v: v[1], reverse=True)
+    stats = stats[::-1]
     chkpt_stats_list = stats[:top_k]  # select top_k
 
     model_dir = Path(stat_file_path).parent
@@ -179,3 +179,13 @@ def select_wsi_annotated(wsi_dir: str, ann_dir: str):
             selected_ann_paths.append(paths[0])
             selected_wsi_paths.append(paths[1])
     return sorted(selected_wsi_paths), sorted(selected_ann_paths) 
+
+def select_wsi_interested(wsi_names, wsi_paths, wsi_ann_paths):
+    selected_wsi_paths, selected_wsi_ann_paths = [], []
+    for wsi_path, ann_path in zip(wsi_paths, wsi_ann_paths):
+        wsi_name = pathlib.Path(wsi_path).stem
+        ann_name = pathlib.Path(ann_path).stem
+        if wsi_name in wsi_names and ann_name in wsi_names:
+            selected_wsi_paths.append(wsi_path)
+            selected_wsi_ann_paths.append(ann_path)
+    return selected_wsi_paths, selected_wsi_ann_paths

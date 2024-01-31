@@ -8,12 +8,12 @@ import pathlib
 import joblib
 import argparse
 import pathlib
-from pathlib import Path
 
 import numpy as np
 import albumentations as A
+
 from albumentations.pytorch import ToTensorV2
-from common.m_utils import load_json, recur_find_ext, rmdir, select_checkpoints
+from common.m_utils import recur_find_ext, rmdir, select_checkpoints
 from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig, NucleusInstanceSegmentor
 from tiatoolbox.models.architecture.vanilla import CNNBackbone, CNNModel
 from tiatoolbox.models.architecture.hipt import get_vit256
@@ -32,21 +32,6 @@ random.seed(SEED)
 rng = np.random.default_rng(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed(SEED)
-
-target_image = stain_norm_target()
-stain_normaliser = get_normalizer("reinhard")
-stain_normaliser.fit(target_image)
-
-TS = A.Compose([A.Normalize(), ToTensorV2()])
-
-def preproc_func(img):
-    return TS(image=img)["image"]
-
-def postproc_func(output):
-    return output
-
-def stain_norm_func(img):
-    return stain_normaliser.transform(img)
 
 def extract_wsi_feature(
         wsi_paths, 
@@ -112,8 +97,16 @@ def extract_cnn_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25, 
     )
     
     model = CNNBackbone("resnet50")
-    model.preproc_func = preproc_func
-    model.postproc_func = postproc_func
+    ## define preprocessing function
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+    TS = A.Compose([A.Normalize(mean, std), ToTensorV2()])
+    def _preproc_func(img):
+        return TS(image=img)["image"]
+    def _postproc_func(img):
+        return img
+    model.preproc_func = _preproc_func
+    model.postproc_func = _postproc_func
     
     extractor = DeepFeatureExtractor(
         batch_size=32, 
@@ -181,8 +174,16 @@ def extract_finetuned_cnn_features(wsi_paths, msk_paths, save_dir, mode, resolut
     )
     
     model = CNNClassifier(backbone="resnet50", num_classes=1)
-    model.preproc_func = preproc_func
-    model.postproc_func = postproc_func
+    ## define preprocessing function
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+    TS = A.Compose([A.Normalize(mean, std), ToTensorV2()])
+    def _preproc_func(img):
+        return TS(image=img)["image"]
+    def _postproc_func(img):
+        return img
+    model.preproc_func = _preproc_func
+    model.postproc_func = _postproc_func
 
     pretrained_dir = "a_04feature_extraction/tile_bladder_models/cnn/00"
     stat_files = recur_find_ext(f"{pretrained_dir}/", [".json"])
@@ -229,7 +230,6 @@ def extract_finetuned_cnn_features(wsi_paths, msk_paths, save_dir, mode, resolut
 class ViT(torch.nn.Module):
     def __init__(self, model256_path):
         super().__init__()
-        self._transform = self.transform()
         self.model256 = get_vit256(pretrained_weights=model256_path)
     
     def forward(self, imgs):
@@ -257,8 +257,16 @@ def extract_vit_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25, 
     
     pretrained_path = "/well/rittscher/projects/shangqi-workspace/data/projects/HIPT/HIPT_4K/Checkpoints/vit256_small_dino.pth"
     model = ViT(pretrained_path)
-    model.preproc_func = preproc_func
-    model.postproc_func = postproc_func
+    ## define preprocessing function
+    mean = (0.5, 0.5, 0.5)
+    std = (0.5, 0.5, 0.5)
+    TS = A.Compose([A.Normalize(mean, std), ToTensorV2()])
+    def _preproc_func(img):
+        return TS(image=img)["image"]
+    def _postproc_func(img):
+        return img
+    model.preproc_func = _preproc_func
+    model.postproc_func = _postproc_func
 
     extractor = DeepFeatureExtractor(
         batch_size=32, 
@@ -300,7 +308,14 @@ def extract_composition_features(wsi_paths, msk_paths, save_dir, mode, resolutio
     )
     if mode == "wsi":
         inst_segmentor.ioconfig.tile_shape = (5120, 5120)
-    inst_segmentor.model.preproc_func = stain_norm_func
+    
+    ## define preprocessing function
+    target_image = stain_norm_target()
+    stain_normaliser = get_normalizer("reinhard")
+    stain_normaliser.fit(target_image)
+    def _stain_norm_func(img):
+        return stain_normaliser.transform(img)
+    inst_segmentor.model.preproc_func = _stain_norm_func
 
     rmdir(save_dir)
     output_map_list = inst_segmentor.predict(

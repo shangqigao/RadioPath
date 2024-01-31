@@ -486,6 +486,46 @@ def plot_graph(
         cv2.circle(canvas, node, node_size, color, thickness=-1)
     return canvas
 
+def plot_map(
+    canvas: np.ndarray,
+    cluster_points: list,
+    point_size: np.ndarray,
+    cluster_colors: Union[Tuple[int], np.ndarray] = (0, 0, 0)
+):
+    """Drawing a map onto a canvas.
+
+    Drawing a map onto a canvas.
+
+    Args:
+        canvas (np.ndarray):
+            Canvas to be drawn upon.
+        cluster_points (list):
+            List of clusters, expected to be Nx* where N is the number of
+            clusters. Each cluster is expected to be a list of '(x,y)'
+        point_size (np.ndarray):
+            size of a rectangle, expected to be '[h, w]'
+        cluster_colors (tuple or np.ndarray):
+            A color or list of cluster colors. Each color is expected to be
+            `(r, g, b)` and is between 0 and 255.
+
+    """
+    if isinstance(cluster_colors, tuple):
+        cluster_colors = [cluster_colors] * len(cluster_points)
+
+    # draw the clusters
+    def to_int_tuple(x):
+        """Helper to convert to tuple of int."""
+        return tuple(int(v) for v in x)
+    
+    for idx, cluster in enumerate(cluster_points):
+        color = to_int_tuple(cluster_colors[idx])
+        for i in range(len(cluster)):
+            coordinate = cluster[i]
+            start_point = to_int_tuple(coordinate)
+            end_point = to_int_tuple(coordinate + point_size)
+            cv2.rectangle(canvas, start_point, end_point, color, thickness=-1)
+    return canvas
+
 
 class AnnotationRenderer:
     """Renderer containing information and methods to render annotations

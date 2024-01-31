@@ -102,12 +102,12 @@ def generate_tile_from_wsi(
         if bbox[2] - bbox[0] <= tile_size:
             x_start, x_end = (bbox[0] + bbox[2] - tile_size) // 2, bbox[2]
         else:
-            x_start, x_end = bbox[0] - tile_size // 2, bbox[2] - tile_size // 2
+            x_start, x_end = bbox[0], bbox[2] - tile_size
 
         if bbox[3] - bbox[1] <= tile_size:
             y_start, y_end = (bbox[1] + bbox[3] - tile_size) // 2, bbox[3]
         else:
-            y_start, y_end = bbox[1] - tile_size // 2, bbox[3] - tile_size // 2
+            y_start, y_end = bbox[1], bbox[3] - tile_size
         bbox_list = []
         for x in range(x_start, x_end, tile_size):
             for y in range(y_start, y_end, tile_size):
@@ -134,7 +134,7 @@ def generate_tile_from_wsi(
                         tile = wsi_reader.read_bounds(bbox, resolution, units, coord_space="resolution")
                         anno = ann_reader.read_bounds(bbox, resolution, units, coord_space="resolution")
                         _, anno = cv2.threshold(anno, 0, 1, cv2.THRESH_BINARY)
-                        if 0.1 < np.mean(anno) < 0.9:
+                        if np.mean(anno) > 0.1:
                             contours, _ = cv2.findContours(anno, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
                             polygons = [np.array(polygon).squeeze().tolist() for polygon in contours]
                             ann_dict = {k : {"bounds": [], "points": []} for k in list(lab_dict.keys())[1:]}

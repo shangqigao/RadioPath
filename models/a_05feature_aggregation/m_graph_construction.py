@@ -14,18 +14,24 @@ import os
 import pathlib
 import json
 import argparse
+import logging
+
+import seaborn as sns
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from matplotlib import pyplot as plt
 
 import numpy as np
-import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable, get_cmap
 from torch_geometric.data import Data
+from torch_geometric.utils import subgraph
 from pprint import pprint
 from common.m_utils import mkdir, load_json
 
 from tiatoolbox.wsicore.wsireader import WSIReader, VirtualWSIReader
 from tiatoolbox.tools.graph import SlideGraphConstructor
-from tiatoolbox.utils.visualization import plot_graph
+from tiatoolbox.utils.visualization import plot_graph, plot_map
 from tiatoolbox.utils.misc import imwrite
 
 from models.a_02tissue_masking.m_tissue_masking import generate_wsi_tissue_mask
@@ -42,7 +48,7 @@ def construct_graph(wsi_name, wsi_feature_dir, save_path):
         new_graph_dict.update({"cluster_points": graph_dict["cluster_points"]})
         json.dump(new_graph_dict, handle)
 
-def construct_wsi_graph(wsi_paths, save_dir):
+def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
     """construct graph for wsi
     Args:
         wsi_paths (list): a list of wsi paths
@@ -56,7 +62,7 @@ def construct_wsi_graph(wsi_paths, save_dir):
         return
     
     # construct graphs in parallel
-    joblib.Parallel(n_jobs=8)(
+    joblib.Parallel(n_jobs=n_jobs)(
         joblib.delayed(_construct_graph)(idx, wsi_path)
         for idx, wsi_path in enumerate(wsi_paths)
     )    
@@ -97,7 +103,7 @@ def generate_label_from_annotation(
         resolution=resolution,
         units=units
     )
-    wsi_thumb = wsi_reader.slide_thumbnail(resolution=0, units="level")
+    wsi_thumb = wsi_reader.slide_thumbnail(resolution=16*resolution, units=units)
     msk_thumb = tissue_masker.transform([wsi_thumb])[0]
     msk_reader = VirtualWSIReader(msk_thumb.astype(np.uint8), info=wsi_reader.info, mode="bool")
     # imwrite(f"{wsi_name}_tissue_mask.jpg".replace("/", ""), msk_thumb.astype(np.uint8)*255)
@@ -186,25 +192,52 @@ def generate_node_label(
     logging.info(f"Totally {count_nodes} nodes in {len(wsi_graph_paths)} graphs!")
     return
 
-def visualize_graph(wsi_path, graph_path, label=None, resolution=0.25, units="mpp"):
-    NODE_RESOLUTION = {"resolution": resolution, "units": units}
-    PLOT_RESOLUTION = {"resolution": 4*resolution, "units": units}
-    NODE_SIZE = 24
-    EDGE_SIZE = 4
+def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show_map=False, resolution=0.25, units="mpp"):
+    if pathlib.Path(wsi_path).suffix == ".jpg":
+        NODE_RESOLUTION = {"resolution": resolution, "units": units}
+        PLOT_RESOLUTION = {"resolution": 4*resolution, "units": units}
+        NODE_SIZE = 24
+        EDGE_SIZE = 4
+    else:
+        NODE_RESOLUTION = {"resolution": resolution, "units": units}
+        PLOT_RESOLUTION = {"resolution": 16*resolution, "units": units}
+        NODE_SIZE = 24
+        EDGE_SIZE = 4
     graph_dict = load_json(graph_path)
-    graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
-    graph = Data(**graph_dict)
+    if show_map:
+        cluster_points = graph_dict["cluster_points"]
+        cluster_points = [np.array(c) for c in cluster_points]
+        POINT_SIZE = [256, 256]
+    graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items() if k != "cluster_points"}
 
+    uncertainty_map = None
     if isinstance(label, pathlib.Path):
         node_activations = np.load(label)
     elif isinstance(label, np.ndarray):
-        node_activations = np.argmax(label, axis=1)
+        if label.ndim == 3:
+            mean = np.mean(label, axis=0)
+            std = np.std(label, axis=0)
+            node_activations = np.argmax(mean, axis=1)
+            uncertainty_map = np.array([std[i, node_activations[i]] for i in range(std.shape[0])])
+        else:
+            node_activations = np.argmax(label, axis=1)
     else:
-        node_activations = np.argmax(graph.x, axis=1)
+        node_activations = np.argmax(graph_dict["x"].numpy(), axis=1)
+
+    if positive_graph:
+        positive = torch.tensor(node_activations).squeeze() > 0
+        edge_index, _ = subgraph(positive, graph_dict["edge_index"], relabel_nodes=False)
+        graph_dict["edge_index"] = edge_index
+        
+    graph_dict = {k: v.numpy() for k, v in graph_dict.items() if k != "cluster_points"}
+    graph = Data(**graph_dict)
 
     cmap = get_cmap("viridis")
     norm_node_activations = (node_activations - node_activations.min()) / (node_activations.max() - node_activations.min() + 1e-10)
     node_colors = (cmap(norm_node_activations)[..., :3] * 255).astype(np.uint8)
+    if uncertainty_map is not None:
+        norm_uncertainty_map = (uncertainty_map - uncertainty_map.min()) / (uncertainty_map.max() - uncertainty_map.min() + 1e-10)
+        uncertainty_colors = (cmap(norm_uncertainty_map)[..., :3] * 255).astype(np.uint8)
 
     # graph.x = StandardScaler().fit_transform(graph.x)
     # node_colors = PCA(n_components=3).fit_transform(graph.x)[:, [1,0,2]]
@@ -220,33 +253,142 @@ def visualize_graph(wsi_path, graph_path, label=None, resolution=0.25, units="mp
     node_resolution = reader.slide_dimensions(**NODE_RESOLUTION)
     plot_resolution = reader.slide_dimensions(**PLOT_RESOLUTION)
     fx = np.array(node_resolution) / np.array(plot_resolution)
-    node_coordinates = np.array(graph.coordinates) / fx
+    logging.info(f"The downsampling scale is {fx}")
+    node_coordinates = np.array(graph.coordinates + 128) / fx
     edges = np.array(graph.edge_index.T)
+    if show_map:
+        cluster_points = [c / fx for c in cluster_points]
+        POINT_SIZE = np.array(POINT_SIZE) / fx
 
     thumb = reader.slide_thumbnail(**PLOT_RESOLUTION)
-    thumb_overlaid = plot_graph(
-        thumb.copy(),
-        node_coordinates,
-        edges,
-        node_colors=node_colors,
-        node_size=NODE_SIZE,
-        edge_size=EDGE_SIZE,
-    )
-    plt.figure(figsize=(15,5))
-    plt.subplot(1,2,1)
-    plt.imshow(thumb)
-    plt.axis("off")
-    ax = plt.subplot(1,2,2)
-    plt.imshow(thumb_overlaid)
-    plt.axis("off")
-    fig = plt.gcf()
-    norm = Normalize(np.min(node_activations), np.max(node_activations))
-    sm = ScalarMappable(cmap=cmap, norm=norm)
-    cbar = fig.colorbar(sm, ax=ax, extend="both")
-    cbar.minorticks_on()
-    plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
-    
+    if uncertainty_map is not None:
+        if not show_map:
+            uncertainty_overlaid = plot_graph(
+                thumb.copy(),
+                node_coordinates,
+                edges,
+                node_colors=uncertainty_colors,
+                node_size=NODE_SIZE,
+                edge_size=EDGE_SIZE,
+            )
+            thumb_overlaid = plot_graph(
+                thumb.copy(),
+                node_coordinates,
+                edges,
+                node_colors=node_colors,
+                node_size=NODE_SIZE,
+                edge_size=EDGE_SIZE,
+            )
+        else:
+            uncertainty_overlaid = plot_map(
+                np.zeros_like(thumb),
+                cluster_points,
+                point_size=POINT_SIZE,
+                cluster_colors=uncertainty_colors
+            )
+            thumb_overlaid = plot_map(
+                thumb.copy(),
+                cluster_points,
+                point_size=POINT_SIZE,
+                cluster_colors=node_colors
+            )
+        img_name = pathlib.Path(wsi_path).stem
+        img_path = f"a_06semantic_segmentation/wsi_bladder_tumour_maps/{img_name}.png"
+        imwrite(img_path, thumb_overlaid)
+        plt.figure(figsize=(20,5))
+        plt.subplot(1,2,1)
+        plt.imshow(thumb)
+        plt.axis("off")
 
+        ax = plt.subplot(1,2,2)
+        plt.imshow(thumb_overlaid)
+        plt.axis("off")
+        fig = plt.gcf()
+        norm = Normalize(np.min(node_activations), np.max(node_activations))
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        cbar = fig.colorbar(sm, ax=ax, extend="both")
+        cbar.minorticks_on()
+        
+        # ax = plt.subplot(1,2,2)
+        # plt.imshow(uncertainty_overlaid)
+        # plt.axis("off")
+        # fig = plt.gcf()
+        # norm = Normalize(np.min(uncertainty_map), np.max(uncertainty_map))
+        # sm = ScalarMappable(cmap=cmap, norm=norm)
+        # cbar = fig.colorbar(sm, ax=ax, extend="both")
+        # cbar.minorticks_on()
+        plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
+    else:
+        if not show_map:
+            thumb_overlaid = plot_graph(
+                thumb.copy(),
+                node_coordinates,
+                edges,
+                node_colors=node_colors,
+                node_size=NODE_SIZE,
+                edge_size=EDGE_SIZE,
+            )
+        else:
+            thumb_overlaid = plot_map(
+                thumb.copy(),
+                cluster_points,
+                point_size=POINT_SIZE,
+                cluster_colors=node_colors
+            )
+        img_name = pathlib.Path(wsi_path).stem
+        img_path = f"a_06semantic_segmentation/wsi_bladder_borderline/{img_name}.png"
+        imwrite(img_path, thumb_overlaid)
+        plt.figure(figsize=(20,5))
+        plt.subplot(1,2,1)
+        plt.imshow(thumb)
+        plt.axis("off")
+        ax = plt.subplot(1,2,2)
+        plt.imshow(thumb_overlaid)
+        plt.axis("off")
+        fig = plt.gcf()
+        norm = Normalize(np.min(node_activations), np.max(node_activations))
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        cbar = fig.colorbar(sm, ax=ax, extend="both")
+        cbar.minorticks_on()
+        plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
+    
+def graph_feature_visualization(wsi_paths, save_graph_dir, save_label_dir, num_class):
+    features, colors = [], []
+    for wsi_path in wsi_paths:
+        wsi_name = pathlib.Path(wsi_path).stem
+        logging.info(f"loading feature of {wsi_name}")
+        graph_path = pathlib.Path(f"{save_graph_dir}/{wsi_name}.json")
+        graph_dict = load_json(graph_path)
+        feature = np.array(graph_dict["x"])
+        features.append(feature)
+        label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.label.npy")
+        label = np.load(label_path)
+        colors.append(label)
+    features = np.concatenate(features, axis=0)
+    colors = np.concatenate(colors, axis=0)
+    
+    pca_proj = PCA(n_components=64).fit_transform(features)
+    tsne_proj = TSNE().fit_transform(pca_proj)
+
+    sns.set_style('darkgrid')
+    sns.set_palette('muted')
+    sns.set_context("notebook", font_scale=1.5, rc={"lines.linewidth": 2.5})
+    palette = np.array(sns.color_palette("hls", num_class))
+    plt.figure(figsize=(8,8))
+    ax = plt.subplot(aspect='equal')
+    class_list = np.unique(colors).tolist()
+    scatter_list = []
+    for i in class_list:
+        c = colors[colors == i]
+        t = tsne_proj[colors == i, :]
+        sc = ax.scatter(t[:, 0], t[:, 1], lw=0, s=40, c=palette[c.astype(np.int32)])
+        scatter_list.append(sc)
+    plt.legend(scatter_list, class_list, loc="upper right", bbox_to_anchor=(1.1, 1.1), title="Classes")
+    plt.xlim(-25, 25)
+    plt.ylim(-25, 25)
+    ax.axis('off')
+    ax.axis('tight') 
+    plt.savefig('a_05feature_aggregation/feature_tsne_visualization.jpg')
 
 
 if __name__ == "__main__":

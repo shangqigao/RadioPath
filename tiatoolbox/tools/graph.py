@@ -321,7 +321,7 @@ class SlideGraphConstructor:  # noqa: PIE798
         # distance (nearest -> farthest).
         kd_tree = cKDTree(points)
         neighbour_distances_ckd, neighbour_indexes_ckd = kd_tree.query(
-            x=points, k=len(points)
+            x=points, k=min(len(points), 1600)
         )
 
         # Initialise an empty 1-D condensed distance matrix.

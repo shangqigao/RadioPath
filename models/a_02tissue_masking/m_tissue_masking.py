@@ -44,7 +44,7 @@ def generate_wsi_tissue_mask(wsi_paths, save_msk_dir=None, method="otsu", resolu
             wsi = WSIReader.open(path)
         wsi_thumb = wsi.slide_thumbnail(resolution=resolution, units=units)
         wsi_thumb = np.array(wsi_thumb, np.uint8)
-        zeros = wsi_thumb.sum(axis=2) == 0
+        zeros = wsi_thumb.mean(axis=2) < 100
         wsi_thumb[zeros, :] = 255
         return wsi_thumb
     

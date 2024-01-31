@@ -334,7 +334,7 @@ class SlideBayesGraphArch(nn.Module):
         wsi_outputs = wsi_outputs.squeeze()
         wsi_labels = wsi_graphs.y.squeeze()
         loss = loss(wsi_outputs, wsi_labels)
-        kl_loss, kl_weight = kl["loss"](model), kl["weight"]
+        kl_loss, kl_weight = kl["loss"](model)[0], kl["weight"]
         loss = loss + kl_weight * kl_loss
         loss.backward()
         optimizer.step()
@@ -420,8 +420,8 @@ class PULoss(nn.Module):
         y_positive = self.loss_func(input)
         y_unlabeled = self.loss_func(-input)
 
-        positive_risk = self.prior * torch.mean(y_positive[positive])
-        negative_risk = torch.mean(y_unlabeled[unlabeled]) - self.prior * torch.mean(y_unlabeled[positive])
+        positive_risk = 0.8 * self.prior * torch.mean(y_positive[positive])
+        negative_risk = 0.2 * torch.mean(y_unlabeled[unlabeled]) - 0.2 * self.prior * torch.mean(y_unlabeled[positive])
 
         if self.mode == "nnPU":
             if negative_risk < -self.beta:
@@ -431,6 +431,7 @@ class PULoss(nn.Module):
         elif self.mode == "uPU":
             return positive_risk + negative_risk
         elif self.mode == "PN":
+            positive_risk = self.prior * torch.mean(y_positive[positive])
             negative_risk = (1 - self.prior) * torch.mean(y_unlabeled[unlabeled])
             return positive_risk + negative_risk
         else:
@@ -472,3 +473,14 @@ class LHCELoss(nn.Module):
         input = torch.concat([input_lowgrade, input_highgrade])
         target = torch.concat([target_lowgrade, target_highgrade])
         return self.CrossEntropy(input, target)
+    
+def update_loss(mode, prior=0.5):
+    loss = {
+        "CE": torch.nn.CrossEntropyLoss(),
+        "PN": PULoss(prior=prior, mode="PN"),
+        "uPU": PULoss(prior=prior, mode="uPU"),
+        "nnPU": PULoss(prior=prior, mode="nnPU"),
+        "PCE": PCELoss(),
+        "LHCE": LHCELoss()
+    }[mode]
+    return loss
