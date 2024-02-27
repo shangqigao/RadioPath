@@ -1,6 +1,12 @@
 # untracked files
+*.jpg
+*.png
+models/*.jpg
+models/*.png
 models/**/*.jpg
-models/**/**
+models/**/*.png
+models/**/tile*
+models/**/wsi*
 **/__pycache__
 **/**/__pycache__
 **/**/**/__pycache__
