@@ -352,20 +352,21 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
         cbar.minorticks_on()
         plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
     
-def graph_feature_visualization(wsi_paths, save_graph_dir, save_label_dir, num_class):
-    features, colors = [], []
-    for wsi_path in wsi_paths:
-        wsi_name = pathlib.Path(wsi_path).stem
-        logging.info(f"loading feature of {wsi_name}")
-        graph_path = pathlib.Path(f"{save_graph_dir}/{wsi_name}.json")
-        graph_dict = load_json(graph_path)
-        feature = np.array(graph_dict["x"])
-        features.append(feature)
-        label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.label.npy")
-        label = np.load(label_path)
-        colors.append(label)
-    features = np.concatenate(features, axis=0)
-    colors = np.concatenate(colors, axis=0)
+def graph_feature_visualization(wsi_paths, save_graph_dir, save_label_dir, num_class, features=None, colors=None):
+    if features is None or colors is None:
+        features, colors = [], []
+        for wsi_path in wsi_paths:
+            wsi_name = pathlib.Path(wsi_path).stem
+            logging.info(f"loading feature of {wsi_name}")
+            graph_path = pathlib.Path(f"{save_graph_dir}/{wsi_name}.json")
+            graph_dict = load_json(graph_path)
+            feature = np.array(graph_dict["x"])
+            features.append(feature)
+            label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.label.npy")
+            label = np.load(label_path)
+            colors.append(label)
+        features = np.concatenate(features, axis=0)
+        colors = np.concatenate(colors, axis=0)
     
     pca_proj = PCA(n_components=64).fit_transform(features)
     tsne_proj = TSNE().fit_transform(pca_proj)

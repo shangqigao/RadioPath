@@ -158,13 +158,13 @@ class SlideGraphArch(nn.Module):
                 feature = self.convs[layer - 1](feature, edge_index)
             feature = self.linears[layer - 1](feature)
         if self.conv_name in ["MLP", "GINConv", "EdgeConv"]:
-            feature = self.tail(feature)
+            output = self.tail(feature)
         else:
-            feature = self.tail(feature, edge_index)
-        return feature
+            output = self.tail(feature, edge_index)
+        return output, feature
     
     @staticmethod
-    def train_batch(model, batch_data, on_gpu, loss, kl, optimizer, probs=None, tau=1):
+    def train_batch(model, batch_data, on_gpu, loss, kl, optimizer, probs=None, tau=1, centroid=None):
         device = "cuda" if on_gpu else "cpu"
         wsi_graphs = batch_data.to(device)
 
@@ -172,7 +172,7 @@ class SlideGraphArch(nn.Module):
 
         model.train()
         optimizer.zero_grad()
-        wsi_outputs = model(wsi_graphs)
+        wsi_outputs, feature = model(wsi_graphs)
         ## using logit ajusted cross-entropy
         if probs is not None:
             shift = tau * torch.log(torch.tensor(probs) + 1e-12)
@@ -180,13 +180,43 @@ class SlideGraphArch(nn.Module):
         wsi_outputs = wsi_outputs.squeeze()
         wsi_labels = wsi_graphs.y.squeeze()
         loss = loss(wsi_outputs, wsi_labels)
+        ## using contrastive loss for positive samples
+        if centroid is not None:
+            centroid = torch.from_numpy(centroid).to(device)
+            k = centroid.shape[2]
+            feature = feature[wsi_labels > 0]
+            expand_feat = feature.unsqueeze(2).expand(-1, -1, k)
+            fro_norm = torch.norm(expand_feat - centroid, dim=1)
+            clusters = torch.argmin(fro_norm, dim=1)
+            feat_norm = torch.norm(feature, dim=1, keepdim=True)
+            feat_prod = torch.matmul(feature, feature.transpose(0, 1))
+            cos_sim = feat_prod / torch.matmul(feat_norm, feat_norm.transpose(0, 1))
+            intra_sim = []
+            c = feature.shape[1]
+            intra_feat_sum = torch.zeros(size=(1, c, k)).to(device)
+            intra_mem_num = torch.zeros(size=(1, 1, k)).to(device)
+            for i in range(k):
+                indecies = clusters == i
+                if len(indecies) > 0:
+                    intra_feature = feature[indecies, :]
+                    intra_feat_sum[..., i] = intra_feature.sum(axis=0, keepdim=True)
+                    intra_mem_num[0, 0, i] = len(indecies)
+                    intra_sim_i = cos_sim[indecies, indecies]
+                    intra_sim.append(torch.exp(intra_sim_i).sum())
+            contrastive_loss = - sum(intra_sim) / torch.exp(cos_sim).sum()
+            loss = loss + contrastive_loss
         loss.backward()
         optimizer.step()
 
         loss = loss.detach().cpu().numpy()
         assert not np.isnan(loss)
         wsi_labels = wsi_labels.cpu().numpy()
-        return [loss, wsi_outputs, wsi_labels]
+        if centroid is not None:
+            intra_feat_sum = intra_feat_sum.detach().cpu().numpy()
+            intra_mem_num = intra_mem_num.detach().cpu().numpy()
+            return [loss, intra_feat_sum, intra_mem_num]
+        else:
+            return [loss, wsi_outputs, wsi_labels]
     
     @staticmethod
     def infer_batch(model, batch_data, on_gpu, mode):
@@ -196,8 +226,9 @@ class SlideGraphArch(nn.Module):
 
         model.eval()
         with torch.inference_mode():
-            wsi_outputs = model(wsi_graphs)
+            wsi_outputs, feature = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
+        feature = feature.squeeze().cpu().numpy()
         if wsi_graphs.y is not None:
             wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
 
@@ -217,7 +248,7 @@ class SlideGraphArch(nn.Module):
                 wsi_outputs = np.concatenate([low_outputs, high_outputs], axis=0)
                 wsi_labels = np.concatenate([low_labels, high_labels], axis=0)
             return [wsi_outputs, wsi_labels]
-        return [wsi_outputs]
+        return [wsi_outputs, feature]
 
 class SlideBayesGraphArch(nn.Module):
     """define SlideBayesGraph architecture
