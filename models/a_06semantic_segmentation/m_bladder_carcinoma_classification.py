@@ -613,9 +613,9 @@ def test(
         assert pretrained_detection is not None
         arch_kwargs_PU = arch_kwargs.copy()
         if PN_learning:
-            arch_kwargs_PU.update({"dim_target": 1})
-        else:
             arch_kwargs_PU.update({"dim_target": 2})
+        else:
+            arch_kwargs_PU.update({"dim_target": 1})
         chkpt_results, _ = run_once(
             new_split,
             num_epochs=1,
@@ -758,7 +758,7 @@ if __name__ == "__main__":
     parser.add_argument('--node_features', default=384, choices=[2048, 2048, 384], type=int)
     parser.add_argument('--resolution', default=0.25, type=float)
     parser.add_argument('--units', default="mpp", type=str)
-    parser.add_argument('--loss', default="nnPU", choices=["CE", "PN", "uPU", "nnPU", "PCE", "LHCE"], type=str)
+    parser.add_argument('--loss', default="LHCE", choices=["CE", "PN", "uPU", "nnPU", "PCE", "LHCE"], type=str)
     parser.add_argument('--Bayes', default=True, type=bool, help="whether to build Bayesian GNN")
     args = parser.parse_args()
 
@@ -923,17 +923,17 @@ if __name__ == "__main__":
     # )
 
     # ## inference
-    inference(
-        split_path=split_path,
-        scaler_path=scaler_path,
-        num_node_features=args.node_features,
-        pretrained_dir=save_model_dir,
-        select_positive_samples=False,
-        select_low_high_samples=False,
-        PN_learning=False,
-        PU_learning=False,
-        BayesGNN=args.Bayes
-    )
+    # inference(
+    #     split_path=split_path,
+    #     scaler_path=scaler_path,
+    #     num_node_features=args.node_features,
+    #     pretrained_dir=save_model_dir,
+    #     select_positive_samples=False,
+    #     select_low_high_samples=False,
+    #     PN_learning=False,
+    #     PU_learning=False,
+    #     BayesGNN=args.Bayes
+    # )
 
     ## visualize feature
     # graph_feature_visualization(
@@ -982,39 +982,41 @@ if __name__ == "__main__":
     # )
 
     ## visualize prediction on wsi
-    # fold = 0
-    # name = args.loss
-    # model_name = f"GIN_{name}" if not args.Bayes else f"BayesGIN_{name}"
-    # pretrained_main_classification = f"{save_model_dir}/{model_name}/{fold:02d}/epoch=049.weights.pth"
-    # pretrained_aux_classification = f"{save_model_dir}/{model_name}/{fold:02d}/epoch=049.aux.dat"
-    # pretrained_classification = [pretrained_main_classification, pretrained_aux_classification]
-    # if name in ["PCE", "LHCE"]:
-    #     pretrained_main_detection = f"{save_model_dir}/BayesGIN_nnPU/{fold:02d}/epoch=049.weights.pth"
-    #     pretrained_aux_detection = f"{save_model_dir}/BayesGIN_nnPU/{fold:02d}/epoch=049.aux.dat"
-    #     pretrained_detection = [pretrained_main_detection, pretrained_aux_detection]
-    # else:
-    #     pretrained_detection = None
-    # for wsi_path in wsi_paths:
-    #     # wsi_path = wsi_paths[1] # 1, 7
-    #     wsi_name = pathlib.Path(wsi_path).stem 
-    #     graph_path = save_feature_dir / f"{wsi_name}.json"
-    #     label_path = save_label_dir / f"{wsi_name}.label.npy"
-    #     prob = test(
-    #         graph_path=graph_path,
-    #         scaler_path=scaler_path,
-    #         num_node_features=args.node_features,
-    #         pretrained_classificaiton=pretrained_classification,
-    #         pretrained_detection=pretrained_detection,
-    #         conv="GINConv",
-    #         BayesGNN=args.Bayes,
-    #         borderline=True
-    #     )
-    #     visualize_graph(
-    #         wsi_path=wsi_path,
-    #         graph_path=graph_path,
-    #         label=prob,
-    #         positive_graph=False,
-    #         show_map=True,
-    #         resolution=args.resolution,
-    #         units=args.units
-    #     )
+    fold = 0
+    name = args.loss
+    model_name = f"GIN_{name}" if not args.Bayes else f"BayesGIN_{name}"
+    pretrained_main_classification = f"{save_model_dir}/{model_name}/{fold:02d}/epoch=049.weights.pth"
+    pretrained_aux_classification = f"{save_model_dir}/{model_name}/{fold:02d}/epoch=049.aux.dat"
+    pretrained_classification = [pretrained_main_classification, pretrained_aux_classification]
+    if name in ["PCE", "LHCE"]:
+        pretrained_main_detection = f"{save_model_dir}/BayesGIN_nnPU/{fold:02d}/epoch=049.weights.pth"
+        pretrained_aux_detection = f"{save_model_dir}/BayesGIN_nnPU/{fold:02d}/epoch=049.aux.dat"
+        pretrained_detection = [pretrained_main_detection, pretrained_aux_detection]
+    else:
+        pretrained_detection = None
+    for wsi_path in wsi_paths[1:2]:
+        # wsi_path = wsi_paths[1] # 1, 7
+        wsi_name = pathlib.Path(wsi_path).stem 
+        graph_path = save_feature_dir / f"{wsi_name}.json"
+        label_path = save_label_dir / f"{wsi_name}.label.npy"
+        prob = test(
+            graph_path=graph_path,
+            scaler_path=scaler_path,
+            num_node_features=args.node_features,
+            pretrained_classificaiton=pretrained_classification,
+            pretrained_detection=pretrained_detection,
+            conv="GINConv",
+            PN_learning=False,
+            PU_learning=True,
+            BayesGNN=args.Bayes,
+            borderline=True
+        )
+        visualize_graph(
+            wsi_path=wsi_path,
+            graph_path=graph_path,
+            label=prob,
+            positive_graph=False,
+            show_map=True,
+            resolution=args.resolution,
+            units=args.units
+        )
