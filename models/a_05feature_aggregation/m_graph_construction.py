@@ -352,7 +352,7 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
         cbar.minorticks_on()
         plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
     
-def graph_feature_visualization(wsi_paths, save_graph_dir, save_label_dir, num_class, features=None, colors=None):
+def graph_feature_visualization(wsi_paths, save_graph_dir, save_label_dir=None, num_class=1, features=None, colors=None):
     if features is None or colors is None:
         features, colors = [], []
         for wsi_path in wsi_paths:
@@ -362,8 +362,11 @@ def graph_feature_visualization(wsi_paths, save_graph_dir, save_label_dir, num_c
             graph_dict = load_json(graph_path)
             feature = np.array(graph_dict["x"])
             features.append(feature)
-            label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.label.npy")
-            label = np.load(label_path)
+            if save_label_dir is not None:
+                label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.label.npy")
+                label = np.load(label_path)
+            else:
+                label = np.argmax(feature, axis=1)
             colors.append(label)
         features = np.concatenate(features, axis=0)
         colors = np.concatenate(colors, axis=0)
