@@ -36,7 +36,7 @@ from tiatoolbox.utils.misc import imwrite
 
 from models.a_02tissue_masking.m_tissue_masking import generate_wsi_tissue_mask
 from models.a_03patch_extraction.m_patch_extraction import prepare_annotation_reader
-from models.a_04feature_extraction.m_feature_extraction import extract_cnn_features, extract_composition_features
+from models.a_04feature_extraction.m_feature_extraction import extract_cnn_pathomic_features, extract_composition_features
 torch.multiprocessing.set_sharing_strategy("file_system")
 
 def construct_graph(wsi_name, wsi_feature_dir, save_path):
@@ -445,7 +445,7 @@ if __name__ == "__main__":
                 args.units,
             )
         elif args.feature_mode == "cnn":
-            output_list = extract_cnn_features(
+            output_list = extract_cnn_pathomic_features(
                 [wsi_path],
                 [msk_path],
                 wsi_feature_dir,

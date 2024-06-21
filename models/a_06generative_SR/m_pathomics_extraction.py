@@ -747,9 +747,9 @@ def compute_label_portion(split_path):
 if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--wsi_dir', default="~/rds/rds-ge-sow2-imaging-MRNJucHuBik/TCGA/DX/")
+    parser.add_argument('--wsi_dir', default="/Users/shangqigao/Documents/projects/TCGA")
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
-    parser.add_argument('--save_dir', default="~/rds/hpc-work/Experiments/pathomics", type=str)
+    parser.add_argument('--save_dir', default="/Users/shangqigao/Documents/projects/Experiments/pathomics", type=str)
     parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
@@ -764,7 +764,7 @@ if __name__ == "__main__":
     ## get wsi path
     wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
     wsi_paths = sorted(pathlib.Path(wsi_dir).rglob("*.svs"))
-    logging.info("The number of WSIs on {}: {}".format(len(wsi_paths), args.dataset))
+    logging.info("The number of WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
     
     ## set save dir
     save_tile_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_pathomic_tiles")
@@ -786,6 +786,7 @@ if __name__ == "__main__":
     # extract wsi feature
     if args.mode == "wsi":
         save_msk_paths = sorted(save_msk_dir.glob("*.jpg"))
+        print(f"{save_msk_paths}")
     else:
         save_msk_paths = None
     extract_pathomic_feature(

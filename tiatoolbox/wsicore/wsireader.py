@@ -13,7 +13,7 @@ from numbers import Number
 from typing import Iterable, List, Optional, Tuple, Union
 
 import numpy as np
-# import openslide
+import openslide
 import pandas as pd
 import tifffile
 import zarr
