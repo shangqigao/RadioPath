@@ -40,7 +40,7 @@ warnings.filterwarnings('ignore')
 class SlideDataset(Dataset):
     """loading graph data from disk
     """
-    def __init__(self, info_list, lab_dict, tissue_masker, mode="train", resolution=0.25, units="mpp"):
+    def __init__(self, info_list, lab_dict, tissue_masker, mode="train", resolution=0.5, units="mpp"):
         super().__init__()
         self.info_list = info_list
         self.lab_dict = lab_dict
@@ -271,7 +271,7 @@ def run_once(
         pretrained=None,
         loader_kwargs=None,
         optim_kwargs=None,
-        resolution=0.25,
+        resolution=0.5,
         units="mpp",
 ):
     """running the inference or training loop once"""
@@ -455,8 +455,8 @@ if __name__ == "__main__":
     parser.add_argument('--mode', default="tile", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
     parser.add_argument('--feature_mode', default="cnn", choices=["cnn", "composition"], type=str)
-    parser.add_argument('--resolution', default=0.25, type=float)
-    parser.add_argument('--units', default="mpp", type=str)
+    parser.add_argument('--resolution', default=20, type=float)
+    parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
 
     ## select annotated wsi

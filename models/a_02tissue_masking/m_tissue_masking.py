@@ -6,6 +6,7 @@ import argparse
 import pathlib
 import logging
 import joblib
+import random
 
 import numpy as np
 from common.m_utils import mkdir
@@ -14,7 +15,7 @@ from tiatoolbox.utils.misc import imwrite, imread
 from tiatoolbox.tools import tissuemask
 from pprint import pprint
 
-def generate_wsi_tissue_mask(wsi_paths, save_msk_dir=None, method="otsu", resolution=1.25, units="power"):
+def generate_wsi_tissue_mask(wsi_paths, save_msk_dir=None, method="otsu", n_jobs=8, resolution=1.25, units="power"):
     """generate tissue masks for a list of whole slide images
     Args:
         wsi_paths (List): a list of wsi paths
@@ -31,8 +32,8 @@ def generate_wsi_tissue_mask(wsi_paths, save_msk_dir=None, method="otsu", resolu
             logging.info(f"Reading image: {img_name}...")
             img = imread(path)
             metadata = WSIMeta(
-                mpp=np.array([0.25, 0.25]),
-                objective_power=40,
+                mpp=np.array([0.5, 0.5]),
+                objective_power=20,
                 axes="YXS",
                 slide_dimensions=np.array(img.shape[:2][::-1]),
                 level_downsamples=[1.0],
@@ -41,15 +42,18 @@ def generate_wsi_tissue_mask(wsi_paths, save_msk_dir=None, method="otsu", resolu
             )
             wsi = VirtualWSIReader(img, info=metadata)
         else:
+            img_name = pathlib.Path(path).stem
+            logging.info(f"Reading WSI: {img_name}...")
             wsi = WSIReader.open(path)
         wsi_thumb = wsi.slide_thumbnail(resolution=resolution, units=units)
         wsi_thumb = np.array(wsi_thumb, np.uint8)
         zeros = wsi_thumb.mean(axis=2) < 100
         wsi_thumb[zeros, :] = 255
+        del wsi
         return wsi_thumb
     
     # extract wsi thumbnails in parallel
-    wsi_thumbs = joblib.Parallel(n_jobs=8)(
+    wsi_thumbs = joblib.Parallel(n_jobs=n_jobs)(
         joblib.delayed(_extract_wsi_thumbs)(path)
         for path in wsi_paths
     )

@@ -39,7 +39,7 @@ def extract_pathomic_feature(
         feature_mode, 
         save_dir, 
         mode, 
-        resolution=0.25, 
+        resolution=0.5, 
         units="mpp"
     ):
     """extract pathomic feature from wsi
@@ -120,7 +120,7 @@ def extract_radiomic_feature(
         raise ValueError(f"Invalid feature mode: {feature_mode}")
     return
 
-def extract_cnn_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25, units="mpp"):
+def extract_cnn_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.5, units="mpp"):
     ioconfig = IOSegmentorConfig(
         input_resolutions=[{"units": units, "resolution": resolution},],
         output_resolutions=[{"units": units, "resolution": resolution},],
@@ -215,7 +215,7 @@ class ViT(torch.nn.Module):
             output = model(image)
         return [output.cpu().numpy()]
     
-def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25, units="mpp"):
+def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.5, units="mpp"):
     ioconfig = IOSegmentorConfig(
         input_resolutions=[{"units": units, "resolution": resolution},],
         output_resolutions=[{"units": units, "resolution": resolution},],
@@ -269,7 +269,7 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
 
     return output_map_list
 
-def extract_composition_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.25, units="mpp"):
+def extract_composition_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.5, units="mpp"):
     inst_segmentor = NucleusInstanceSegmentor(
         pretrained_model="hovernet_fast-pannuke",
         batch_size=16,
@@ -324,7 +324,7 @@ def get_cell_compositions(
         num_types = 2,
         patch_input_shape = (512, 512),
         stride_shape = (512, 512),
-        resolution = 0.25,
+        resolution = 0.5,
         units = "mpp",
 ):
     if pathlib.Path(wsi_path).suffix == ".jpg":

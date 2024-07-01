@@ -76,7 +76,7 @@ def generate_label_from_annotation(
         lab_dict, 
         node_size,
         min_ann_ratio, 
-        resolution=0.25, 
+        resolution=0.5, 
         units="mpp"
     ):
     """generate label for each graph node according to annotation
@@ -146,7 +146,7 @@ def generate_node_label(
         save_lab_dir, 
         node_size=164, 
         min_ann_ratio=1e-4,
-        resolution=0.25, 
+        resolution=0.5, 
         units="mpp"
     ):
     """generate node label for a list of graphs
@@ -192,7 +192,7 @@ def generate_node_label(
     logging.info(f"Totally {count_nodes} nodes in {len(wsi_graph_paths)} graphs!")
     return
 
-def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show_map=False, resolution=0.25, units="mpp"):
+def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show_map=False, resolution=0.5, units="mpp"):
     if pathlib.Path(wsi_path).suffix == ".jpg":
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
         PLOT_RESOLUTION = {"resolution": 4*resolution, "units": units}
@@ -407,8 +407,8 @@ if __name__ == "__main__":
     parser.add_argument('--mode', default="tile", type=str)
     parser.add_argument('--feature_mode', default="composition", type=str)
     parser.add_argument('--pre_generated', default=False, type=bool)
-    parser.add_argument('--resolution', default=0.25, type=float)
-    parser.add_argument('--units', default="mpp", type=str)
+    parser.add_argument('--resolution', default=20, type=float)
+    parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
 
     if not args.pre_generated:

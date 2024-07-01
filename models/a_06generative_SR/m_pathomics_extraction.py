@@ -24,7 +24,7 @@ from tiatoolbox.utils.misc import save_as_json
 from tiatoolbox import logger
 
 from common.m_utils import mkdir, create_pbar, load_json, rm_n_mkdir, recur_find_ext
-from common.m_utils import reset_logging, select_checkpoints, select_wsi_annotated, select_wsi_interested
+from common.m_utils import reset_logging, select_checkpoints, select_wsi, select_wsi_interested
 
 from models.a_02tissue_masking.m_tissue_masking import generate_wsi_tissue_mask
 from models.a_03patch_extraction.m_patch_extraction import generate_tile_from_wsi
@@ -747,24 +747,25 @@ def compute_label_portion(split_path):
 if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('--wsi_dir', default="/Users/shangqigao/Documents/projects/TCGA")
+    parser.add_argument('--wsi_dir', default="/home/sg2162/rds/rds-ge-sow2-imaging-MRNJucHuBik/TCGA/WSI")
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
-    parser.add_argument('--save_dir', default="/Users/shangqigao/Documents/projects/Experiments/pathomics", type=str)
+    parser.add_argument('--save_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
     parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
     parser.add_argument('--feature_mode', default="vit", choices=["cnn", "vit"], type=str)
     parser.add_argument('--node_features', default=384, choices=[2048, 2048, 384], type=int)
-    parser.add_argument('--resolution', default=0.25, type=float)
-    parser.add_argument('--units', default="mpp", type=str)
+    parser.add_argument('--resolution', default=20, type=float)
+    parser.add_argument('--units', default="power", type=str)
     parser.add_argument('--loss', default="LHCE", choices=["CE", "PN", "uPU", "nnPU", "PCE", "LHCE"], type=str)
     parser.add_argument('--Bayes', default=True, type=bool, help="whether to build Bayesian GNN")
     args = parser.parse_args()
 
     ## get wsi path
     wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
-    wsi_paths = sorted(pathlib.Path(wsi_dir).rglob("*.svs"))
-    logging.info("The number of WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
+    excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1"]
+    wsi_paths = select_wsi(wsi_dir, excluded_wsi)
+    logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
     
     ## set save dir
     save_tile_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_pathomic_tiles")
@@ -773,38 +774,45 @@ if __name__ == "__main__":
     save_model_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_{args.mode}_models/{args.feature_mode}")
     
 
-    # generate wsi tissue mask
+    # generate wsi tissue mask batch by batch
     if args.mode == "wsi":
-        generate_wsi_tissue_mask(
-            wsi_paths=wsi_paths,
-            save_msk_dir=save_msk_dir,
-            method=args.mask_method,
-            resolution=16*args.resolution,
-            units=args.units
-        )
+        bs = 32
+        nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
+        for i in range(0, nb):
+            logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+            start = i * bs
+            end = min(len(wsi_paths), (i + 1) * bs)
+            batch_wsi_paths = wsi_paths[start:end]
+            generate_wsi_tissue_mask(
+                wsi_paths=batch_wsi_paths,
+                save_msk_dir=save_msk_dir,
+                n_jobs=8,
+                method=args.mask_method,
+                resolution=1.25,
+                units="power"
+            )
 
     # extract wsi feature
-    if args.mode == "wsi":
-        save_msk_paths = sorted(save_msk_dir.glob("*.jpg"))
-        print(f"{save_msk_paths}")
-    else:
-        save_msk_paths = None
-    extract_pathomic_feature(
-        wsi_paths=wsi_paths,
-        wsi_msk_paths=save_msk_paths,
-        feature_mode=args.feature_mode,
-        save_dir=save_feature_dir,
-        mode=args.mode,
-        resolution=args.resolution,
-        units=args.units,
-    )
+    # if args.mode == "wsi":
+    #     save_msk_paths = sorted(save_msk_dir.glob("*.jpg"))
+    # else:
+    #     save_msk_paths = None
+    # extract_pathomic_feature(
+    #     wsi_paths=wsi_paths,
+    #     wsi_msk_paths=save_msk_paths,
+    #     feature_mode=args.feature_mode,
+    #     save_dir=save_feature_dir,
+    #     mode=args.mode,
+    #     resolution=args.resolution,
+    #     units=args.units,
+    # )
 
     # construct wsi graph
-    construct_wsi_graph(
-        wsi_paths=wsi_paths,
-        save_dir=save_feature_dir,
-        n_jobs=1 if args.mode == "wsi" else 8
-    )
+    # construct_wsi_graph(
+    #     wsi_paths=wsi_paths,
+    #     save_dir=save_feature_dir,
+    #     n_jobs=1 if args.mode == "wsi" else 8
+    # )
 
     ## split data set
     # num_folds = 5

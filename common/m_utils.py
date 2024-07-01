@@ -7,6 +7,8 @@ import shutil
 from tqdm import tqdm
 from pathlib import Path
 
+from tiatoolbox.wsicore.wsireader import WSIReader 
+
 def mkdir(dir_path: Path):
     """Create a directory if it does not exist."""
     if not dir_path.is_dir():
@@ -145,6 +147,38 @@ def select_checkpoints(
     chkpt_stats_list = [[v[0], v[2]] for v in chkpt_stats_list]
     print(paths)  # noqa: T201
     return paths, chkpt_stats_list
+
+def select_wsi(wsi_dir: str, excluded_wsi: list):
+    """select annotated wsi
+    Args:
+        wsi_dir (str): directory of wsi
+    Returns:
+        selected_wsi_paths (list[pathlib.Path]): a list of selected wsi paths
+    """
+    
+    wsi_paths = sorted(pathlib.Path(wsi_dir).rglob("*.svs"))
+    logging.info(f"Totally {len(wsi_paths)} WSIs!")
+
+    def _filter_wsi(wsi_path):
+        wsi = WSIReader.open(wsi_path)
+        if wsi.info.mpp is None and wsi.info.objective_power is None:
+            selected_path = None
+        else:
+            selected_path = wsi_path
+        del wsi
+        return selected_path
+
+    selected_wsi_paths = joblib.Parallel(n_jobs=8)(
+        joblib.delayed(_filter_wsi)(wsi_path) 
+        for wsi_path in wsi_paths
+        )
+
+    selected_paths = []
+    for path in selected_wsi_paths:
+        wsi_name = f"{path}".split("/")[-1].split(".")[0]
+        if path is not None and wsi_name not in excluded_wsi:
+            selected_paths.append(path)
+    return sorted(selected_paths)
 
 def select_wsi_annotated(wsi_dir: str, ann_dir: str):
     """select annotated wsi

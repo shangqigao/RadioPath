@@ -21,7 +21,7 @@ from tiatoolbox.utils.misc import imwrite, imread
 from models.a_01stain_normalization.m_stain_normalization import wsi_stain_normalization
 
 
-def prepare_annotation_reader(wsi_path, wsi_ann_path, lab_dict, resolution=0.25, units="mpp"):
+def prepare_annotation_reader(wsi_path, wsi_ann_path, lab_dict, resolution=0.5, units="mpp"):
     """prepare annotation reader
     Args:
         wsi_path (str): path of a wsi of a tile
@@ -40,7 +40,7 @@ def prepare_annotation_reader(wsi_path, wsi_ann_path, lab_dict, resolution=0.25,
         img = imread(wsi_path)
         metadata = WSIMeta(
             mpp=np.array([resolution, resolution]),
-            objective_power=40,
+            objective_power=20,
             axes="YXS",
             slide_dimensions=np.array(img.shape[:2][::-1]),
             level_downsamples=[1.0],
@@ -75,7 +75,7 @@ def generate_tile_from_wsi(
         lab_dict, 
         save_tile_dir, 
         tile_size=None, 
-        resolution=0.25, 
+        resolution=0.5, 
         units="mpp"
     ):
     """generate tiles from wsi based on annotation

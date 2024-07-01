@@ -1,12 +1,15 @@
 #!/bin/bash
 
-#SBATCH -A CRISPIN-ORTUZAR-SL3-CPU
+#SBATCH -A CRISPIN-ORTUZAR-SL3-GPU
 #SBATCH -J radiopath
 #SBATCH -o log.%x.job_%j
-#SBATCH -p cclake
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=0-12:00:00
+##SBATCH -p cclake
 ##SBATCH -p cclake-himem
-##SBATCH -p ampere
-##SBATCH --gres=gpu:1
+#SBATCH -p ampere
+#SBATCH --gres=gpu:1
 
 ## activate environment
 source ~/.bashrc
