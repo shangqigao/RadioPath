@@ -927,26 +927,27 @@ if __name__ == "__main__":
     # )
 
     # visualize feature
-    feature_visualization(
-        wsi_paths=wsi_paths[0:900:90],
-        save_feature_dir=save_feature_dir,
-        save_label_dir=None,
-        graph=False,
-        num_class=args.node_features
-    )
+    # feature_visualization(
+    #     wsi_paths=wsi_paths[0:900:90],
+    #     save_feature_dir=save_feature_dir,
+    #     save_label_dir=None,
+    #     graph=True,
+    #     num_class=args.node_features
+    # )
 
 
     ## visualize graph on wsi
-    # wsi_path = wsi_paths[0]
-    # wsi_name = pathlib.Path(wsi_path).stem 
-    # graph_path = save_feature_dir / f"{wsi_name}.json"
-    # visualize_graph(
-    #     wsi_path=wsi_path,
-    #     graph_path=graph_path,
-    #     label=None,
-    #     positive_graph=False,
-    #     show_map=False,
-    #     magnify=True,
-    #     resolution=args.resolution,
-    #     units=args.units
-    # )
+    wsi_path = wsi_paths[2]
+    wsi_name = pathlib.Path(wsi_path).stem 
+    logging.info(f"Visualizing graph of {wsi_name}...")
+    graph_path = save_feature_dir / f"{wsi_name}.json"
+    visualize_graph(
+        wsi_path=wsi_path,
+        graph_path=graph_path,
+        label=None,
+        positive_graph=False,
+        show_map=False,
+        magnify=True,
+        resolution=args.resolution,
+        units=args.units
+    )
