@@ -223,7 +223,7 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
         else:
             node_activations = np.argmax(label, axis=1)
     else:
-        node_activations = np.argmax(graph_dict["x"].numpy(), axis=1)
+        node_activations = np.argmax(softmax(graph_dict["x"].numpy(), axis=1), axis=1)
 
     if positive_graph:
         positive = torch.tensor(node_activations).squeeze() > 0
