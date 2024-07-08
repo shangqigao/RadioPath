@@ -20,6 +20,7 @@ import seaborn as sns
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from matplotlib import pyplot as plt
+from scipy.special import softmax
 
 import numpy as np
 from matplotlib.colors import Normalize
@@ -422,7 +423,7 @@ def feature_visualization(wsi_paths, save_feature_dir, save_label_dir=None, grap
                 label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.label.npy")
                 label = np.load(label_path)
             else:
-                label = np.argmax(feature, axis=1)
+                label = np.argmax(softmax(feature, axis=1), axis=1)
             colors.append(label)
         features = np.concatenate(features, axis=0)
         colors = np.concatenate(colors, axis=0)
