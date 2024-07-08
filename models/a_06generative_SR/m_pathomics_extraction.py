@@ -928,7 +928,7 @@ if __name__ == "__main__":
 
     # visualize feature
     feature_visualization(
-        wsi_paths=wsi_paths[0:10],
+        wsi_paths=wsi_paths[0:900:90],
         save_graph_dir=save_feature_dir,
         save_label_dir=None,
         graph=False,
