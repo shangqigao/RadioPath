@@ -435,6 +435,7 @@ def plot_graph(
     node_size: int = 5,
     edge_colors: Union[Tuple[int], np.ndarray] = (0, 0, 0),
     edge_size: int = 5,
+    bbox = None
 ):
     """Drawing a graph onto a canvas.
 
@@ -484,6 +485,14 @@ def plot_graph(
         node = to_int_tuple(node)
         color = to_int_tuple(node_colors[idx])
         cv2.circle(canvas, node, node_size, color, thickness=-1)
+
+    # draw bbox
+    if bbox is not None:
+        pt1 = (int(bbox[0]), int(bbox[1]))
+        pt2 = (int(bbox[2]), int(bbox[3]))
+        color = (255, 0, 0)
+        cv2.rectangle(canvas, pt1, pt2, color, edge_size * 2)
+        
     return canvas
 
 def plot_map(

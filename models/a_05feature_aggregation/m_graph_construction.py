@@ -65,7 +65,7 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
     joblib.Parallel(n_jobs=n_jobs)(
         joblib.delayed(_construct_graph)(idx, wsi_path)
         for idx, wsi_path in enumerate(wsi_paths)
-    )    
+    )
     return 
 
 def generate_label_from_annotation(
@@ -192,15 +192,15 @@ def generate_node_label(
     logging.info(f"Totally {count_nodes} nodes in {len(wsi_graph_paths)} graphs!")
     return
 
-def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show_map=False, resolution=0.5, units="mpp"):
+def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show_map=False, magnify=False, resolution=0.5, units="mpp"):
     if pathlib.Path(wsi_path).suffix == ".jpg":
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
-        PLOT_RESOLUTION = {"resolution": 4*resolution, "units": units}
+        PLOT_RESOLUTION = {"resolution": resolution / 4, "units": units}
         NODE_SIZE = 24
         EDGE_SIZE = 4
     else:
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
-        PLOT_RESOLUTION = {"resolution": 16*resolution, "units": units}
+        PLOT_RESOLUTION = {"resolution": resolution / 16, "units": units}
         NODE_SIZE = 24
         EDGE_SIZE = 4
     graph_dict = load_json(graph_path)
@@ -261,6 +261,44 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
         POINT_SIZE = np.array(POINT_SIZE) / fx
 
     thumb = reader.slide_thumbnail(**PLOT_RESOLUTION)
+    thumb_bbox = None
+    if magnify:
+        tile_node_coordinates = node_coordinates * fx / 4
+        n_nodes = len(tile_node_coordinates)
+        adjacent_matric = np.zeros((n_nodes, n_nodes))
+        for i in range(len(edges)):
+            x, y = edges[i][0], edges[i][1]
+            adjacent_matric[x, y] = 1
+        ul = np.mean(tile_node_coordinates, axis=0)
+        x_start, y_start = ul[0] - 1300, ul[1] - 1300
+        x_end, y_end = x_start + 2600, y_start + 2600
+        tile_bbox = np.array([x_start, y_start, x_end, y_end])
+        thumb_bbox = tile_bbox * 4 / np.concatenate([fx]*2)
+        bbox_index = []
+        for i in range(len(tile_node_coordinates)):
+            x, y = tile_node_coordinates[i][0], tile_node_coordinates[i][1]
+            if (x_start <= x < x_end) and (y_start <= y < y_end):
+                bbox_index.append(i)
+        tile_node_coordinates = tile_node_coordinates[bbox_index]
+        tile_node_coordinates -= np.array([[x_start, y_start]])
+        tile_node_colors = node_colors[bbox_index]
+        tile_adjacent_matrix = adjacent_matric[bbox_index, :][:, bbox_index]
+        n_nodes = len(tile_node_coordinates)
+        tile_edges = []
+        for i in range(n_nodes):
+            for j in range(n_nodes):
+                if tile_adjacent_matrix[i, j] == 1:
+                    tile_edges.append([i, j])
+        tile_edges = np.array(tile_edges)
+        rect_params = {
+            "location": (int(x_start), int(y_start)),
+            "size": (int(x_end - x_start), int(y_end - y_start)),
+            "resolution": NODE_RESOLUTION["resolution"] / 4, 
+            "units": units,
+            "coord_space": "resolution"
+            }
+        tile = reader.read_rect(**rect_params)
+
     if uncertainty_map is not None:
         if not show_map:
             uncertainty_overlaid = plot_graph(
@@ -327,6 +365,7 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
                 node_colors=node_colors,
                 node_size=NODE_SIZE,
                 edge_size=EDGE_SIZE,
+                bbox=thumb_bbox
             )
         else:
             thumb_overlaid = plot_map(
@@ -335,14 +374,25 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
                 point_size=POINT_SIZE,
                 cluster_colors=node_colors
             )
-        img_name = pathlib.Path(wsi_path).stem
-        img_path = f"a_06semantic_segmentation/wsi_bladder_borderline/{img_name}.png"
-        imwrite(img_path, thumb_overlaid)
-        plt.figure(figsize=(20,5))
-        plt.subplot(1,2,1)
+        # img_name = pathlib.Path(wsi_path).stem
+        # img_path = f"a_06generative_SR/{img_name}.png"
+        # imwrite(img_path, thumb_overlaid)
+        if magnify:
+            thumb_tile = plot_graph(
+                tile.copy(),
+                tile_node_coordinates,
+                tile_edges,
+                node_colors=tile_node_colors,
+                node_size=NODE_SIZE,
+                edge_size=EDGE_SIZE,
+            )
+        else:
+            thumb_tile = np.ones((256, 256, 3))*255
+        plt.figure(figsize=(20,10))
+        plt.subplot(2,2,1)
         plt.imshow(thumb)
         plt.axis("off")
-        ax = plt.subplot(1,2,2)
+        ax = plt.subplot(2,2,2)
         plt.imshow(thumb_overlaid)
         plt.axis("off")
         fig = plt.gcf()
@@ -350,6 +400,8 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
         sm = ScalarMappable(cmap=cmap, norm=norm)
         cbar = fig.colorbar(sm, ax=ax, extend="both")
         cbar.minorticks_on()
+        plt.subplot(2,2,3)
+        plt.imshow(thumb_tile)
         plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
     
 def graph_feature_visualization(wsi_paths, save_graph_dir, save_label_dir=None, num_class=1, features=None, colors=None):

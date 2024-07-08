@@ -93,26 +93,22 @@ def extract_radiomic_feature(
             "composition" for extracting features by segmenting and counting nucleus
             "cnn" for extracting features by deep neural networks
         save_dir (str): directory of saving features
-        mode (str): 'wsi' or 'tile', if 'wsi', extracting features of wsi
-            could be slow if feature mode if 'composition'
         resolution (int): the resolution of extacting features
         units (str): the units of resolution, e.g., mpp  
     """
     if feature_mode == "cnn":
         _ = extract_cnn_pathomic_features(
-            wsi_paths,
-            wsi_msk_paths,
+            img_paths,
+            img_msk_paths,
             save_dir,
-            mode,
             resolution,
             units
         )
     elif feature_mode == "vit":
         _ = extract_vit_pathomic_features(
-            wsi_paths,
-            wsi_msk_paths,
+            img_paths,
+            img_msk_paths,
             save_dir,
-            mode,
             resolution,
             units
         )
@@ -225,7 +221,7 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         save_resolution={"units": "mpp", "resolution": 8.0}
     )
     
-    pretrained_path = "/well/rittscher/projects/shangqi-workspace/data/projects/HIPT/HIPT_4K/Checkpoints/vit256_small_dino.pth"
+    pretrained_path = "/home/sg2162/rds/hpc-work/HIPT/HIPT_4K/Checkpoints/vit256_small_dino.pth"
     model = ViT(pretrained_path)
     ## define preprocessing function
     mean = (0.5, 0.5, 0.5)
@@ -239,9 +235,9 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
     model.postproc_func = _postproc_func
 
     extractor = DeepFeatureExtractor(
-        batch_size=32, 
+        batch_size=128, 
         model=model, 
-        num_loader_workers=8, 
+        num_loader_workers=32, 
     )
 
     rmdir(save_dir)

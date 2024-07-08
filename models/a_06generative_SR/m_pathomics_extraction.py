@@ -38,6 +38,7 @@ from models.a_05feature_aggregation.m_graph_neural_network import SlideGraphData
 from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage
 from models.a_05feature_aggregation.m_graph_neural_network import SlideBayesGraphArch
 from models.a_05feature_aggregation.m_graph_neural_network import update_loss
+# from models.a_06generative_SR.m_zeroshot_classification import pathology_zeroshot_classification, load_prompts
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -749,11 +750,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--wsi_dir', default="/home/sg2162/rds/rds-ge-sow2-imaging-MRNJucHuBik/TCGA/WSI")
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
+    parser.add_argument('--prompts', default="./a_06generative_SR/TCGA_prompts.json", type=str)
     parser.add_argument('--save_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
     parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--feature_mode', default="vit", choices=["cnn", "vit"], type=str)
+    parser.add_argument('--feature_mode', default="vit", choices=["cnn", "vit", "CONCH"], type=str)
     parser.add_argument('--node_features', default=384, choices=[2048, 2048, 384], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
@@ -775,44 +777,71 @@ if __name__ == "__main__":
     
 
     # generate wsi tissue mask batch by batch
-    if args.mode == "wsi":
-        bs = 32
-        nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-        for i in range(0, nb):
-            logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
-            start = i * bs
-            end = min(len(wsi_paths), (i + 1) * bs)
-            batch_wsi_paths = wsi_paths[start:end]
-            generate_wsi_tissue_mask(
-                wsi_paths=batch_wsi_paths,
-                save_msk_dir=save_msk_dir,
-                n_jobs=8,
-                method=args.mask_method,
-                resolution=1.25,
-                units="power"
-            )
+    # if args.mode == "wsi":
+    #     bs = 32
+    #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
+    #     for i in range(0, nb):
+    #         logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+    #         start = i * bs
+    #         end = min(len(wsi_paths), (i + 1) * bs)
+    #         batch_wsi_paths = wsi_paths[start:end]
+    #         generate_wsi_tissue_mask(
+    #             wsi_paths=batch_wsi_paths,
+    #             save_msk_dir=save_msk_dir,
+    #             n_jobs=32,
+    #             method=args.mask_method,
+    #             resolution=1.25,
+    #             units="power"
+    #         )
 
     # extract wsi feature
     # if args.mode == "wsi":
-    #     save_msk_paths = sorted(save_msk_dir.glob("*.jpg"))
+    #     msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
+    #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
     # else:
-    #     save_msk_paths = None
+    #     msk_paths = None
     # extract_pathomic_feature(
     #     wsi_paths=wsi_paths,
-    #     wsi_msk_paths=save_msk_paths,
+    #     wsi_msk_paths=msk_paths,
     #     feature_mode=args.feature_mode,
     #     save_dir=save_feature_dir,
     #     mode=args.mode,
     #     resolution=args.resolution,
-    #     units=args.units,
+    #     units=args.units
+    # )
+
+    # zero-shot classification
+    # if args.mode == "wsi":
+    #     msk_paths = sorted(save_msk_dir.glob("*.jpg"))
+    #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
+    # else:
+    #     msk_paths = None
+    # prompts = load_prompts(args.prompts)
+    # pathology_zeroshot_classification(
+    #     wsi_paths=wsi_paths,
+    #     wsi_msk_paths=msk_paths,
+    #     cls_mode=args.feature_mode,
+    #     save_dir=save_feature_dir,
+    #     mode=args.mode,
+    #     prompts=prompts,
+    #     resolution=args.resolution,
+    #     units=args.units
     # )
 
     # construct wsi graph
-    # construct_wsi_graph(
-    #     wsi_paths=wsi_paths,
-    #     save_dir=save_feature_dir,
-    #     n_jobs=1 if args.mode == "wsi" else 8
-    # )
+    # bs = 32
+    # nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
+    # for i in range(0, nb):
+    #     logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+    #     start = i * bs
+    #     end = min(len(wsi_paths), (i + 1) * bs)
+    #     batch_wsi_paths = wsi_paths[start:end]
+    #     construct_wsi_graph(
+    #         wsi_paths=batch_wsi_paths,
+    #         save_dir=save_feature_dir,
+    #         n_jobs=32
+    #     )
+
 
     ## split data set
     # num_folds = 5
@@ -907,15 +936,16 @@ if __name__ == "__main__":
 
 
     ## visualize graph on wsi
-    # wsi_path = wsi_paths[1]
-    # wsi_name = pathlib.Path(wsi_path).stem 
-    # graph_path = save_feature_dir / f"{wsi_name}.json"
-    # visualize_graph(
-    #     wsi_path=wsi_path,
-    #     graph_path=graph_path,
-    #     label=None,
-    #     positive_graph=False,
-    #     show_map=True,
-    #     resolution=args.resolution,
-    #     units=args.units
-    # )
+    wsi_path = wsi_paths[0]
+    wsi_name = pathlib.Path(wsi_path).stem 
+    graph_path = save_feature_dir / f"{wsi_name}.json"
+    visualize_graph(
+        wsi_path=wsi_path,
+        graph_path=graph_path,
+        label=None,
+        positive_graph=False,
+        show_map=False,
+        magnify=True,
+        resolution=args.resolution,
+        units=args.units
+    )

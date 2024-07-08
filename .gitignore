@@ -1,6 +1,7 @@
 # untracked files
 *.jpg
 *.png
+models/log.*
 models/*.jpg
 models/*.png
 models/**/*.jpg
