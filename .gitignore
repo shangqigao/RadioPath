@@ -2,6 +2,7 @@
 *.jpg
 *.png
 models/log.*
+models/demo*.sh
 models/*.jpg
 models/*.png
 models/**/*.jpg
