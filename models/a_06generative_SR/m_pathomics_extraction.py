@@ -32,7 +32,7 @@ from models.a_04feature_extraction.m_feature_extraction import extract_pathomic_
 from models.a_05feature_aggregation.m_graph_construction import construct_wsi_graph
 from models.a_05feature_aggregation.m_graph_construction import generate_node_label
 from models.a_05feature_aggregation.m_graph_construction import visualize_graph
-from models.a_05feature_aggregation.m_graph_construction import graph_feature_visualization
+from models.a_05feature_aggregation.m_graph_construction import feature_visualization
 from models.a_05feature_aggregation.m_graph_neural_network import SlideGraphArch
 from models.a_05feature_aggregation.m_graph_neural_network import SlideGraphDataset
 from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage
@@ -927,25 +927,26 @@ if __name__ == "__main__":
     # )
 
     # visualize feature
-    # graph_feature_visualization(
-    #     wsi_paths=wsi_paths[0:10],
-    #     save_graph_dir=save_feature_dir,
-    #     save_label_dir=None,
-    #     num_class=args.node_features
-    # )
+    feature_visualization(
+        wsi_paths=wsi_paths[0:10],
+        save_graph_dir=save_feature_dir,
+        save_label_dir=None,
+        graph=False,
+        num_class=args.node_features
+    )
 
 
     ## visualize graph on wsi
-    wsi_path = wsi_paths[0]
-    wsi_name = pathlib.Path(wsi_path).stem 
-    graph_path = save_feature_dir / f"{wsi_name}.json"
-    visualize_graph(
-        wsi_path=wsi_path,
-        graph_path=graph_path,
-        label=None,
-        positive_graph=False,
-        show_map=False,
-        magnify=True,
-        resolution=args.resolution,
-        units=args.units
-    )
+    # wsi_path = wsi_paths[0]
+    # wsi_name = pathlib.Path(wsi_path).stem 
+    # graph_path = save_feature_dir / f"{wsi_name}.json"
+    # visualize_graph(
+    #     wsi_path=wsi_path,
+    #     graph_path=graph_path,
+    #     label=None,
+    #     positive_graph=False,
+    #     show_map=False,
+    #     magnify=True,
+    #     resolution=args.resolution,
+    #     units=args.units
+    # )

@@ -404,15 +404,19 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
         plt.imshow(thumb_tile)
         plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
     
-def graph_feature_visualization(wsi_paths, save_graph_dir, save_label_dir=None, num_class=1, features=None, colors=None):
+def feature_visualization(wsi_paths, save_feature_dir, save_label_dir=None, graph=True, num_class=1, features=None, colors=None):
     if features is None or colors is None:
         features, colors = [], []
         for wsi_path in wsi_paths:
             wsi_name = pathlib.Path(wsi_path).stem
             logging.info(f"loading feature of {wsi_name}")
-            graph_path = pathlib.Path(f"{save_graph_dir}/{wsi_name}.json")
-            graph_dict = load_json(graph_path)
-            feature = np.array(graph_dict["x"])
+            if graph:
+                feature_path = pathlib.Path(f"{save_feature_dir}/{wsi_name}.json")
+                graph_dict = load_json(feature_path)
+                feature = np.array(graph_dict["x"])
+            else:
+                feature_path = pathlib.Path(f"{save_feature_dir}/{wsi_name}.features.npy")
+                feature = np.load(feature_path)
             features.append(feature)
             if save_label_dir is not None:
                 label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.label.npy")
