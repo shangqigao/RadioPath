@@ -16,7 +16,6 @@
             ],
             "DEB": [
                 "debris",
-                "colorectal adenocarcinoma debris and necrosis",
                 "necrosis",
                 "necrotic debris"
             ],
@@ -41,9 +40,6 @@
                 "muscularis mucosa"
             ],
             "NORM": [
-                "normal colon mucosa",
-                "uninvolved colon mucosa",
-                "normal colonic mucosa",
                 "benign epithelium"
             ],
             "STR": [
@@ -54,8 +50,6 @@
                 "stroma"
             ],
             "TUM": [
-                "colorectal adenocarcinoma epithelium",
-                "colorectal adenocarcinoma",
                 "tumor",
                 "adenocarcinoma",
                 "malignant epithelium"

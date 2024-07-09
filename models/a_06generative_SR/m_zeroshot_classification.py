@@ -230,14 +230,17 @@ def pathology_conch_zeroshot_classification(wsi_paths, msk_paths, save_dir, mode
     return output_map_list
 
 def load_prompts(json_path, index=10):
-    with open(args.prompts) as f:
+    with open(json_path) as f:
         prompts = json.load(f)['0']
     classnames = prompts['classnames']
     template = prompts['templates'][index]
     classnames_text = []
     for v in classnames.values():
         classnames_text += v
-    prompts = [template.replace("CLASSNAME", name) for name in classnames_text]
+    if index > 0:
+        prompts = [template.replace("CLASSNAME", name) for name in classnames_text]
+    else:
+        prompts = classnames_text
     return prompts
 
 

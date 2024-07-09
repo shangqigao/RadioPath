@@ -38,7 +38,7 @@ from models.a_05feature_aggregation.m_graph_neural_network import SlideGraphData
 from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage
 from models.a_05feature_aggregation.m_graph_neural_network import SlideBayesGraphArch
 from models.a_05feature_aggregation.m_graph_neural_network import update_loss
-# from models.a_06generative_SR.m_zeroshot_classification import pathology_zeroshot_classification, load_prompts
+from models.a_06generative_SR.m_zeroshot_classification import pathology_zeroshot_classification, load_prompts
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -755,8 +755,8 @@ if __name__ == "__main__":
     parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--feature_mode', default="vit", choices=["cnn", "vit", "CONCH"], type=str)
-    parser.add_argument('--node_features', default=384, choices=[2048, 2048, 384], type=int)
+    parser.add_argument('--feature_mode', default="CONCH", choices=["cnn", "vit", "CONCH"], type=str)
+    parser.add_argument('--node_features', default=384, choices=[2048, 384], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
     parser.add_argument('--loss', default="LHCE", choices=["CE", "PN", "uPU", "nnPU", "PCE", "LHCE"], type=str)
@@ -811,22 +811,22 @@ if __name__ == "__main__":
     # )
 
     # zero-shot classification
-    # if args.mode == "wsi":
-    #     msk_paths = sorted(save_msk_dir.glob("*.jpg"))
-    #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
-    # else:
-    #     msk_paths = None
-    # prompts = load_prompts(args.prompts)
-    # pathology_zeroshot_classification(
-    #     wsi_paths=wsi_paths,
-    #     wsi_msk_paths=msk_paths,
-    #     cls_mode=args.feature_mode,
-    #     save_dir=save_feature_dir,
-    #     mode=args.mode,
-    #     prompts=prompts,
-    #     resolution=args.resolution,
-    #     units=args.units
-    # )
+    if args.mode == "wsi":
+        msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
+        logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
+    else:
+        msk_paths = None
+    prompts = load_prompts(args.prompts)
+    pathology_zeroshot_classification(
+        wsi_paths=wsi_paths,
+        wsi_msk_paths=msk_paths,
+        cls_mode=args.feature_mode,
+        save_dir=save_feature_dir,
+        mode=args.mode,
+        prompts=prompts,
+        resolution=args.resolution,
+        units=args.units
+    )
 
     # construct wsi graph
     # bs = 32
@@ -937,17 +937,17 @@ if __name__ == "__main__":
 
 
     ## visualize graph on wsi
-    wsi_path = wsi_paths[2]
-    wsi_name = pathlib.Path(wsi_path).stem 
-    logging.info(f"Visualizing graph of {wsi_name}...")
-    graph_path = save_feature_dir / f"{wsi_name}.json"
-    visualize_graph(
-        wsi_path=wsi_path,
-        graph_path=graph_path,
-        label=None,
-        positive_graph=False,
-        show_map=False,
-        magnify=True,
-        resolution=args.resolution,
-        units=args.units
-    )
+    # wsi_path = wsi_paths[2]
+    # wsi_name = pathlib.Path(wsi_path).stem 
+    # logging.info(f"Visualizing graph of {wsi_name}...")
+    # graph_path = save_feature_dir / f"{wsi_name}.json"
+    # visualize_graph(
+    #     wsi_path=wsi_path,
+    #     graph_path=graph_path,
+    #     label=None,
+    #     positive_graph=False,
+    #     show_map=False,
+    #     magnify=True,
+    #     resolution=args.resolution,
+    #     units=args.units
+    # )

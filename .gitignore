@@ -2,7 +2,7 @@
 *.jpg
 *.png
 models/log.*
-models/demo*.sh
+models/demo_cpu.sh
 models/*.jpg
 models/*.png
 models/**/*.jpg
