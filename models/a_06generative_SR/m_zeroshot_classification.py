@@ -1,32 +1,26 @@
 import sys
 sys.path.append('../')
 
-import random
 import torch
 import os
 import pathlib
-import joblib
 import argparse
 import pathlib
 import json
+import logging
 
 import numpy as np
 import albumentations as A
 
+from common.m_utils import rmdir
 from albumentations.pytorch import ToTensorV2
-from common.m_utils import recur_find_ext, rmdir, select_checkpoints
-from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig, NucleusInstanceSegmentor
-from tiatoolbox.models.architecture.vanilla import CNNBackbone, CNNModel
+from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig
+from tiatoolbox.models.architecture.vanilla import CNNBackbone
 from tiatoolbox.models.architecture.hipt import get_vit256
 from tiatoolbox.models.architecture.conch.open_clip_custom import create_model_from_pretrained, tokenize, get_tokenizer
-from tiatoolbox.tools.stainnorm import get_normalizer
-from tiatoolbox.data import stain_norm_target
 from tiatoolbox.wsicore.wsireader import WSIReader
-from tiatoolbox.tools.patchextraction import PatchExtractor
 from tiatoolbox.utils.misc import imwrite
 
-from shapely.geometry import box as shapely_box
-from shapely.strtree import STRtree
 from pprint import pprint
 
 # SEED = 5
@@ -58,7 +52,7 @@ def pathology_zeroshot_classification(
         resolution (int): the resolution of extacting features
         units (str): the units of resolution, e.g., mpp  
     """
-    if cls_mode == "MIzero":
+    if cls_mode == "mizero":
         _ = pathology_mizero_zeroshot_classification(
             wsi_paths,
             wsi_msk_paths,
@@ -68,7 +62,7 @@ def pathology_zeroshot_classification(
             resolution,
             units
         )
-    elif cls_mode == "CONCH":
+    elif cls_mode == "conch":
         _ = pathology_conch_zeroshot_classification(
             wsi_paths,
             wsi_msk_paths,
@@ -160,9 +154,10 @@ class CONCH(torch.nn.Module):
         self.tokenizer = get_tokenizer()
         self.prompts = tokenize(self.tokenizer, prompts).to(device)
 
-    def forward(self, imgs):
-        feat = self.model.encode_image(imgs)
-        return torch.flatten(feat, 1)
+    def forward(self, images, prompts):
+        img_embeddings = self.model.encode_image(images)
+        txt_embeddings = self.model.encode_text(prompts)
+        return img_embeddings, txt_embeddings
 
     @staticmethod
     def infer_batch(model, images, on_gpu):
@@ -171,8 +166,7 @@ class CONCH(torch.nn.Module):
         prompts = model.prompts
         model.eval()
         with torch.inference_mode():
-            img_embedings = model.encode_image(images)
-            txt_embedings = model.encode_text(prompts)
+            img_embedings, txt_embedings = model(images, prompts)
             sim_scores = (img_embedings @ txt_embedings.T * model.logit_scale.exp()).softmax(dim=-1)
         return [sim_scores.cpu().numpy()]
     
@@ -199,9 +193,9 @@ def pathology_conch_zeroshot_classification(wsi_paths, msk_paths, save_dir, mode
     model.postproc_func = _postproc_func
 
     extractor = DeepFeatureExtractor(
-        batch_size=32, 
+        batch_size=128, 
         model=model, 
-        num_loader_workers=8, 
+        num_loader_workers=32, 
     )
 
     rmdir(save_dir)
@@ -237,6 +231,7 @@ def load_prompts(json_path, index=10):
     classnames_text = []
     for v in classnames.values():
         classnames_text += v
+    logging.info(f"The number prompt classes: {len(classnames_text)}")
     if index > 0:
         prompts = [template.replace("CLASSNAME", name) for name in classnames_text]
     else:

@@ -8,6 +8,8 @@ import pathlib
 import joblib
 import argparse
 import pathlib
+import timm
+import cv2
 
 import numpy as np
 import albumentations as A
@@ -73,8 +75,17 @@ def extract_pathomic_feature(
             resolution,
             units
         )
+    elif feature_mode == "uni":
+        _ = extract_uni_pathomic_features(
+            wsi_paths,
+            wsi_msk_paths,
+            save_dir,
+            mode,
+            resolution,
+            units
+        )
     else:
-        raise ValueError(f"Invalid feature mode: {feature_mode}")
+        raise NotImplementedError
     return
 
 def extract_radiomic_feature(
@@ -227,6 +238,85 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
     mean = (0.5, 0.5, 0.5)
     std = (0.5, 0.5, 0.5)
     TS = A.Compose([A.Normalize(mean, std), ToTensorV2()])
+    def _preproc_func(img):
+        return TS(image=img)["image"]
+    def _postproc_func(img):
+        return img
+    model.preproc_func = _preproc_func
+    model.postproc_func = _postproc_func
+
+    extractor = DeepFeatureExtractor(
+        batch_size=128, 
+        model=model, 
+        num_loader_workers=32, 
+    )
+
+    rmdir(save_dir)
+    output_map_list = extractor.predict(
+        wsi_paths,
+        msk_paths,
+        mode=mode,
+        ioconfig=ioconfig,
+        on_gpu=True,
+        crash_on_exception=True,
+        save_dir=save_dir,
+    )
+    
+    for input_path, output_path in output_map_list:
+        input_name = pathlib.Path(input_path).stem
+        output_parent_dir = pathlib.Path(output_path).parent
+
+        src_path = pathlib.Path(f"{output_path}.position.npy")
+        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.position.npy")
+        src_path.rename(new_path)
+
+        src_path = pathlib.Path(f"{output_path}.features.0.npy")
+        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.features.npy")
+        src_path.rename(new_path)
+
+    return output_map_list
+
+class UNI(torch.nn.Module):
+    def __init__(self, model_path):
+        super().__init__()
+        self.model = timm.create_model(
+            model_name="vit_large_patch16_224", 
+            img_size=224, 
+            patch_size=16, 
+            init_values=1e-5, 
+            num_classes=0, 
+            dynamic_img_size=True
+        )
+    
+    def forward(self, imgs):
+        feat = self.model(imgs)
+        return torch.flatten(feat, 1)
+
+    @staticmethod
+    def infer_batch(model, batch_data, on_gpu):
+        device = "cuda" if on_gpu else "cpu"
+        image = batch_data.to(device).type(torch.float32)
+        model.eval()
+        with torch.inference_mode():
+            output = model(image)
+        return [output.cpu().numpy()]
+    
+def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.5, units="mpp"):
+    ioconfig = IOSegmentorConfig(
+        input_resolutions=[{"units": units, "resolution": resolution},],
+        output_resolutions=[{"units": units, "resolution": resolution},],
+        patch_input_shape=[256, 256],
+        patch_output_shape=[256, 256],
+        stride_shape=[256, 256],
+        save_resolution={"units": "mpp", "resolution": 8.0}
+    )
+    
+    pretrained_path = "/home/sg2162/rds/hpc-work/UNI/checkpoints/uni/pytorch_model.bin"
+    model = UNI(pretrained_path)
+    ## define preprocessing function
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+    TS = A.Compose([A.Resize(224, 224, cv2.INTER_CUBIC), A.Normalize(mean, std), ToTensorV2()])
     def _preproc_func(img):
         return TS(image=img)["image"]
     def _postproc_func(img):
