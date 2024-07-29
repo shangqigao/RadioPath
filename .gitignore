@@ -12,6 +12,8 @@ models/**/wsi*
 **/__pycache__
 **/**/__pycache__
 **/**/**/__pycache__
+.DS_Store
+models/.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
