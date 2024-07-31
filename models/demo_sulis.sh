@@ -10,7 +10,21 @@
 
 ## activate environment
 source ~/.bashrc
-conda activate totalseg
+conda activate radiopath
 
-## segment TCIA
-python totalseg_tcia.py
+## test stain normalization
+# python a_01stain_normalization/m_stain_normalization.py
+
+## test nucleus instance segmentation
+# python a_04feature_extraction/m_nucleus_instance_segmentation.py
+
+## test feature extraction
+# python a_04feature_extraction/m_feature_extraction.py
+
+## test graph construction
+wsi_dir = "/home/shared/su123/TCGA_ORI"
+save_dir = "/home/s/sg2162/projects/Experiments/pathomics"
+python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --save_dir $save_dir
+
+## test bladder segmentation
+# python a_06semantic_segmentation/m_bladder_segmentation.py
