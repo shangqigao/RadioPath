@@ -193,9 +193,9 @@ def pathology_conch_zeroshot_classification(wsi_paths, msk_paths, save_dir, mode
     model.postproc_func = _postproc_func
 
     extractor = DeepFeatureExtractor(
-        batch_size=128, 
+        batch_size=32, 
         model=model, 
-        num_loader_workers=32, 
+        num_loader_workers=8, 
     )
 
     rmdir(save_dir)
