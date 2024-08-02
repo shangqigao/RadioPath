@@ -22,8 +22,8 @@ conda activate radiopath
 # python a_04feature_extraction/m_feature_extraction.py
 
 ## test graph construction
-wsi_dir = "/home/shared/su123/TCGA_ORI"
-save_dir = "/home/s/sg2162/projects/Experiments/pathomics"
+wsi_dir="/home/shared/su123/TCGA_ORI"
+save_dir="/home/s/sg2162/projects/Experiments/pathomics"
 python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --save_dir $save_dir
 
 ## test bladder segmentation

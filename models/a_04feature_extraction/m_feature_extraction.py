@@ -232,7 +232,7 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         save_resolution={"units": "mpp", "resolution": 8.0}
     )
     
-    pretrained_path = "/home/sg2162/rds/hpc-work/HIPT/HIPT_4K/Checkpoints/vit256_small_dino.pth"
+    pretrained_path = "../checkpoints/HIPT/vit256_small_dino.pth"
     model = ViT(pretrained_path)
     ## define preprocessing function
     mean = (0.5, 0.5, 0.5)
@@ -311,7 +311,7 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         save_resolution={"units": "mpp", "resolution": 8.0}
     )
     
-    pretrained_path = "/home/sg2162/rds/hpc-work/UNI/checkpoints/uni/pytorch_model.bin"
+    pretrained_path = "../checkpoints/UNI/pytorch_model.bin"
     model = UNI(pretrained_path)
     ## define preprocessing function
     mean = (0.485, 0.456, 0.406)

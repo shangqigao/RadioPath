@@ -8,6 +8,7 @@ import argparse
 import pathlib
 import json
 import logging
+import PIL
 
 import numpy as np
 import albumentations as A
@@ -163,11 +164,11 @@ class CONCH(torch.nn.Module):
     def infer_batch(model, images, on_gpu):
         device = "cuda" if on_gpu else "cpu"
         images = images.to(device).type(torch.float32)
-        prompts = model.prompts
+        prompts = model.module.prompts # model is a DataParallel object
         model.eval()
         with torch.inference_mode():
             img_embedings, txt_embedings = model(images, prompts)
-            sim_scores = (img_embedings @ txt_embedings.T * model.logit_scale.exp()).softmax(dim=-1)
+            sim_scores = (img_embedings @ txt_embedings.T * model.module.model.logit_scale.exp()).softmax(dim=-1)
         return [sim_scores.cpu().numpy()]
     
 def pathology_conch_zeroshot_classification(wsi_paths, msk_paths, save_dir, mode, prompts, resolution=0.5, units="mpp"):
@@ -181,11 +182,12 @@ def pathology_conch_zeroshot_classification(wsi_paths, msk_paths, save_dir, mode
     )
     
     model_cfg = 'conch_ViT-B-16'
-    ckpt_path = '/home/sg2162/rds/hpc-work/CONCH/checkpoints/conch/pytorch_model.bin'
+    ckpt_path = '../checkpoints/CONCH/pytorch_model.bin'
     model = CONCH(model_cfg, ckpt_path, prompts, 'cuda')
     ## define preprocessing function
     TS = model.preprocess
     def _preproc_func(img):
+        img = PIL.Image.fromarray(img)
         return TS(img)
     def _postproc_func(img):
         return img
@@ -193,9 +195,9 @@ def pathology_conch_zeroshot_classification(wsi_paths, msk_paths, save_dir, mode
     model.postproc_func = _postproc_func
 
     extractor = DeepFeatureExtractor(
-        batch_size=32, 
+        batch_size=128, 
         model=model, 
-        num_loader_workers=8, 
+        num_loader_workers=32, 
     )
 
     rmdir(save_dir)

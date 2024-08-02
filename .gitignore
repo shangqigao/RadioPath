@@ -1,7 +1,8 @@
 # untracked files
 *.jpg
 *.png
-models/log.*
+checkpoints
+models/*.out
 models/*.jpg
 models/*.png
 models/**/*.jpg
