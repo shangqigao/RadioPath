@@ -155,7 +155,8 @@ def extract_cnn_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         num_loader_workers=8, 
     )
 
-    rmdir(save_dir)
+    # create temporary dir
+    tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
     output_map_list = extractor.predict(
         wsi_paths,
         msk_paths,
@@ -163,12 +164,12 @@ def extract_cnn_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         ioconfig=ioconfig,
         on_gpu=True,
         crash_on_exception=True,
-        save_dir=save_dir,
+        save_dir=tmp_save_dir,
     )
     
     for input_path, output_path in output_map_list:
         input_name = pathlib.Path(input_path).stem
-        output_parent_dir = pathlib.Path(output_path).parent
+        output_parent_dir = pathlib.Path(output_path).parent.parent
 
         src_path = pathlib.Path(f"{output_path}.position.npy")
         new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.position.npy")
@@ -177,6 +178,9 @@ def extract_cnn_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         src_path = pathlib.Path(f"{output_path}.features.0.npy")
         new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.features.npy")
         src_path.rename(new_path)
+
+    # remove temporary dir
+    rmdir(tmp_save_dir)
 
     return output_map_list
 
@@ -251,7 +255,8 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         num_loader_workers=32, 
     )
 
-    rmdir(save_dir)
+    # create temporary dir
+    tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
     output_map_list = extractor.predict(
         wsi_paths,
         msk_paths,
@@ -259,12 +264,12 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         ioconfig=ioconfig,
         on_gpu=True,
         crash_on_exception=True,
-        save_dir=save_dir,
+        save_dir=tmp_save_dir,
     )
     
     for input_path, output_path in output_map_list:
         input_name = pathlib.Path(input_path).stem
-        output_parent_dir = pathlib.Path(output_path).parent
+        output_parent_dir = pathlib.Path(output_path).parent.parent
 
         src_path = pathlib.Path(f"{output_path}.position.npy")
         new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.position.npy")
@@ -273,6 +278,9 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         src_path = pathlib.Path(f"{output_path}.features.0.npy")
         new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.features.npy")
         src_path.rename(new_path)
+
+    # remove temporary dir
+    rmdir(tmp_save_dir)
 
     return output_map_list
 
@@ -330,7 +338,8 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         num_loader_workers=32, 
     )
 
-    rmdir(save_dir)
+    # create temporary dir
+    tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
     output_map_list = extractor.predict(
         wsi_paths,
         msk_paths,
@@ -338,12 +347,12 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         ioconfig=ioconfig,
         on_gpu=True,
         crash_on_exception=True,
-        save_dir=save_dir,
+        save_dir=tmp_save_dir,
     )
     
     for input_path, output_path in output_map_list:
         input_name = pathlib.Path(input_path).stem
-        output_parent_dir = pathlib.Path(output_path).parent
+        output_parent_dir = pathlib.Path(output_path).parent.parent
 
         src_path = pathlib.Path(f"{output_path}.position.npy")
         new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.position.npy")
@@ -352,6 +361,9 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
         src_path = pathlib.Path(f"{output_path}.features.0.npy")
         new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.features.npy")
         src_path.rename(new_path)
+
+    # remove temporary dir
+    rmdir(tmp_save_dir)
 
     return output_map_list
 
@@ -373,7 +385,6 @@ def extract_composition_features(wsi_paths, msk_paths, save_dir, mode, resolutio
         return stain_normaliser.transform(img)
     inst_segmentor.model.preproc_func = _stain_norm_func
 
-    rmdir(save_dir)
     output_map_list = inst_segmentor.predict(
         wsi_paths,
         msk_paths,
@@ -399,6 +410,10 @@ def extract_composition_features(wsi_paths, msk_paths, save_dir, mode, resolutio
             get_cell_compositions(wsi_paths[idx], msk_paths[idx], path, save_dir, resolution=resolution, units=units)
         else:
             get_cell_compositions(wsi_paths[idx], None, path, save_dir, resolution=resolution, units=units)
+
+    # remove temporary dir
+    rmdir(tmp_save_dir)
+
     return output_paths
 
 
