@@ -125,6 +125,8 @@ def pathology_mizero_zeroshot_classification(wsi_paths, msk_paths, save_dir, mod
 
     # create temporary dir
     tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
+    rmdir(tmp_save_dir)
+    rmdir(tmp_save_dir)
     output_map_list = extractor.predict(
         wsi_paths,
         msk_paths,
@@ -206,6 +208,7 @@ def pathology_conch_zeroshot_classification(wsi_paths, msk_paths, save_dir, mode
 
     # create temporary dir
     tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
+    rmdir(tmp_save_dir)
     output_map_list = extractor.predict(
         wsi_paths,
         msk_paths,

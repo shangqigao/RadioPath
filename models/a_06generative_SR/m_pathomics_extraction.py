@@ -794,7 +794,7 @@ if __name__ == "__main__":
     #             units="power"
     #         )
 
-    # extract wsi feature
+    # extract wsi feature patch by patch
     # if args.mode == "wsi":
     #     msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
     #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
@@ -803,7 +803,7 @@ if __name__ == "__main__":
     # if args.mode == "wsi":
     #     bs = 32
     #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-    #     for i in range(0, nb):
+    #     for i in range(20, nb):
     #         logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
     #         start = i * bs
     #         end = min(len(wsi_paths), (i + 1) * bs)
@@ -829,7 +829,7 @@ if __name__ == "__main__":
     if args.mode == "wsi":
         bs = 32
         nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-        for i in range(0, nb):
+        for i in range(29, nb):
             logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
             start = i * bs
             end = min(len(wsi_paths), (i + 1) * bs)

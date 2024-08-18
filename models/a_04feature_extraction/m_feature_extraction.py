@@ -150,13 +150,14 @@ def extract_cnn_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
     model.postproc_func = _postproc_func
     
     extractor = DeepFeatureExtractor(
-        batch_size=32, 
+        batch_size=128, 
         model=model, 
-        num_loader_workers=8, 
+        num_loader_workers=32, 
     )
 
     # create temporary dir
     tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
+    rmdir(tmp_save_dir)
     output_map_list = extractor.predict(
         wsi_paths,
         msk_paths,
@@ -257,6 +258,7 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
 
     # create temporary dir
     tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
+    rmdir(tmp_save_dir)
     output_map_list = extractor.predict(
         wsi_paths,
         msk_paths,
@@ -340,6 +342,7 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
 
     # create temporary dir
     tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
+    rmdir(tmp_save_dir)
     output_map_list = extractor.predict(
         wsi_paths,
         msk_paths,
