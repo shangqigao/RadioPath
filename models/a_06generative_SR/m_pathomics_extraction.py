@@ -69,7 +69,6 @@ if __name__ == "__main__":
     #             units="power"
     #         )
 
-<<<<<<< HEAD
     # extract wsi feature patch by patch
     # if args.mode == "wsi":
     #     msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
@@ -94,32 +93,6 @@ if __name__ == "__main__":
     #             resolution=args.resolution,
     #             units=args.units
     #         )
-=======
-    # extract wsi feature
-    # if args.mode == "wsi":
-    #     msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
-    #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
-    # else:
-    #     msk_paths = None
-    # if args.mode == "wsi":
-    #     bs = 32
-    #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-    #     for i in range(0, nb):
-    #         logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
-    #         start = i * bs
-    #         end = min(len(wsi_paths), (i + 1) * bs)
-    #         batch_wsi_paths = wsi_paths[start:end]
-    #         batch_msk_paths = msk_paths[start:end]
-    #         extract_pathomic_feature(
-    #             wsi_paths=batch_wsi_paths,
-    #             wsi_msk_paths=batch_msk_paths,
-    #             feature_mode=args.feature_mode,
-    #             save_dir=save_feature_dir,
-    #             mode=args.mode,
-    #             resolution=args.resolution,
-    #             units=args.units
-    #         )
->>>>>>> c5efda1 (add generative graph diffusion)
 
     # zero-shot classification
     # if args.mode == "wsi":
@@ -193,7 +166,7 @@ if __name__ == "__main__":
     #     wsi_path=wsi_path,
     #     graph_path=graph_path,
     #     label=None,
-    #     positive_graph=False,
+    #     positive_graph=False
     #     show_map=False,
     #     magnify=True,
     #     resolution=args.resolution,
