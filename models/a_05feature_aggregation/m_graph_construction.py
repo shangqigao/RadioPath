@@ -139,12 +139,44 @@ def generate_label_from_annotation(
         logging.warning(f"The nodes of {wsi_name} are all background!")
     return np.array(labels), len(xy)
 
+def generate_label_from_classification(
+        wsi_graph_path,
+        wsi_cls_path,
+        n_jobs
+):
+    with pathlib.Path(wsi_graph_path).open() as fptr:
+        graph_dict = json.load(fptr)
+    cluster_points_list = graph_dict["cluster_points"]
+
+    patch_cls_np = np.load(wsi_cls_path)
+    wsi_pos_path = f"{wsi_cls_path}".replace(".features.npy", ".position.npy")
+    patch_pos_np = np.load(wsi_pos_path)
+    labels = np.zeros((len(cluster_points_list), patch_cls_np.shape[1]))
+
+    def _label_graph_node(idx, cluster_points):
+        cls_prob_list = []
+        for point in cluster_points:
+            point = np.array([point])
+            index = np.argwhere(np.sum(patch_pos_np == point, axis=1)).squeeze()
+            cls_prob_list.append(patch_cls_np[index])
+        labels[idx] = np.array(cls_prob_list).mean(axis=0)
+        return
+
+    # construct graphs in parallel
+    joblib.Parallel(n_jobs=n_jobs)(
+        joblib.delayed(_label_graph_node)(idx, cluster_points)
+        for idx, cluster_points in enumerate(cluster_points_list)
+    )
+    return labels, len(labels)
+
 def generate_node_label(
         wsi_paths, 
         wsi_annot_paths, 
-        wsi_graph_paths,
-        lab_dict,  
-        save_lab_dir, 
+        wsi_graph_paths, 
+        save_lab_dir,
+        anno_type,
+        lab_dict=None,
+        n_jobs=8,
         node_size=164, 
         min_ann_ratio=1e-4,
         resolution=0.5, 
@@ -175,17 +207,26 @@ def generate_node_label(
     for idx, (wsi_path, annot_path, graph_path) in enumerate(zip(wsi_paths, wsi_annot_paths, wsi_graph_paths)):
         logging.info("annotating nodes of graph: {}/{}...".format(idx + 1, len(wsi_graph_paths)))
         wsi_name = pathlib.Path(wsi_path).stem
-        patch_labels, num_nodes = generate_label_from_annotation(
-            wsi_path=wsi_path, 
-            wsi_ann_path=annot_path, 
-            wsi_graph_path=graph_path, 
-            tissue_masker=tissue_masker,
-            lab_dict=lab_dict, 
-            node_size=node_size, 
-            min_ann_ratio=min_ann_ratio, 
-            resolution=resolution, 
-            units=units
-        )
+        if anno_type == "annotation":
+            patch_labels, num_nodes = generate_label_from_annotation(
+                wsi_path=wsi_path, 
+                wsi_ann_path=annot_path, 
+                wsi_graph_path=graph_path, 
+                tissue_masker=tissue_masker,
+                lab_dict=lab_dict, 
+                node_size=node_size, 
+                min_ann_ratio=min_ann_ratio, 
+                resolution=resolution, 
+                units=units
+            )
+        elif anno_type == "classification":
+            patch_labels, num_nodes = generate_label_from_classification(
+                wsi_graph_path=graph_path,
+                wsi_cls_path=annot_path,
+                n_jobs=n_jobs
+            )
+        else:
+            raise NotImplementedError
         count_nodes += num_nodes
         save_lab_path = f"{save_lab_dir}/{wsi_name}.label.npy"
         logging.info(f"Saving node label {wsi_name}.label.npy")
