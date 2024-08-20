@@ -148,13 +148,13 @@ if __name__ == "__main__":
     # )
 
     # visualize feature
-    # feature_visualization(
-    #     wsi_paths=wsi_paths[0:900:90],
-    #     save_feature_dir=save_feature_dir,
-    #     save_label_dir=None,
-    #     graph=True,
-    #     num_class=args.node_features
-    # )
+    feature_visualization(
+        wsi_paths=wsi_paths[0:900:90],
+        save_feature_dir=save_feature_dir,
+        save_label_dir=None,
+        graph=False,
+        num_class=args.node_features
+    )
 
 
     ## visualize graph on wsi

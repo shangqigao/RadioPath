@@ -18,6 +18,7 @@ import logging
 
 import seaborn as sns
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from sklearn.manifold import TSNE
 from matplotlib import pyplot as plt
 from scipy.special import softmax
@@ -446,7 +447,7 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
         plt.imshow(thumb_tile)
         plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
     
-def feature_visualization(wsi_paths, save_feature_dir, save_label_dir=None, graph=True, num_class=1, features=None, colors=None):
+def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, num_class=1, features=None, colors=None):
     if features is None or colors is None:
         features, colors = [], []
         for wsi_path in wsi_paths:
@@ -469,7 +470,11 @@ def feature_visualization(wsi_paths, save_feature_dir, save_label_dir=None, grap
         features = np.concatenate(features, axis=0)
         colors = np.concatenate(colors, axis=0)
     
-    pca_proj = PCA(n_components=64).fit_transform(features)
+    n_samples, n_features = features.shape
+    n_components = min(64, n_samples, n_features)
+    scaled_features = StandardScaler().fit_transform(features)
+    pca_proj = PCA(n_components=n_components).fit_transform(scaled_features)
+
     tsne_proj = TSNE().fit_transform(pca_proj)
 
     sns.set_style('darkgrid')
