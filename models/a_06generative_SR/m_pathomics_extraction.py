@@ -151,6 +151,7 @@ if __name__ == "__main__":
     feature_visualization(
         wsi_paths=wsi_paths[0:900:90],
         save_feature_dir=save_feature_dir,
+        mode="tsne",
         save_label_dir=None,
         graph=False,
         num_class=args.node_features

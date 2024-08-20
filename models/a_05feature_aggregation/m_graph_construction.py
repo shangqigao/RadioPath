@@ -15,6 +15,7 @@ import pathlib
 import json
 import argparse
 import logging
+import umap
 
 import seaborn as sns
 from sklearn.decomposition import PCA
@@ -471,11 +472,18 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
         colors = np.concatenate(colors, axis=0)
     
     n_samples, n_features = features.shape
-    n_components = min(64, n_samples, n_features)
     scaled_features = StandardScaler().fit_transform(features)
-    pca_proj = PCA(n_components=n_components).fit_transform(scaled_features)
+    if min(n_samples, n_features) > 64:
+        pca_proj = PCA(n_components=64).fit_transform(scaled_features)
+    else:
+        pca_proj = scaled_features
 
-    tsne_proj = TSNE().fit_transform(pca_proj)
+    if mode == "tsne":
+        vis_proj = TSNE().fit_transform(pca_proj)
+    elif mode == "umap":
+        vis_proj = umap.UMAP().fit(pca_proj)
+    else:
+        raise NotImplementedError
 
     sns.set_style('darkgrid')
     sns.set_palette('muted')
@@ -487,7 +495,7 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
     scatter_list = []
     for i in class_list:
         c = colors[colors == i]
-        t = tsne_proj[colors == i, :]
+        t = vis_proj[colors == i, :]
         sc = ax.scatter(t[:, 0], t[:, 1], lw=0, s=40, c=palette[c.astype(np.int32)])
         scatter_list.append(sc)
     plt.legend(scatter_list, class_list, loc="upper right", bbox_to_anchor=(1.1, 1.1), title="Classes")
@@ -495,7 +503,7 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
     plt.ylim(-25, 25)
     ax.axis('off')
     ax.axis('tight') 
-    plt.savefig('a_05feature_aggregation/feature_tsne_visualization.jpg')
+    plt.savefig('a_05feature_aggregation/feature_visualization.jpg')
 
 
 if __name__ == "__main__":
