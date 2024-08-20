@@ -4,10 +4,10 @@
 #SBATCH -J radiopath
 #SBATCH -o log.%x.job_%j
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=16
 #SBATCH --time=0-12:00:00
-##SBATCH -p cclake
-#SBATCH -p cclake-himem
+#SBATCH -p cclake
+##SBATCH -p cclake-himem
 ##SBATCH -p ampere
 ##SBATCH --gres=gpu:1
 

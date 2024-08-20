@@ -481,7 +481,7 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
     if mode == "tsne":
         vis_proj = TSNE(n_jobs=-1).fit_transform(pca_proj)
     elif mode == "umap":
-        vis_proj = umap.UMAP(n_jobs=-1).fit(pca_proj)
+        vis_proj = umap.UMAP(n_jobs=-1).fit_transform(pca_proj)
     else:
         raise NotImplementedError
 
