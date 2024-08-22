@@ -81,7 +81,8 @@ def extract_minimum_spanning_tree(wsi_graph_paths, save_dir, n_jobs=8):
         save_dir (str): directory of saving minimum spanning tree
     """
     def _extract_mst(idx, graph_path):
-        original_graph_dict = json.load(graph_path)
+        with pathlib.Path(graph_path).open() as fptr:
+            original_graph_dict = json.load(fptr)
         graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
         logging.info("extracting minimum spanning tree: {}/{}...".format(idx + 1, len(wsi_graph_paths)))
         feature = graph_dict["x"]
