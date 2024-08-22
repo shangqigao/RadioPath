@@ -23,12 +23,15 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.manifold import TSNE
 from matplotlib import pyplot as plt
 from scipy.special import softmax
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import minimum_spanning_tree
 
 import numpy as np
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable, get_cmap
 from torch_geometric.data import Data
 from torch_geometric.utils import subgraph
+from torch_geometric import transforms
 from pprint import pprint
 from common.m_utils import mkdir, load_json
 
@@ -70,6 +73,39 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
         for idx, wsi_path in enumerate(wsi_paths)
     )
     return 
+
+def extract_minimum_spanning_tree(wsi_graph_paths, save_dir, n_jobs=8):
+    """extract minimum spanning tree from graph
+    Args:
+        wsi_graph_paths (list): a list of wsi graph paths
+        save_dir (str): directory of saving minimum spanning tree
+    """
+    def _extract_mst(idx, graph_path):
+        original_graph_dict = json.load(graph_path)
+        graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
+        logging.info("extracting minimum spanning tree: {}/{}...".format(idx + 1, len(wsi_graph_paths)))
+        feature = graph_dict["x"]
+        edge_index = graph_dict["edge_index"]
+        rows, cols = edge_index[0, :], edge_index[1, :]
+        distance = np.linalg.norm(feature[rows] - feature[cols], axis=1)
+        shape = (len(feature), len(feature))
+        X = csr_matrix((distance, (rows, cols)), shape)
+        MST = minimum_spanning_tree(X).toarray()
+        edge_index = np.ascontiguousarray(np.stack(MST.nonzero(), axis=1).T)
+        graph_dict.update({"edge_index": edge_index.astype(np.int64)})
+        wsi_name = pathlib.Path(graph_path).stem
+        save_path = pathlib.Path(f"{save_dir}/{wsi_name}.MST.json")
+        with save_path.open("w") as handle:
+            graph_dict = {k: v.tolist() for k, v in graph_dict.items()}
+            graph_dict.update({"cluster_points": original_graph_dict["cluster_points"]})
+            json.dump(graph_dict, handle)
+
+    # extract minimum spanning trees in parallel
+    joblib.Parallel(n_jobs=n_jobs)(
+        joblib.delayed(_extract_mst)(idx, graph_path)
+        for idx, graph_path in enumerate(wsi_graph_paths)
+    )
+    return
 
 def generate_label_from_annotation(
         wsi_path,
