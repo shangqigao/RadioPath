@@ -31,8 +31,8 @@ if __name__ == "__main__":
     parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--feature_mode', default="vit", choices=["cnn", "vit", "uni", "conch"], type=str)
-    parser.add_argument('--node_features', default=384, choices=[2048, 384, 1024, 35], type=int)
+    parser.add_argument('--feature_mode', default="conch", choices=["cnn", "vit", "uni", "conch"], type=str)
+    parser.add_argument('--node_features', default=35, choices=[2048, 384, 1024, 35], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
@@ -151,7 +151,7 @@ if __name__ == "__main__":
     feature_visualization(
         wsi_paths=wsi_paths[0:900:90],
         save_feature_dir=save_feature_dir,
-        mode="umap",
+        mode="tsne",
         save_label_dir=None,
         graph=False,
         num_class=args.node_features
