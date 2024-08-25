@@ -83,7 +83,7 @@ def extract_minimum_spanning_tree(wsi_graph_paths, save_dir, n_jobs=8):
     def _extract_mst(idx, graph_path):
         with pathlib.Path(graph_path).open() as fptr:
             original_graph_dict = json.load(fptr)
-        graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
+        graph_dict = {k: np.array(v) for k, v in original_graph_dict.items() if k != "cluster_points"}
         logging.info("extracting minimum spanning tree: {}/{}...".format(idx + 1, len(wsi_graph_paths)))
         feature = graph_dict["x"]
         edge_index = graph_dict["edge_index"]
@@ -189,23 +189,25 @@ def generate_label_from_classification(
 
     patch_cls_np = np.load(wsi_cls_path)
     wsi_pos_path = f"{wsi_cls_path}".replace(".features.npy", ".position.npy")
-    patch_pos_np = np.load(wsi_pos_path)
-    labels = np.zeros((len(cluster_points_list), patch_cls_np.shape[1]))
+    patch_pos_np = np.load(wsi_pos_path)[:, :2]
 
     def _label_graph_node(idx, cluster_points):
         cls_prob_list = []
         for point in cluster_points:
             point = np.array([point])
-            index = np.argwhere(np.sum(patch_pos_np == point, axis=1)).squeeze()
+            index = np.argwhere(np.sum(patch_pos_np == point, axis=1) == 2).squeeze()
             cls_prob_list.append(patch_cls_np[index])
-        labels[idx] = np.array(cls_prob_list).mean(axis=0)
-        return
+        label = np.stack(cls_prob_list, axis=0).mean(axis=0)
+        return idx, label
 
     # construct graphs in parallel
-    joblib.Parallel(n_jobs=n_jobs)(
+    idx_labels = joblib.Parallel(n_jobs=n_jobs)(
         joblib.delayed(_label_graph_node)(idx, cluster_points)
         for idx, cluster_points in enumerate(cluster_points_list)
     )
+    labels = np.zeros((len(cluster_points_list), patch_cls_np.shape[1]))
+    for idx, label in idx_labels: labels[idx] = label
+    
     return labels, len(labels)
 
 def generate_node_label(
@@ -236,12 +238,13 @@ def generate_node_label(
     save_lab_dir = pathlib.Path(save_lab_dir)
     mkdir(save_lab_dir)
     # finding threshold of masking tissue from all is better than each
-    tissue_masker = generate_wsi_tissue_mask(
-        wsi_paths=wsi_paths, 
-        method="otsu", 
-        resolution=16*resolution, 
-        units=units
-    )
+    if anno_type == "annotation":
+        tissue_masker = generate_wsi_tissue_mask(
+            wsi_paths=wsi_paths, 
+            method="otsu", 
+            resolution=16*resolution, 
+            units=units
+        )
     count_nodes = 0
     for idx, (wsi_path, annot_path, graph_path) in enumerate(zip(wsi_paths, wsi_annot_paths, wsi_graph_paths)):
         logging.info("annotating nodes of graph: {}/{}...".format(idx + 1, len(wsi_graph_paths)))
