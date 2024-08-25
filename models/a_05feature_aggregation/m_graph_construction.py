@@ -276,7 +276,7 @@ def generate_node_label(
     logging.info(f"Totally {count_nodes} nodes in {len(wsi_graph_paths)} graphs!")
     return
 
-def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show_map=False, magnify=False, resolution=0.5, units="mpp"):
+def visualize_graph(wsi_path, graph_path, label=None, subgraph_id=None, show_map=False, magnify=False, resolution=0.5, units="mpp"):
     if pathlib.Path(wsi_path).suffix == ".jpg":
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
         PLOT_RESOLUTION = {"resolution": resolution / 4, "units": units}
@@ -310,9 +310,9 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
     else:
         node_activations = np.argmax(softmax(graph_dict["x"].numpy(), axis=1), axis=1)
 
-    if positive_graph:
-        positive = torch.tensor(node_activations).squeeze() > 0
-        edge_index, _ = subgraph(positive, graph_dict["edge_index"], relabel_nodes=False)
+    if subgraph_id is not None:
+        subset = torch.tensor(node_activations).squeeze() == subgraph_id
+        edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=False)
         graph_dict["edge_index"] = edge_index
         
     graph_dict = {k: v.numpy() for k, v in graph_dict.items() if k != "cluster_points"}

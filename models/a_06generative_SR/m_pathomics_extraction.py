@@ -173,11 +173,16 @@ if __name__ == "__main__":
     logging.info(f"Visualizing graph of {wsi_name}...")
     graph_path = save_feature_dir / f"{wsi_name}.json"
     label_path = save_feature_dir / f"{wsi_name}.label.npy"
+    subgraph_id = 32
+    if subgraph_id is not None: 
+        prompts = load_prompts(args.prompts, index=0)
+        class_name = prompts[subgraph_id]
+        logging.info(f"Visualizing subgraph of {class_name}...")
     visualize_graph(
         wsi_path=wsi_path,
         graph_path=graph_path,
         label=label_path,
-        positive_graph=False,
+        subgraph_id=subgraph_id,
         show_map=False,
         magnify=True,
         resolution=args.resolution,
