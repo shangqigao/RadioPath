@@ -297,6 +297,8 @@ def visualize_graph(wsi_path, graph_path, label=None, positive_graph=False, show
     uncertainty_map = None
     if isinstance(label, pathlib.Path):
         node_activations = np.load(label)
+        if node_activations.ndim == 2:
+            node_activations = np.argmax(node_activations, axis=1)
     elif isinstance(label, np.ndarray):
         if label.ndim == 3:
             mean = np.mean(label, axis=0)
