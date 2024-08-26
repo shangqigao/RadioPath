@@ -276,7 +276,18 @@ def generate_node_label(
     logging.info(f"Totally {count_nodes} nodes in {len(wsi_graph_paths)} graphs!")
     return
 
-def visualize_graph(wsi_path, graph_path, label=None, subgraph_id=None, show_map=False, magnify=False, resolution=0.5, units="mpp"):
+def visualize_graph(
+        wsi_path, 
+        graph_path, 
+        label=None, 
+        label_min=None,
+        label_max=None,
+        subgraph_id=None, 
+        show_map=False, 
+        magnify=False, 
+        resolution=0.5, 
+        units="mpp"
+    ):
     if pathlib.Path(wsi_path).suffix == ".jpg":
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
         PLOT_RESOLUTION = {"resolution": resolution / 4, "units": units}
@@ -309,6 +320,8 @@ def visualize_graph(wsi_path, graph_path, label=None, subgraph_id=None, show_map
             node_activations = np.argmax(label, axis=1)
     else:
         node_activations = np.argmax(softmax(graph_dict["x"].numpy(), axis=1), axis=1)
+    if label_min is None: label_min = node_activations.min()
+    if label_max is None: label_max = node_activations.max()
 
     if subgraph_id is not None:
         subset = torch.tensor(node_activations).squeeze() == subgraph_id
@@ -323,7 +336,7 @@ def visualize_graph(wsi_path, graph_path, label=None, subgraph_id=None, show_map
     graph = Data(**graph_dict)
 
     cmap = get_cmap("viridis")
-    norm_node_activations = (node_activations - node_activations.min()) / (node_activations.max() - node_activations.min() + 1e-10)
+    norm_node_activations = (node_activations - label_min) / (label_max - label_min + 1e-10)
     node_colors = (cmap(norm_node_activations)[..., :3] * 255).astype(np.uint8)
     if uncertainty_map is not None:
         norm_uncertainty_map = (uncertainty_map - uncertainty_map.min()) / (uncertainty_map.max() - uncertainty_map.min() + 1e-10)
