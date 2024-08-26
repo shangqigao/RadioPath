@@ -173,11 +173,12 @@ if __name__ == "__main__":
     logging.info(f"Visualizing graph of {wsi_name}...")
     graph_path = save_feature_dir / f"{wsi_name}.MST.json"
     label_path = save_feature_dir / f"{wsi_name}.label.npy"
-    subgraph_id = 32
+    subgraph_id = [0, 4]
     if subgraph_id is not None: 
         prompts = load_prompts(args.prompts, index=0)
-        class_name = prompts[subgraph_id]
-        logging.info(f"Visualizing subgraph of {class_name}...")
+        class_start = prompts[subgraph_id[0]]
+        class_end = prompts[subgraph_id[1]]
+        logging.info(f"Visualizing subgraph from {class_start} to {class_end}...")
     visualize_graph(
         wsi_path=wsi_path,
         graph_path=graph_path,

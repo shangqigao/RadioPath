@@ -324,7 +324,8 @@ def visualize_graph(
     if label_max is None: label_max = node_activations.max()
 
     if subgraph_id is not None:
-        subset = torch.tensor(node_activations).squeeze() == subgraph_id
+        act_tensor = torch.tensor(node_activations).squeeze()
+        subset = torch.logical_and(act_tensor >= subgraph_id[0], act_tensor <= subgraph_id[1])
         edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=True)
         subset = subset.numpy().tolist()
         node_activations = node_activations[subset]
@@ -445,7 +446,7 @@ def visualize_graph(
         plt.imshow(thumb_overlaid)
         plt.axis("off")
         fig = plt.gcf()
-        norm = Normalize(np.min(node_activations), np.max(node_activations))
+        norm = Normalize(label_min, label_max)
         sm = ScalarMappable(cmap=cmap, norm=norm)
         cbar = fig.colorbar(sm, ax=ax, extend="both")
         cbar.minorticks_on()
@@ -499,7 +500,7 @@ def visualize_graph(
         plt.imshow(thumb_overlaid)
         plt.axis("off")
         fig = plt.gcf()
-        norm = Normalize(np.min(node_activations), np.max(node_activations))
+        norm = Normalize(label_min, label_max)
         sm = ScalarMappable(cmap=cmap, norm=norm)
         cbar = fig.colorbar(sm, ax=ax, extend="both")
         cbar.minorticks_on()
