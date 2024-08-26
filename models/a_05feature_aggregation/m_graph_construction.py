@@ -291,7 +291,7 @@ def visualize_graph(wsi_path, graph_path, label=None, subgraph_id=None, show_map
     if show_map:
         cluster_points = graph_dict["cluster_points"]
         cluster_points = [np.array(c) for c in cluster_points]
-        POINT_SIZE = [256, 256]
+        POINT_SIZE = [256, 256] # patch size in embedding
     graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items() if k != "cluster_points"}
 
     uncertainty_map = None

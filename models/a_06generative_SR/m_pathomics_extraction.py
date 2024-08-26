@@ -32,7 +32,7 @@ if __name__ == "__main__":
     parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--feature_mode', default="vit", choices=["cnn", "vit", "uni", "conch"], type=str)
+    parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch"], type=str)
     parser.add_argument('--node_features', default=1024, choices=[2048, 384, 1024, 35], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     wsi_path = wsi_paths[2]
     wsi_name = pathlib.Path(wsi_path).stem 
     logging.info(f"Visualizing graph of {wsi_name}...")
-    graph_path = save_feature_dir / f"{wsi_name}.json"
+    graph_path = save_feature_dir / f"{wsi_name}.MST.json"
     label_path = save_feature_dir / f"{wsi_name}.label.npy"
     subgraph_id = 32
     if subgraph_id is not None: 
