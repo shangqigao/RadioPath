@@ -312,10 +312,14 @@ def visualize_graph(wsi_path, graph_path, label=None, subgraph_id=None, show_map
 
     if subgraph_id is not None:
         subset = torch.tensor(node_activations).squeeze() == subgraph_id
-        edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=False)
+        edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=True)
         graph_dict["edge_index"] = edge_index
-        
-    graph_dict = {k: v.numpy() for k, v in graph_dict.items() if k != "cluster_points"}
+        subset = subset.numpy().tolist()
+        node_activations = node_activations[subset]
+        if show_map: cluster_points = cluster_points[subset]
+        graph_dict = {k: v[subset] for k, v in graph_dict.items() if k != "edge_index"}
+
+    graph_dict = {k: v.numpy() for k, v in graph_dict.items()}
     graph = Data(**graph_dict)
 
     cmap = get_cmap("viridis")
