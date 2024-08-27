@@ -523,7 +523,10 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
                 feature = np.load(feature_path)
             features.append(feature)
             if save_label_dir is not None:
-                label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.label.npy")
+                if graph:
+                    label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.label.npy")
+                else:
+                    label_path = pathlib.Path(f"{save_label_dir}/{wsi_name}.features.npy")
                 label = np.load(label_path)
                 if label.ndim == 2: label = np.argmax(label, axis=1)
             else:
