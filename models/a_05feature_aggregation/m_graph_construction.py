@@ -518,7 +518,7 @@ def visualize_graph(
         plt.imshow(thumb_tile)
         plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
     
-def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, features=None, colors=None):
+def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, n_class=None, features=None, colors=None):
     if features is None or colors is None:
         features, colors = [], []
         for wsi_path in wsi_paths:
@@ -563,7 +563,8 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
     sns.set_palette('muted')
     sns.set_context("notebook", font_scale=1.5, rc={"lines.linewidth": 2.5})
     class_list = np.unique(colors).tolist()
-    palette = np.array(sns.color_palette("hls", len(class_list)))
+    if n_class is None: n_class = int(max(class_list))
+    palette = np.array(sns.color_palette("hls", n_class))
     plt.figure(figsize=(8,8))
     ax = plt.subplot(aspect='equal')
     scatter_list = []

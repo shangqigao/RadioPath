@@ -160,9 +160,10 @@ if __name__ == "__main__":
     feature_visualization(
         wsi_paths=wsi_paths[0:900:90],
         save_feature_dir=save_feature_dir,
-        mode="tsne",
+        mode="umap",
         save_label_dir=save_classification_dir,
-        graph=False
+        graph=False,
+        n_class=35
     )
 
 
