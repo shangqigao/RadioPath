@@ -276,6 +276,16 @@ def generate_node_label(
     logging.info(f"Totally {count_nodes} nodes in {len(wsi_graph_paths)} graphs!")
     return
 
+def measure_graph_properties(
+    graph_path,
+    subgraph_ids=None,    
+    ):
+    graph_dict = load_json(graph_path)
+    if subgraph_ids is None:
+        edge_index = graph_dict["edge_index"]
+
+    return
+
 def visualize_graph(
         wsi_path, 
         graph_path, 
@@ -508,7 +518,7 @@ def visualize_graph(
         plt.imshow(thumb_tile)
         plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
     
-def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, num_class=1, features=None, colors=None):
+def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, features=None, colors=None):
     if features is None or colors is None:
         features, colors = [], []
         for wsi_path in wsi_paths:
@@ -552,10 +562,10 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
     sns.set_style('darkgrid')
     sns.set_palette('muted')
     sns.set_context("notebook", font_scale=1.5, rc={"lines.linewidth": 2.5})
-    palette = np.array(sns.color_palette("hls", num_class))
+    class_list = np.unique(colors).tolist()
+    palette = np.array(sns.color_palette("hls", len(class_list)))
     plt.figure(figsize=(8,8))
     ax = plt.subplot(aspect='equal')
-    class_list = np.unique(colors).tolist()
     scatter_list = []
     for i in class_list:
         c = colors[colors == i]
