@@ -162,8 +162,7 @@ if __name__ == "__main__":
         save_feature_dir=save_feature_dir,
         mode="tsne",
         save_label_dir=save_classification_dir,
-        graph=True,
-        num_class=args.node_features
+        graph=False
     )
 
 
