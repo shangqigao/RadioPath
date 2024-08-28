@@ -521,7 +521,7 @@ def visualize_graph(
 def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, n_class=None, features=None, colors=None):
     if features is None or colors is None:
         features, colors = [], []
-        for wsi_path in wsi_paths:
+        for i, wsi_path in enumerate(wsi_paths):
             wsi_name = pathlib.Path(wsi_path).stem
             logging.info(f"loading feature of {wsi_name}")
             if graph:
@@ -540,7 +540,8 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
                 label = np.load(label_path)
                 if label.ndim == 2: label = np.argmax(label, axis=1)
             else:
-                label = np.argmax(softmax(feature, axis=1), axis=1)
+                # label = np.argmax(softmax(feature, axis=1), axis=1)
+                label = np.array([i]*len(feature), np.int32)
             colors.append(label)
         features = np.concatenate(features, axis=0)
         colors = np.concatenate(colors, axis=0)
@@ -563,7 +564,7 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
     sns.set_palette('muted')
     sns.set_context("notebook", font_scale=1.5, rc={"lines.linewidth": 2.5})
     class_list = np.unique(colors).tolist()
-    if n_class is None: n_class = int(max(class_list))
+    if n_class is None: n_class = int(max(class_list)) + 1
     palette = np.array(sns.color_palette("hls", n_class))
     plt.figure(figsize=(8,8))
     ax = plt.subplot(aspect='equal')
