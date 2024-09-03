@@ -540,8 +540,8 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
                 label = np.load(label_path)
                 if label.ndim == 2: label = np.argmax(label, axis=1)
             else:
-                # label = np.argmax(softmax(feature, axis=1), axis=1)
-                label = np.array([i]*len(feature), np.int32)
+                label = np.argmax(softmax(feature, axis=1), axis=1)
+                # label = np.array([i]*len(feature), np.int32)
             colors.append(label)
         features = np.concatenate(features, axis=0)
         colors = np.concatenate(colors, axis=0)

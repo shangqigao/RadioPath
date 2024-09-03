@@ -161,9 +161,9 @@ if __name__ == "__main__":
         wsi_paths=wsi_paths[0:900:90],
         save_feature_dir=save_feature_dir,
         mode="tsne",
-        save_label_dir=None,
+        save_label_dir=save_feature_dir,
         graph=True,
-        n_class=10
+        n_class=35
     )
 
 
