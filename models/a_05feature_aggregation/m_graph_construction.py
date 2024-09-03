@@ -27,6 +27,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import minimum_spanning_tree
 
 import numpy as np
+import networkx as nx
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable, get_cmap
 from torch_geometric.data import Data
@@ -276,14 +277,165 @@ def generate_node_label(
     logging.info(f"Totally {count_nodes} nodes in {len(wsi_graph_paths)} graphs!")
     return
 
-def measure_graph_properties(
+def measure_subgraph_properties(
     graph_path,
+    label_path,
     subgraph_ids=None,    
     ):
+    label = np.load(label_path)
+    if label.ndim == 2:
+        label = np.argmax(label, axis=1)
     graph_dict = load_json(graph_path)
+    
     if subgraph_ids is None:
+        graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
+        feature = graph_dict["x"]
         edge_index = graph_dict["edge_index"]
+    else:
+        graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items() if k != "cluster_points"}
+        label = torch.tensor(label).squeeze()
+        subset = torch.logical_and(label >= subgraph_ids[0], label <= subgraph_ids[1])
+        edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=True)
+        edge_index = edge_index.numpy()
+        feature = graph_dict["x"][subset].numpy()
+    
+    rows, cols = edge_index[0, :], edge_index[1, :]
+    distance = np.linalg.norm(feature[rows] - feature[cols], axis=1)
+    shape = (len(feature), len(feature))
+    X = csr_matrix((distance, (rows, cols)), shape)
+    G = nx.Graph(X)
 
+    prop_dict = {}
+    prop_dict["num_nodes"] = [G.number_of_nodes()]
+    prop_dict["num_edges"] = [G.number_of_edges()]
+    prop_dict["num_components"] = [nx.number_connected_components(G)]
+    prop_dict["degree"] = list(list(zip(*G.degree()))[1])
+    prop_dict["closeness"] = list(nx.closeness_centrality(G, distance="weight").values())
+    prop_dict["graph_diameter"] = [nx.diameter(G.subgraph(SG)) for SG in nx.connected_components(G)]
+    prop_dict["graph_assortativity"] = [nx.degree_pearson_correlation_coefficient(G)]
+    prop_dict["mean_neighbor_degree"] = list(nx.average_neighbor_degree(G).values())
+
+    return prop_dict
+
+def measure_graph_properties(
+    graph_paths,
+    label_paths,
+    subgraph_dict=None,
+    n_jobs=8
+    ):
+    def _measure_graph_properties(graph_path, label_path):
+        graph_name = pathlib.Path(graph_path).stem
+        logging.info(f"Measuring graph properties of {graph_name}...")
+        if subgraph_dict is None:
+            prop_dict = measure_subgraph_properties(graph_path, label_path)
+        else:
+            prop_dict = {}
+            for cls, ids in subgraph_dict.items():
+                subgraph_prop_dict = measure_subgraph_properties(graph_path, label_path, ids)
+                prop_dict.update({cls: subgraph_prop_dict})
+        return prop_dict
+    
+    # measure graph properties in parallel
+    prop_list = joblib.Parallel(n_jobs=n_jobs)(
+        joblib.delayed(_measure_graph_properties)(graph_path, label_path)
+        for graph_path, label_path in zip(graph_paths, label_paths)
+    )
+
+    def _concat_dict_list(dict_list):
+        concat_dict = dict_list[0]
+        if len(dict_list) > 1:
+            for d in dict_list[1:]:
+                for k, v in d.items(): concat_dict[k] += v
+        return concat_dict
+    
+    if subgraph_dict is None:
+        prop_dict = _concat_dict_list(prop_list)
+    else:
+        prop_dict = {}
+        for k in subgraph_dict.keys():
+            dict_list = [d[k] for d in prop_list]
+            prop_dict[k] = _concat_dict_list(dict_list)
+
+    return prop_dict
+
+def plot_graph_properties(
+    graph_paths,
+    label_paths,
+    subgraph_dict=None,
+    n_jobs=8,
+    prop_key="num_nodes",
+    plotted="hist"
+    ):
+    graph_prop_dict = measure_graph_properties(
+        graph_paths=graph_paths,
+        label_paths=label_paths,
+        subgraph_dict=subgraph_dict,
+        n_jobs=n_jobs
+    )
+
+    property_dict = {}
+    if subgraph_dict is None:
+        assert prop_key in graph_prop_dict.keys()
+        property_dict.update({"Whole slide graph": graph_prop_dict[prop_key]})
+    else:
+        for k in subgraph_dict.keys():
+            property_dict.update({f"Subgraph {k}": graph_prop_dict[k][prop_key]})
+
+    # plot
+    logging.info(f"Visualizing {plotted} of the graph property {prop_key}...")
+    plt.figure()
+    i, D = 0, []
+    for k, v in property_dict.items():
+        ax = plt.subplot(1, len(property_dict), i)
+        i += 1
+        y = np.array(k)
+        D.append(y)
+        if plotted == "bar":
+            x = np.arange(len(k)) + 0.5
+            ax.bar(x, y, width=1, edgecolor="white", linewidth=0.7)
+            ax.set_xlabel("Subject ID")
+            ax.set_ylabel(f"{prop_key}")
+        elif plotted == "stem":
+            x = np.arange(len(k)) + 0.5
+            ax.stem(x, y, label=k)
+            ax.set_xlabel("Subject ID")
+            ax.set_ylabel(f"{prop_key}")
+        elif plotted == "hist":
+            ax.hist(y, bins="auto", linewidth=0.5, edgecolor="white")
+            ax.set_xlabel(f"{prop_key}")
+            ax.set_ylabel("Frequency")
+        ax.title(f"{prop_key} for {k}")
+
+    D = np.stack(D, axis=1)
+    ax = plt.subplot(1,1,1)
+    if plotted == "box":
+        positions = [(i+1)*2 for i in range(len(graph_prop_dict))]
+        ax.boxplot(D, positions=positions, widths=1.5, patch_artist=True,
+                showmeans=False, showfliers=False,
+                medianprops={"color": "white", "linewidth": 0.5},
+                boxprops={"facecolor": "C0", "edgecolor": "white", "linewidth": 0.5},
+                whiskerprops={"color": "C0", "linewidth": 1.5},
+                capprops={"color": "C0", "linewidth": 1.5}
+                )
+        ax.set_ylabel(f"{prop_key}")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(property_dict.keys(), rotation=45)
+    elif plotted == "voilin":
+        positions = [(i+1)*2 for i in range(len(graph_prop_dict))]
+        ax.violinplot(D, positions, widths=2,
+                showmeans=False, showmedians=False, showextrema=False
+                )
+        ax.set_ylabel(f"{prop_key}")
+        ax.set_xticks(positions)
+        ax.set_xticklabels(property_dict.keys(), rotation=45)
+    elif plotted == "plot":
+        x = np.arange(len(D))
+        ax.plot(x, D, linewidth=2)
+        ax.set_xlabel("subject ID")
+        ax.set_ylabel(f"{prop_key}")
+    ax.title(f"Comparison of {prop_key}")
+    plt.savefig("a_05feature_aggregation/graph_property.jpg") 
+    logging.info("Visualization done!") 
     return
 
 def visualize_graph(

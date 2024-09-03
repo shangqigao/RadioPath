@@ -15,6 +15,7 @@ from models.a_05feature_aggregation.m_graph_construction import visualize_graph
 from models.a_05feature_aggregation.m_graph_construction import feature_visualization
 from models.a_05feature_aggregation.m_graph_construction import generate_node_label
 from models.a_05feature_aggregation.m_graph_construction import extract_minimum_spanning_tree
+from models.a_05feature_aggregation.m_graph_construction import plot_graph_properties
 from models.a_06generative_SR.m_zeroshot_classification import pathology_zeroshot_classification, load_prompts
 
 torch.multiprocessing.set_sharing_strategy("file_system")
@@ -157,6 +158,7 @@ if __name__ == "__main__":
     # )
 
     # visualize feature
+<<<<<<< HEAD
     feature_visualization(
         wsi_paths=wsi_paths[0:900:90],
         save_feature_dir=save_feature_dir,
@@ -164,6 +166,48 @@ if __name__ == "__main__":
         save_label_dir=save_feature_dir,
         graph=True,
         n_class=35
+=======
+    # feature_visualization(
+    #     wsi_paths=wsi_paths[0:900:90],
+    #     save_feature_dir=save_feature_dir,
+    #     mode="tsne",
+    #     save_label_dir=None,
+    #     graph=True,
+    #     n_class=10
+    # )
+
+    # visualize graph properties
+    wsi_graph_paths = [save_feature_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    wsi_label_paths = [save_feature_dir / f"{p.stem}.label.npy" for p in wsi_paths]
+    subgraph_dict = {
+        "ADI": [0, 4],
+        "BACK": [5, 8],
+        "DEB": [9, 11],
+        "LYM": [12, 16],
+        "MUC": [17, 20],
+        "NORM": [21, 25],
+        "STR": [27, 31],
+        "TUM": [32, 34]
+    }
+    graph_properties = [
+        "num_nodes", 
+        "num_edges", 
+        "num_components", 
+        "degree", 
+        "closeness", 
+        "graph_diameter",
+        "graph_assortativity",
+        "mean_neighbor_degree"
+    ]
+    plot_types = ["bar", "stem", "hist", "box", "voilin", "plot"]
+    plot_graph_properties(
+        graph_paths=wsi_graph_paths,
+        label_paths=wsi_label_paths,
+        subgraph_dict=None,
+        n_jobs=42,
+        prop_key=graph_properties[0],
+        plotted=plot_types[2]
+>>>>>>> 46d7cca73b29a903acfebbed6c2abf78beca8932
     )
 
 
