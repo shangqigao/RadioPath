@@ -158,15 +158,6 @@ if __name__ == "__main__":
     # )
 
     # visualize feature
-<<<<<<< HEAD
-    feature_visualization(
-        wsi_paths=wsi_paths[0:900:90],
-        save_feature_dir=save_feature_dir,
-        mode="tsne",
-        save_label_dir=save_feature_dir,
-        graph=True,
-        n_class=35
-=======
     # feature_visualization(
     #     wsi_paths=wsi_paths[0:900:90],
     #     save_feature_dir=save_feature_dir,
@@ -207,7 +198,6 @@ if __name__ == "__main__":
         n_jobs=42,
         prop_key=graph_properties[0],
         plotted=plot_types[2]
->>>>>>> 46d7cca73b29a903acfebbed6c2abf78beca8932
     )
 
 
