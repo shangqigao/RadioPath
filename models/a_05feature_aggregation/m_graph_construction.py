@@ -323,9 +323,8 @@ def measure_graph_properties(
     subgraph_dict=None,
     n_jobs=8
     ):
-    def _measure_graph_properties(graph_path, label_path):
-        graph_name = pathlib.Path(graph_path).stem
-        logging.info(f"Measuring graph properties of {graph_name}...")
+    def _measure_graph_properties(idx, graph_path, label_path):
+        logging.info("Measuring graph properties: {}/{}...".format(idx + 1, len(graph_paths)))
         if subgraph_dict is None:
             prop_dict = measure_subgraph_properties(graph_path, label_path)
         else:
@@ -337,8 +336,8 @@ def measure_graph_properties(
     
     # measure graph properties in parallel
     prop_list = joblib.Parallel(n_jobs=n_jobs)(
-        joblib.delayed(_measure_graph_properties)(graph_path, label_path)
-        for graph_path, label_path in zip(graph_paths, label_paths)
+        joblib.delayed(_measure_graph_properties)(idx, graph_path, label_path)
+        for idx, (graph_path, label_path) in enumerate(zip(graph_paths, label_paths))
     )
 
     def _concat_dict_list(dict_list):
