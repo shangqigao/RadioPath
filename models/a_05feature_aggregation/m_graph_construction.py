@@ -385,54 +385,56 @@ def plot_graph_properties(
     plt.figure()
     i, D = 1, []
     for k, v in property_dict.items():
-        ax = plt.subplot(1, len(property_dict), i)
         i += 1
         y = np.array(k)
         D.append(y)
-        if plotted == "bar":
-            x = np.arange(len(k)) + 0.5
-            ax.bar(x, y, width=1, edgecolor="white", linewidth=0.7)
-            ax.set_xlabel("Subject ID")
-            ax.set_ylabel(f"{prop_key}")
-        elif plotted == "stem":
-            x = np.arange(len(k)) + 0.5
-            ax.stem(x, y, label=k)
-            ax.set_xlabel("Subject ID")
-            ax.set_ylabel(f"{prop_key}")
-        elif plotted == "hist":
-            ax.hist(y, bins="auto", linewidth=0.5, edgecolor="white")
-            ax.set_xlabel(f"{prop_key}")
-            ax.set_ylabel("Frequency")
-        ax.title(f"{prop_key} for {k}")
+        if plotted in ["bar", "stem", "hist"]:
+            ax = plt.subplot(1, len(property_dict), i)
+            if plotted == "bar":
+                x = np.arange(len(k)) + 0.5
+                ax.bar(x, y, width=1, edgecolor="white", linewidth=0.7)
+                ax.set_xlabel("Subject ID")
+                ax.set_ylabel(f"{prop_key}")
+            elif plotted == "stem":
+                x = np.arange(len(k)) + 0.5
+                ax.stem(x, y, label=k)
+                ax.set_xlabel("Subject ID")
+                ax.set_ylabel(f"{prop_key}")
+            elif plotted == "hist":
+                ax.hist(y, bins="auto", linewidth=0.5, edgecolor="white")
+                ax.set_xlabel(f"{prop_key}")
+                ax.set_ylabel("Frequency")
+            ax.title(f"{prop_key} for {k}")
 
-    D = np.stack(D, axis=1)
-    ax = plt.subplot(1,1,1)
-    if plotted == "box":
-        positions = [(i+1)*2 for i in range(len(graph_prop_dict))]
-        ax.boxplot(D, positions=positions, widths=1.5, patch_artist=True,
-                showmeans=False, showfliers=False,
-                medianprops={"color": "white", "linewidth": 0.5},
-                boxprops={"facecolor": "C0", "edgecolor": "white", "linewidth": 0.5},
-                whiskerprops={"color": "C0", "linewidth": 1.5},
-                capprops={"color": "C0", "linewidth": 1.5}
-                )
-        ax.set_ylabel(f"{prop_key}")
-        ax.set_xticks(positions)
-        ax.set_xticklabels(property_dict.keys(), rotation=45)
-    elif plotted == "voilin":
-        positions = [(i+1)*2 for i in range(len(graph_prop_dict))]
-        ax.violinplot(D, positions, widths=2,
-                showmeans=False, showmedians=False, showextrema=False
-                )
-        ax.set_ylabel(f"{prop_key}")
-        ax.set_xticks(positions)
-        ax.set_xticklabels(property_dict.keys(), rotation=45)
-    elif plotted == "plot":
-        x = np.arange(len(D))
-        ax.plot(x, D, linewidth=2)
-        ax.set_xlabel("subject ID")
-        ax.set_ylabel(f"{prop_key}")
-    ax.title(f"Comparison of {prop_key}")
+    if plotted in ["box", "voilin", "plot"]:
+        D = np.stack(D, axis=1)
+        ax = plt.subplot(1,1,1)
+        if plotted == "box":
+            positions = [(i+1)*2 for i in range(len(graph_prop_dict))]
+            ax.boxplot(D, positions=positions, widths=1.5, patch_artist=True,
+                    showmeans=False, showfliers=False,
+                    medianprops={"color": "white", "linewidth": 0.5},
+                    boxprops={"facecolor": "C0", "edgecolor": "white", "linewidth": 0.5},
+                    whiskerprops={"color": "C0", "linewidth": 1.5},
+                    capprops={"color": "C0", "linewidth": 1.5}
+                    )
+            ax.set_ylabel(f"{prop_key}")
+            ax.set_xticks(positions)
+            ax.set_xticklabels(property_dict.keys(), rotation=45)
+        elif plotted == "voilin":
+            positions = [(i+1)*2 for i in range(len(graph_prop_dict))]
+            ax.violinplot(D, positions, widths=2,
+                    showmeans=False, showmedians=False, showextrema=False
+                    )
+            ax.set_ylabel(f"{prop_key}")
+            ax.set_xticks(positions)
+            ax.set_xticklabels(property_dict.keys(), rotation=45)
+        elif plotted == "plot":
+            x = np.arange(len(D))
+            ax.plot(x, D, linewidth=2)
+            ax.set_xlabel("subject ID")
+            ax.set_ylabel(f"{prop_key}")
+        ax.title(f"Comparison of {prop_key}")
     plt.savefig("a_05feature_aggregation/graph_property.jpg") 
     logging.info("Visualization done!") 
     return
