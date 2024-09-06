@@ -385,8 +385,7 @@ def plot_graph_properties(
     plt.figure()
     i, D = 1, []
     for k, v in property_dict.items():
-        i += 1
-        y = np.array(k)
+        y = np.array(v)
         D.append(y)
         if plotted in ["bar", "stem", "hist"]:
             ax = plt.subplot(1, len(property_dict), i)
@@ -405,6 +404,7 @@ def plot_graph_properties(
                 ax.set_xlabel(f"{prop_key}")
                 ax.set_ylabel("Frequency")
             ax.title(f"{prop_key} for {k}")
+        i += 1
 
     if plotted in ["box", "voilin", "plot"]:
         D = np.stack(D, axis=1)
