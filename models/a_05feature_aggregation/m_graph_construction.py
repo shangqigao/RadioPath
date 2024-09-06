@@ -34,7 +34,7 @@ from torch_geometric.data import Data
 from torch_geometric.utils import subgraph
 from torch_geometric import transforms
 from pprint import pprint
-from common.m_utils import mkdir, load_json
+from common.m_utils import mkdir, load_json, concat_dict_list
 
 from tiatoolbox.wsicore.wsireader import WSIReader, VirtualWSIReader
 from tiatoolbox.tools.graph import SlideGraphConstructor
@@ -320,57 +320,48 @@ def measure_subgraph_properties(
 def measure_graph_properties(
     graph_paths,
     label_paths,
+    save_dir,
     subgraph_dict=None,
     n_jobs=8
     ):
     def _measure_graph_properties(idx, graph_path, label_path):
         logging.info("Measuring graph properties: {}/{}...".format(idx + 1, len(graph_paths)))
+        wsi_name = pathlib.Path(graph_path).stem
         if subgraph_dict is None:
             prop_dict = measure_subgraph_properties(graph_path, label_path)
+            save_path = pathlib.Path(f"{save_dir}/{wsi_name}.graph.properties.json")
         else:
             prop_dict = {}
             for cls, ids in subgraph_dict.items():
                 subgraph_prop_dict = measure_subgraph_properties(graph_path, label_path, ids)
                 prop_dict.update({cls: subgraph_prop_dict})
-        return prop_dict
+            save_path = pathlib.Path(f"{save_dir}/{wsi_name}.subgraphs.properties.json")
+        with save_path.open("w") as handle:
+            json.dump(prop_dict, handle)
     
     # measure graph properties in parallel
-    prop_list = joblib.Parallel(n_jobs=n_jobs)(
+    joblib.Parallel(n_jobs=n_jobs)(
         joblib.delayed(_measure_graph_properties)(idx, graph_path, label_path)
         for idx, (graph_path, label_path) in enumerate(zip(graph_paths, label_paths))
     )
-
-    def _concat_dict_list(dict_list):
-        concat_dict = dict_list[0]
-        if len(dict_list) > 1:
-            for d in dict_list[1:]:
-                for k, v in d.items(): concat_dict[k] += v
-        return concat_dict
-    
-    if subgraph_dict is None:
-        prop_dict = _concat_dict_list(prop_list)
-    else:
-        prop_dict = {}
-        for k in subgraph_dict.keys():
-            dict_list = [d[k] for d in prop_list]
-            prop_dict[k] = _concat_dict_list(dict_list)
-
-    return prop_dict
+    return
 
 def plot_graph_properties(
-    graph_paths,
-    label_paths,
+    prop_paths,
     subgraph_dict=None,
-    n_jobs=8,
     prop_key="num_nodes",
     plotted="hist"
     ):
-    graph_prop_dict = measure_graph_properties(
-        graph_paths=graph_paths,
-        label_paths=label_paths,
-        subgraph_dict=subgraph_dict,
-        n_jobs=n_jobs
-    )
+
+    prop_list = [load_json(p) for p in prop_paths]
+    
+    if subgraph_dict is None:
+        graph_prop_dict = concat_dict_list(prop_list)
+    else:
+        graph_prop_dict = {}
+        for k in subgraph_dict.keys():
+            dict_list = [d[k] for d in prop_list]
+            graph_prop_dict[k] = concat_dict_list(dict_list)
 
     property_dict = {}
     if subgraph_dict is None:

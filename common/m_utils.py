@@ -223,3 +223,10 @@ def select_wsi_interested(wsi_names, wsi_paths, wsi_ann_paths):
             selected_wsi_paths.append(wsi_path)
             selected_wsi_ann_paths.append(ann_path)
     return selected_wsi_paths, selected_wsi_ann_paths
+
+def concat_dict_list(dict_list):
+    concat_dict = dict_list[0]
+    if len(dict_list) > 1:
+        for d in dict_list[1:]:
+            for k, v in d.items(): concat_dict[k] += v
+    return concat_dict
