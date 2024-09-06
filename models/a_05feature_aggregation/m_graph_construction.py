@@ -403,7 +403,7 @@ def plot_graph_properties(
                 ax.hist(y, bins="auto", linewidth=0.5, edgecolor="white")
                 ax.set_xlabel(f"{prop_key}")
                 ax.set_ylabel("Frequency")
-            ax.title(f"{prop_key} for {k}")
+            ax.set_title(f"{prop_key} for {k}")
         i += 1
 
     if plotted in ["box", "voilin", "plot"]:
@@ -434,7 +434,7 @@ def plot_graph_properties(
             ax.plot(x, D, linewidth=2)
             ax.set_xlabel("subject ID")
             ax.set_ylabel(f"{prop_key}")
-        ax.title(f"Comparison of {prop_key}")
+        ax.set_title(f"Comparison of {prop_key}")
     plt.savefig("a_05feature_aggregation/graph_property.jpg") 
     logging.info("Visualization done!") 
     return
