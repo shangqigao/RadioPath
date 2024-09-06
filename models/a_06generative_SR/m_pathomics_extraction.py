@@ -193,8 +193,8 @@ if __name__ == "__main__":
     ]
     plot_types = ["bar", "stem", "hist", "box", "voilin", "plot"]
     plot_graph_properties(
-        graph_paths=wsi_graph_paths,
-        label_paths=wsi_label_paths,
+        graph_paths=wsi_graph_paths[:10],
+        label_paths=wsi_label_paths[:10],
         subgraph_dict=None,
         n_jobs=42,
         prop_key=graph_properties[0],

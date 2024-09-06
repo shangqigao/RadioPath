@@ -383,7 +383,7 @@ def plot_graph_properties(
     # plot
     logging.info(f"Visualizing {plotted} of the graph property {prop_key}...")
     plt.figure()
-    i, D = 0, []
+    i, D = 1, []
     for k, v in property_dict.items():
         ax = plt.subplot(1, len(property_dict), i)
         i += 1
