@@ -176,7 +176,7 @@ if __name__ == "__main__":
         graph_paths=wsi_graph_paths,
         label_paths=wsi_label_paths,
         save_dir=save_feature_dir,
-        subgraph_dict=None,
+        subgraph_dict=subgraph_dict,
         n_jobs=42
     )
 

@@ -295,7 +295,9 @@ def measure_subgraph_properties(
         graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items() if k != "cluster_points"}
         label = torch.tensor(label).squeeze()
         subset = torch.logical_and(label >= subgraph_ids[0], label <= subgraph_ids[1])
+        if subset.sum().item() < 2: return None
         edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=True)
+        if edge_index.size(1) == 0: return None
         edge_index = edge_index.numpy()
         feature = graph_dict["x"][subset].numpy()
     
