@@ -362,7 +362,7 @@ def plot_graph_properties(
     else:
         graph_prop_dict = {}
         for k in subgraph_dict.keys():
-            dict_list = [d[k] for d in prop_list]
+            dict_list = [d[k] for d in prop_list if d[k] is not None]
             graph_prop_dict[k] = concat_dict_list(dict_list)
 
     property_dict = {}
