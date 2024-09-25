@@ -352,7 +352,9 @@ def plot_graph_properties(
     prop_paths,
     subgraph_dict=None,
     prop_key="num_nodes",
-    plotted="hist"
+    plotted="hist",
+    min_percentile=0,
+    max_percentile=100
     ):
 
     prop_list = [load_json(p) for p in prop_paths]
@@ -379,6 +381,11 @@ def plot_graph_properties(
     i, D = 1, []
     for k, v in property_dict.items():
         y = np.array(v)
+        y = y[~np.isnan(y)]
+        if prop_key == "graph_diameter": y = y[y > 1]
+        min_perc = np.percentile(y, min_percentile)
+        max_perc = np.percentile(y, max_percentile)
+        y = y[(y >= min_perc) & (y <= max_perc)]
         D.append(y)
         if plotted in ["bar", "stem", "hist"]:
             ax = plt.subplot(1, len(property_dict), i)
@@ -400,7 +407,6 @@ def plot_graph_properties(
         i += 1
 
     if plotted in ["box", "voilin", "plot"]:
-        D = np.stack(D, axis=1)
         ax = plt.subplot(1,1,1)
         if plotted == "box":
             positions = [(i+1)*2 for i in range(len(graph_prop_dict))]
@@ -413,22 +419,23 @@ def plot_graph_properties(
                     )
             ax.set_ylabel(f"{prop_key}")
             ax.set_xticks(positions)
-            ax.set_xticklabels(property_dict.keys(), rotation=45)
+            ax.set_xticklabels(property_dict.keys(), rotation=45, ha='right')
         elif plotted == "voilin":
             positions = [(i+1)*2 for i in range(len(graph_prop_dict))]
             ax.violinplot(D, positions, widths=2,
-                    showmeans=False, showmedians=False, showextrema=False
+                    showmeans=False, showmedians=True, showextrema=True
                     )
             ax.set_ylabel(f"{prop_key}")
             ax.set_xticks(positions)
-            ax.set_xticklabels(property_dict.keys(), rotation=45)
+            ax.set_xticklabels(property_dict.keys(), rotation=45, ha='right')
         elif plotted == "plot":
-            x = np.arange(len(D))
-            ax.plot(x, D, linewidth=2)
+            for d in D:
+                x = np.arange(len(d))
+                ax.plot(x, d, linewidth=2)
             ax.set_xlabel("subject ID")
             ax.set_ylabel(f"{prop_key}")
         ax.set_title(f"Comparison of {prop_key}")
-    plt.savefig("a_05feature_aggregation/graph_property.jpg") 
+    plt.savefig(f"a_05feature_aggregation/graph_{prop_key}.jpg") 
     logging.info("Visualization done!") 
     return
 

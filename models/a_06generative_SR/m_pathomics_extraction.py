@@ -35,7 +35,7 @@ if __name__ == "__main__":
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
     parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch"], type=str)
-    parser.add_argument('--node_features', default=1024, choices=[2048, 384, 1024, 35], type=int)
+    parser.add_argument('--node_features', default=384, choices=[2048, 384, 1024, 35], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
@@ -159,26 +159,26 @@ if __name__ == "__main__":
     # )
 
     # measure graph properties
-    wsi_graph_paths = [save_feature_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    wsi_label_paths = [save_feature_dir / f"{p.stem}.label.npy" for p in wsi_paths]
-    subgraph_dict = {
-        "ADI": [0, 4],
-        "BACK": [5, 8],
-        "DEB": [9, 11],
-        "LYM": [12, 16],
-        "MUC": [17, 20],
-        "MUS": [21, 25],
-        "NORM": [26, 26],
-        "STR": [27, 31],
-        "TUM": [32, 34]
-    }
-    measure_graph_properties(
-        graph_paths=wsi_graph_paths,
-        label_paths=wsi_label_paths,
-        save_dir=save_feature_dir,
-        subgraph_dict=None,
-        n_jobs=8
-    )
+    # wsi_graph_paths = [save_feature_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    # wsi_label_paths = [save_feature_dir / f"{p.stem}.label.npy" for p in wsi_paths]
+    # subgraph_dict = {
+    #     "ADI": [0, 4],
+    #     "BACK": [5, 8],
+    #     "DEB": [9, 11],
+    #     "LYM": [12, 16],
+    #     "MUC": [17, 20],
+    #     "MUS": [21, 25],
+    #     "NORM": [26, 26],
+    #     "STR": [27, 31],
+    #     "TUM": [32, 34]
+    # }
+    # measure_graph_properties(
+    #     graph_paths=wsi_graph_paths,
+    #     label_paths=wsi_label_paths,
+    #     save_dir=save_feature_dir,
+    #     subgraph_dict=None,
+    #     n_jobs=8
+    # )
 
     # visualize feature
     # feature_visualization(
@@ -191,35 +191,40 @@ if __name__ == "__main__":
     # )
 
     # visualize graph properties
-    # graph_prop_paths = [save_feature_dir / f"{p.stem}.graph.properties.json" for p in wsi_paths]
-    # subgraph_dict = {
-    #     "ADI": [0, 4],
-    #     "BACK": [5, 8],
-    #     "DEB": [9, 11],
-    #     "LYM": [12, 16],
-    #     "MUC": [17, 20],
-    #     "MUS": [21, 25],
-    #     "NORM": [26, 26],
-    #     "STR": [27, 31],
-    #     "TUM": [32, 34]
-    # }
-    # graph_properties = [
-    #     "num_nodes", 
-    #     "num_edges", 
-    #     "num_components", 
-    #     "degree", 
-    #     "closeness", 
-    #     "graph_diameter",
-    #     "graph_assortativity",
-    #     "mean_neighbor_degree"
-    # ]
-    # plot_types = ["bar", "stem", "hist", "box", "voilin", "plot"]
-    # plot_graph_properties(
-    #     prop_paths=graph_prop_paths,
-    #     subgraph_dict=None,
-    #     prop_key=graph_properties[0],
-    #     plotted=plot_types[2]
-    # )
+    graph_prop_paths = [save_feature_dir / f"{p.stem}.MST.graph.properties.json" for p in wsi_paths]
+    # graph_prop_paths = [save_feature_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
+    subgraph_dict = {
+        "ADI": [0, 4],
+        "BACK": [5, 8],
+        "DEB": [9, 11],
+        "LYM": [12, 16],
+        "MUC": [17, 20],
+        "MUS": [21, 25],
+        "NORM": [26, 26],
+        "STR": [27, 31],
+        "TUM": [32, 34]
+    }
+    graph_properties = [
+        "num_nodes", 
+        "num_edges", 
+        "num_components", 
+        "degree", 
+        "closeness", 
+        "graph_diameter",
+        "graph_assortativity",
+        "mean_neighbor_degree"
+    ]
+    plot_types = ["bar", "stem", "hist", "box", "voilin", "plot"]
+    percentile = [90, 90, 90, 100, 90, 90, 100, 100]
+    for i in range(len(graph_properties)):
+        plot_graph_properties(
+            prop_paths=graph_prop_paths,
+            subgraph_dict=None,
+            prop_key=graph_properties[i],
+            plotted=plot_types[2],
+            min_percentile=0,
+            max_percentile=percentile[i]
+        )
 
 
     ## visualize graph on wsi
