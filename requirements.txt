@@ -12,6 +12,7 @@ glymur>=0.12.1, ~=0.12.6 # 0.12.6 is incompatible due to a private attribute
 imagecodecs>=2022.9.26
 joblib>=1.1.1
 jupyterlab>=3.5.2
+lifelines>=0.29.0
 matplotlib>=3.6.2
 numba>=0.57.0
 numpy>=1.23.5
@@ -29,6 +30,7 @@ seaborn>=0.13.2
 shapely>=2.0.0
 SimpleITK>=2.2.1
 sphinx>=5.3.0
+tcga>=0.0.22
 transformers>=4.43.3
 tifffile>=2022.10.10
 timm>=1.0.8
