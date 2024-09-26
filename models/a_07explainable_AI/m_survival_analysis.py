@@ -8,9 +8,10 @@ import logging
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
 
-from common.m_utils import mkdir, select_wsi
-from lifelines import KaplanMeierFitter 
+from common.m_utils import mkdir, select_wsi, load_json
+from lifelines import KaplanMeierFitter, CoxPHFitter 
 
 def request_survival_data(project_ids, save_dir):
     fields = [
@@ -110,6 +111,52 @@ def plot_survival_curve(save_dir):
     plt.savefig("a_07explainable_AI/survival_curve.jpg")
     return
 
+def prepare_graph_properties(data_dict, prop_keys):
+    properties = {}
+    for subgraph, prop_dict in data_dict.items():
+        for k in prop_keys:
+            key = f"{subgraph}.{k}"
+            if prop_dict is None:
+                properties[key] = 1 if k == "graph_assortativity" else 0
+            else:
+                if len(prop_dict[k]) == 1:
+                    properties[key] = prop_dict[k][0]
+                else:
+                    properties[key] = np.array(prop_dict[k]).mean()
+    return properties
+
+def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths, prop_keys):
+    df = pd.read_csv(f"{save_clinical_dir}/TCGA_PanKidney_survival_data.csv")
+    
+    # Prepare the survival data
+    df['event'] = df['vital_status'].apply(lambda x: 1 if x == 'Dead' else 0)
+    df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
+    df = df[df['duration'].notna()]
+    df = df[['duration', 'event']]
+    print("Data strcuture:", df.shape)
+    
+    # Prepare the graph properties
+    prop_list = [load_json(p) for p in save_properties_paths]
+    prop_list = [prepare_graph_properties(p, prop_keys) for p in prop_list]
+
+    # filter graph properties
+    filtered_prop = []
+    for id in df['submitter_id']:
+        for i, path in enumerate(save_properties_paths):
+            if f"{id}" in f"{path}": filtered_prop.append(prop_list[i])
+
+    df_prop = pd.DataFrame(filtered_prop)
+    df_concat = pd.concat([df, df_prop], axis=1)
+    print(df_concat.shape)
+
+    # COX regreession
+    cph = CoxPHFitter()
+    cph.fit(df_concat, duration_col='duration', event_col='event')
+    cph.print_summary()
+    cph.plot_covariate_groups()
+    cph.check_assumptions(df_concat, p_value_threshold=0.05)
+    return
+
 if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
@@ -126,10 +173,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     ## get wsi path
-    # wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
-    # excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1"]
-    # wsi_paths = select_wsi(wsi_dir, excluded_wsi)
-    # logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
+    wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
+    excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1"]
+    wsi_paths = select_wsi(wsi_dir, excluded_wsi)
+    logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
+    
     
     ## set save dir
     save_pathomics_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.feature_mode}")
@@ -141,3 +189,21 @@ if __name__ == "__main__":
 
     # plot survival curve
     plot_survival_curve(save_clinical_dir)
+
+    # survival analysis
+    graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
+    graph_properties = [
+        "num_nodes", 
+        "num_edges", 
+        "num_components", 
+        "degree", 
+        "closeness", 
+        "graph_diameter",
+        "graph_assortativity",
+        "mean_neighbor_degree"
+    ]
+    cox_proportional_hazard_regression(
+        save_clinical_dir=save_clinical_dir,
+        save_properties_paths=graph_prop_paths,
+        prop_keys=graph_properties
+    )
