@@ -116,12 +116,10 @@ def prepare_graph_properties(data_dict, prop_keys):
     for subgraph, prop_dict in data_dict.items():
         for k in prop_keys:
             key = f"{subgraph}.{k}"
-            if prop_dict is None:
+            if prop_dict is None or len(prop_dict[k]) == 0:
                 properties[key] = 1 if k == "graph_assortativity" else 0
             else:
-                if len(prop_dict[k]) == 0:
-                    properties[key] = 1 if k == "graph_assortativity" else 0
-                elif len(prop_dict[k]) == 1:
+                if len(prop_dict[k]) == 1:
                     properties[key] = prop_dict[k][0]
                 else:
                     properties[key] = np.array(prop_dict[k]).mean()
@@ -134,8 +132,6 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
     df['event'] = df['vital_status'].apply(lambda x: 1 if x == 'Dead' else 0)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
-    ids = df['submitter_id']
-    df = df[['duration', 'event']]
     print("Data strcuture:", df.shape)
     
     # Prepare the graph properties
@@ -144,13 +140,13 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
 
     # filter graph properties
     filtered_prop = []
-    for k, id in enumerate(ids):
+    for k, id in enumerate(df['submitter_id']):
         for i, path in enumerate(save_properties_paths):
             if f"{id}" in f"{path}": 
                 filtered_prop.append(prop_list[i])
             else:
-                ids.loc[k, 'submitter_id'] = None
-    df = df[ids.notna()]
+                df.drop(k)
+    df = df[['duration', 'event']]
     df_prop = pd.DataFrame(filtered_prop)
     print(df.shape, df_prop.shape)
     df_concat = pd.concat([df, df_prop], axis=1)
