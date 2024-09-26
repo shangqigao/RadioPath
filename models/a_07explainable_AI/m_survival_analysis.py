@@ -153,8 +153,10 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
     cph = CoxPHFitter()
     cph.fit(df_concat, duration_col='duration', event_col='event')
     cph.print_summary()
-    cph.plot_covariate_groups()
     cph.check_assumptions(df_concat, p_value_threshold=0.05)
+    plt.figure(figsize=(10, 10))
+    cph.plot_covariate_groups()
+    plt.savefig("a_07explainable_AI/cox_regression.jpg")
     return
 
 if __name__ == "__main__":
