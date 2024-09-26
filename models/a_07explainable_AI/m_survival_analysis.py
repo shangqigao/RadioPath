@@ -149,7 +149,7 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
     df = df[['duration', 'event']]
     df_prop = pd.DataFrame(filtered_prop)
     print(df.shape, df_prop.shape)
-    df_concat = pd.concat([df, df_prop], axis=1)
+    df_concat = pd.concat([df, df_prop], axis=1, ignore_index=True)
     print("Data strcuture:", df_concat.shape)
 
     # COX regreession
