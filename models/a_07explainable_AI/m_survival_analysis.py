@@ -140,12 +140,12 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
 
     # filter graph properties
     filtered_prop = []
-    for k, id in enumerate(df['submitter_id']):
+    for k, id in df['submitter_id'].items():
         for i, path in enumerate(save_properties_paths):
             if f"{id}" in f"{path}": 
                 filtered_prop.append(prop_list[i])
             else:
-                df.drop(k)
+                df.drop(k, inplace=True)
     df = df[['duration', 'event']]
     df_prop = pd.DataFrame(filtered_prop)
     print(df.shape, df_prop.shape)
