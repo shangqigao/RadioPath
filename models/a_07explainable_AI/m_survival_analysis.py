@@ -93,7 +93,7 @@ def plot_survival_curve(save_dir):
     df['event'] = df['vital_status'].apply(lambda x: 1 if x == 'Dead' else 0)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
-    print(df.shape)
+    print("Data strcuture:", df.shape)
 
     # Fit the Kaplan-Meier estimator
     kmf = KaplanMeierFitter()
@@ -136,5 +136,8 @@ if __name__ == "__main__":
     save_clinical_dir = pathlib.Path(f"{args.save_clinical_dir}")
 
     # request survial data by GDC API
-    project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
-    request_survival_data(project_ids, save_clinical_dir)
+    # project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
+    # request_survival_data(project_ids, save_clinical_dir)
+
+    # plot survival curve
+    plot_survival_curve(save_clinical_dir)
