@@ -119,7 +119,9 @@ def prepare_graph_properties(data_dict, prop_keys):
             if prop_dict is None:
                 properties[key] = 1 if k == "graph_assortativity" else 0
             else:
-                if len(prop_dict[k]) == 1:
+                if len(prop_dict[k]) == 0:
+                    properties[key] = 1 if k == "graph_assortativity" else 0
+                elif len(prop_dict[k]) == 1:
                     properties[key] = prop_dict[k][0]
                 else:
                     properties[key] = np.array(prop_dict[k]).mean()
@@ -132,6 +134,7 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
     df['event'] = df['vital_status'].apply(lambda x: 1 if x == 'Dead' else 0)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
+    ids = df['submitter_id']
     df = df[['duration', 'event']]
     print("Data strcuture:", df.shape)
     
@@ -141,13 +144,14 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
 
     # filter graph properties
     filtered_prop = []
-    for id in df['submitter_id']:
+    for id in ids:
         for i, path in enumerate(save_properties_paths):
             if f"{id}" in f"{path}": filtered_prop.append(prop_list[i])
 
     df_prop = pd.DataFrame(filtered_prop)
+    print(df.shape, df_prop.shape)
     df_concat = pd.concat([df, df_prop], axis=1)
-    print(df_concat.shape)
+    print("Data strcuture:", df_concat.shape)
 
     # COX regreession
     cph = CoxPHFitter()
@@ -176,8 +180,12 @@ if __name__ == "__main__":
 
     ## get wsi path
     wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
-    excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1"]
-    wsi_paths = select_wsi(wsi_dir, excluded_wsi)
+    all_paths = sorted(pathlib.Path(wsi_dir).rglob("*.svs"))
+    excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1", "TCGA-UZ-A9PQ-01Z-00-DX1"]
+    wsi_paths = []
+    for path in all_paths:
+        wsi_name = f"{path}".split("/")[-1].split(".")[0]
+        if wsi_name not in excluded_wsi: wsi_paths.append(path)
     logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
     
     
@@ -190,7 +198,7 @@ if __name__ == "__main__":
     # request_survival_data(project_ids, save_clinical_dir)
 
     # plot survival curve
-    plot_survival_curve(save_clinical_dir)
+    # plot_survival_curve(save_clinical_dir)
 
     # survival analysis
     graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
@@ -198,11 +206,11 @@ if __name__ == "__main__":
         "num_nodes", 
         "num_edges", 
         "num_components", 
-        "degree", 
+        # "degree", 
         "closeness", 
-        "graph_diameter",
+        # "graph_diameter",
         "graph_assortativity",
-        "mean_neighbor_degree"
+        # "mean_neighbor_degree"
     ]
     cox_proportional_hazard_regression(
         save_clinical_dir=save_clinical_dir,
