@@ -144,10 +144,13 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
 
     # filter graph properties
     filtered_prop = []
-    for id in ids:
+    for k, id in enumerate(ids):
         for i, path in enumerate(save_properties_paths):
-            if f"{id}" in f"{path}": filtered_prop.append(prop_list[i])
-
+            if f"{id}" in f"{path}": 
+                filtered_prop.append(prop_list[i])
+            else:
+                ids.loc[k, 'submitter_id'] = None
+    df = df[ids.notna()]
     df_prop = pd.DataFrame(filtered_prop)
     print(df.shape, df_prop.shape)
     df_concat = pd.concat([df, df_prop], axis=1)
