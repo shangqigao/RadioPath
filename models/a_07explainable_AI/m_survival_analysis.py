@@ -114,13 +114,17 @@ def plot_survival_curve(save_dir):
 def prepare_graph_properties(data_dict, prop_keys):
     properties = {}
     for subgraph, prop_dict in data_dict.items():
+        if subgraph == "MUC": continue
         for k in prop_keys:
             key = f"{subgraph}.{k}"
             if prop_dict is None or len(prop_dict[k]) == 0:
-                properties[key] = 1 if k == "graph_assortativity" else 0
+                properties[key] = -1 if k == "graph_assortativity" else 0
             else:
                 if len(prop_dict[k]) == 1:
-                    properties[key] = prop_dict[k][0]
+                    if np.isnan(prop_dict[k][0]):
+                        properties[key] = -1 if k == "graph_assortativity" else 0
+                    else:
+                        properties[key] = prop_dict[k][0]
                 else:
                     properties[key] = np.array(prop_dict[k]).mean()
     return properties
@@ -149,7 +153,7 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
                 matched_i.append(i)
     df = df.loc[matched_index]
     df = df[['duration', 'event']]
-    df = df.reset_index()
+    df = df.reset_index(drop=True)
 
     filtered_prop = [prop_list[i] for i in matched_i]
     df_prop = pd.DataFrame(filtered_prop)
@@ -159,12 +163,20 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
     print(list(df_concat))
 
     # COX regreession
-    cph = CoxPHFitter()
+    cph = CoxPHFitter(penalizer=0.1)
     cph.fit(df_concat, duration_col='duration', event_col='event')
     cph.print_summary()
     cph.check_assumptions(df_concat, p_value_threshold=0.05)
     plt.figure(figsize=(10, 10))
-    cph.plot_covariate_groups()
+    covariates = ["ADI.graph_assortativity", 
+                  "BACK.graph_assortativity", 
+                  "DEB.graph_assortativity",
+                  "LYM.graph_assortativity",
+                  "MUS.graph_assortativity",
+                  "NORM.graph_assortativity",
+                  "STR.graph_assortativity",
+                  "TUM.graph_assortativity"]
+    cph.plot_partial_effects_on_outcome("TUM.graph_assortativity", values=np.arange(-1, 1, 0.1))
     plt.savefig("a_07explainable_AI/cox_regression.jpg")
     return
 
