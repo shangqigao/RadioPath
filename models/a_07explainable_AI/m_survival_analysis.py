@@ -138,20 +138,25 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
     prop_list = [load_json(p) for p in save_properties_paths]
     prop_list = [prepare_graph_properties(p, prop_keys) for p in prop_list]
 
-    # filter graph properties
-    filtered_prop = []
+    # filter graph properties 
     ids = df['submitter_id']
-    for k, id in ids.items():
-        for i, path in enumerate(save_properties_paths):
-            if f"{id}" in f"{path}": 
-                filtered_prop.append(prop_list[i])
-            else:
-                df.drop(index=k, inplace=True)
+    names = [p.stem for p in save_properties_paths]
+    matched_index, matched_i = [], []
+    for index, id in ids.items():
+        for i, name in enumerate(names):
+            if id in name:
+                matched_index.append(index)
+                matched_i.append(i)
+    df = df.loc[matched_index]
     df = df[['duration', 'event']]
+    df = df.reset_index()
+
+    filtered_prop = [prop_list[i] for i in matched_i]
     df_prop = pd.DataFrame(filtered_prop)
     print(df.shape, df_prop.shape)
-    df_concat = pd.concat([df, df_prop], axis=1, ignore_index=True)
+    df_concat = pd.concat([df, df_prop], axis=1)
     print("Data strcuture:", df_concat.shape)
+    print(list(df_concat))
 
     # COX regreession
     cph = CoxPHFitter()
