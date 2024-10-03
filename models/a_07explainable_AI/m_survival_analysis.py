@@ -102,7 +102,7 @@ def plot_survival_curve(save_dir):
     df = pd.read_csv(f"{save_dir}/TCGA_PanKidney_survival_data.csv")
 
     # Prepare the survival data
-    df['event'] = df['vital_status'].apply(lambda x: 1 if x == 'Dead' else 0)
+    df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
     print("Data strcuture:", df.shape)
@@ -155,13 +155,14 @@ def plot_coefficients(coefs, n_highlight):
     ax.grid(True)
     ax.set_xlabel("alpha")
     ax.set_ylabel("coefficient")
-    plt.savefig("a_07explainable_AI/cox_regression.jpg")
+    plt.subplots_adjust(left=0.2)
+    plt.savefig("a_07explainable_AI/coefficients.jpg")
 
-def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths, prop_keys, mode="ridge"):
+def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths, prop_keys, l1_ratio=1.0):
     df = pd.read_csv(f"{save_clinical_dir}/TCGA_PanKidney_survival_data.csv")
     
     # Prepare the survival data
-    df['event'] = df['vital_status'].apply(lambda x: 1 if x == 'Dead' else 0)
+    df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
     print("Data strcuture:", df.shape)
@@ -179,61 +180,32 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
             if id in name:
                 matched_index.append(index)
                 matched_i.append(i)
+                
     df = df.loc[matched_index]
-    df = df[['event', 'duration']]
-    df = df.reset_index(drop=True)
+    df = df[['event', 'duration']].to_records(index=False)
 
     filtered_prop = [prop_list[i] for i in matched_i]
     df_prop = pd.DataFrame(filtered_prop)
+    df_prop = OneHotEncoder().fit_transform(df_prop)
     print("Data to regression:", df.shape, df_prop.shape)
     print(list(df_prop))
 
     # COX regreession
-    if mode == "ridge":
-        alphas = 10.0 ** np.linspace(-4, 4, 50)
-        coefficients = {}
-        cph = CoxPHSurvivalAnalysis()
-        for alpha in alphas:
-            cph.set_params(alpha=alpha)
-            cph.fit(df_prop, df)
-            key = round(alpha, 5)
-            coefficients[key] = cph.coef_
-        coefficients = pd.DataFrame.from_dict(coefficients).rename_axis(index="feature", columns="alpha").set_index(df_prop.columns)
-    elif mode == "lasso":
-        cox_lasso = CoxnetSurvivalAnalysis(l1_ratio=1.0, alpha_min_ratio=0.01)
-        cox_lasso.fit(df_prop, df) 
-        coefficients = pd.DataFrame(cox_lasso.coef_, index=df_prop.columns, columns=np.round(cox_lasso.alphas_, 5))
-    elif mode == "elasticnet":
-        cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=0.9, alpha_min_ratio=0.01)
-        cox_elastic_net.fit(df_prop, df)
-        coefficients = pd.DataFrame(cox_elastic_net.coef_, index=df_prop.columns, columns=np.round(cox_elastic_net.alphas_, 5))
-    else:
-        raise NotImplementedError
+    cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.01)
+    cox_elastic_net.fit(df_prop, df)
+    coefficients = pd.DataFrame(cox_elastic_net.coef_, index=df_prop.columns, columns=np.round(cox_elastic_net.alphas_, 5))
+    
     plot_coefficients(coefficients, n_highlight=5)
 
     # choosing penalty strength by cross validation
-    if mode == "ridge":
-        cox = CoxnetSurvivalAnalysis(l1_ratio=0.0, alpha_min_ratio=0.01, max_iter=100)
-    elif mode == "lasso":
-        cox = CoxnetSurvivalAnalysis(l1_ratio=1.0, alpha_min_ratio=0.01, max_iter=100)
-    elif mode == "elasticnet":
-        cox = CoxnetSurvivalAnalysis(l1_ratio=0.9, alpha_min_ratio=0.01, max_iter=100)
-    else:
-        raise NotImplementedError
+    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.01, max_iter=100)
     coxnet_pipe = make_pipeline(StandardScaler(), cox)
     warnings.simplefilter("ignore", UserWarning)
     warnings.simplefilter("ignore", FitFailedWarning)
     coxnet_pipe.fit(df_prop, df)
     estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
     cv = KFold(n_splits=5, shuffle=True, random_state=0)
-    if mode == "ridge":
-        cox = CoxnetSurvivalAnalysis(l1_ratio=0.0)
-    elif mode == "lasso":
-        cox = CoxnetSurvivalAnalysis(l1_ratio=1.0)
-    elif mode == "elasticnet":
-        cox = CoxnetSurvivalAnalysis(l1_ratio=0.9)
-    else:
-        raise NotImplementedError
+    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio)
     gcv = GridSearchCV(
         make_pipeline(StandardScaler(), cox),
         param_grid={"coxnetsurvivalanalysis__alphas": [[v] for v in estimated_alphas]},
@@ -269,21 +241,16 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
     non_zero_coefs = best_coefs.query("coefficient != 0")
     coef_order = non_zero_coefs.abs().sort_values("coefficient").index
 
-    _, ax = plt.subplots(figsize=(6, 8))
+    _, ax = plt.subplots(figsize=(8, 6))
     non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
     ax.set_xlabel("coefficient")
     ax.grid(True)
+    plt.subplots_adjust(left=0.3)
     plt.savefig("a_07explainable_AI/best_coefficients.jpg") 
 
     # perform prediction using the best params
-    if mode == "ridge":
-        cox = CoxnetSurvivalAnalysis(l1_ratio=0.0, fit_baseline_model=True)
-    elif mode == "lasso":
-        cox = CoxnetSurvivalAnalysis(l1_ratio=1.0, fit_baseline_model=True)
-    elif mode == "elasticnet":
-        cox = CoxnetSurvivalAnalysis(l1_ratio=0.9, fit_baseline_model=True)
-    else:
-        raise NotImplementedError
+    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True)
+
     coxnet_pred = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=0.9, fit_baseline_model=True))
     coxnet_pred.set_params(**gcv.best_params_)
     coxnet_pred.fit(df_prop, df)
@@ -342,5 +309,6 @@ if __name__ == "__main__":
     cox_proportional_hazard_regression(
         save_clinical_dir=save_clinical_dir,
         save_properties_paths=graph_prop_paths,
-        prop_keys=graph_properties
+        prop_keys=graph_properties,
+        l1_ratio=1.0
     )
