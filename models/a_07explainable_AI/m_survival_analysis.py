@@ -157,13 +157,13 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
 
     filtered_prop = [prop_list[i] for i in matched_i]
     df_prop = pd.DataFrame(filtered_prop)
-    print(df.shape, df_prop.shape)
+    print("Data to concatenate:", df.shape, df_prop.shape)
     df_concat = pd.concat([df, df_prop], axis=1)
-    print("Data strcuture:", df_concat.shape)
+    print("New data strcuture:", df_concat.shape)
     print(list(df_concat))
 
     # COX regreession
-    cph = CoxPHFitter(penalizer=0.1)
+    cph = CoxPHFitter(penalizer=0.01, l1_ratio=0.9)
     cph.fit(df_concat, duration_col='duration', event_col='event')
     cph.print_summary()
     cph.check_assumptions(df_concat, p_value_threshold=0.05)
@@ -176,7 +176,7 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
                   "NORM.graph_assortativity",
                   "STR.graph_assortativity",
                   "TUM.graph_assortativity"]
-    cph.plot_partial_effects_on_outcome("TUM.graph_assortativity", values=np.arange(-1, 1, 0.1))
+    cph.plot_partial_effects_on_outcome("BACK.graph_assortativity", values=[-0.5, 0, 0.5])
     plt.savefig("a_07explainable_AI/cox_regression.jpg")
     return
 
@@ -212,7 +212,7 @@ if __name__ == "__main__":
 
     # request survial data by GDC API
     # project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
-    # request_survival_data(project_ids, save_clinical_dir)
+    # request_survival_data(["TCGA-KIRC"], save_clinical_dir)
 
     # plot survival curve
     # plot_survival_curve(save_clinical_dir)
