@@ -251,7 +251,7 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
     # perform prediction using the best params
     cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True)
 
-    coxnet_pred = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=0.9, fit_baseline_model=True))
+    coxnet_pred = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True))
     coxnet_pred.set_params(**gcv.best_params_)
     coxnet_pred.fit(df_prop, df)
     print("Best performance:", coxnet_pred.score(df_prop, df))
