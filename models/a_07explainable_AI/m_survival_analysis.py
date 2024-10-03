@@ -5,10 +5,21 @@ import requests
 import argparse
 import pathlib
 import logging
+import warnings
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+
+from sksurv.nonparametric import kaplan_meier_estimator
+from sksurv.linear_model import CoxPHSurvivalAnalysis, CoxnetSurvivalAnalysis
+from sksurv.preprocessing import OneHotEncoder
+
+from sklearn import set_config
+from sklearn.exceptions import FitFailedWarning
+from sklearn.model_selection import GridSearchCV, KFold
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
 from common.m_utils import mkdir, select_wsi, load_json
 from lifelines import KaplanMeierFitter, CoxPHFitter 
@@ -97,17 +108,14 @@ def plot_survival_curve(save_dir):
     print("Data strcuture:", df.shape)
 
     # Fit the Kaplan-Meier estimator
-    kmf = KaplanMeierFitter()
-    kmf.fit(df['duration'], event_observed=df['event'])
-    print(kmf.survival_function_)
-    print(kmf.median_survival_time_)
-
-    # Plot the survival curve
-    plt.figure(figsize=(10, 6))
-    kmf.plot_survival_function()
-    plt.title("Kaplan-Meier Survival Curve for Pan-Kidney")
-    plt.xlabel("Days")
-    plt.ylabel("Survival Probability")
+    time, survival_prob, conf_int = kaplan_meier_estimator(
+        df["event"], df["duration"], conf_type="log-log"
+        )
+    plt.step(time, survival_prob, where="post")
+    plt.fill_between(time, conf_int[0], conf_int[1], alpha=0.25, step="post")
+    plt.ylim(0, 1)
+    plt.ylabel(r"est. probability of survival $\hat{S}(t)$")
+    plt.xlabel("time $t$")
     plt.savefig("a_07explainable_AI/survival_curve.jpg")
     return
 
@@ -129,7 +137,27 @@ def prepare_graph_properties(data_dict, prop_keys):
                     properties[key] = np.array(prop_dict[k]).mean()
     return properties
 
-def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths, prop_keys):
+def plot_coefficients(coefs, n_highlight):
+    _, ax = plt.subplots(figsize=(9, 6))
+    n_features = coefs.shape[0]
+    alphas = coefs.columns
+    for row in coefs.itertuples():
+        ax.semilogx(alphas, row[1:], ".-", label=row.Index)
+
+    alpha_min = alphas.min()
+    top_coefs = coefs.loc[:, alpha_min].map(abs).sort_values().tail(n_highlight)
+    for name in top_coefs.index:
+        coef = coefs.loc[name, alpha_min]
+        plt.text(alpha_min, coef, name + "   ", horizontalalignment="right", verticalalignment="center")
+
+    ax.yaxis.set_label_position("right")
+    ax.yaxis.tick_right()
+    ax.grid(True)
+    ax.set_xlabel("alpha")
+    ax.set_ylabel("coefficient")
+    plt.savefig("a_07explainable_AI/cox_regression.jpg")
+
+def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths, prop_keys, mode="ridge"):
     df = pd.read_csv(f"{save_clinical_dir}/TCGA_PanKidney_survival_data.csv")
     
     # Prepare the survival data
@@ -152,32 +180,114 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
                 matched_index.append(index)
                 matched_i.append(i)
     df = df.loc[matched_index]
-    df = df[['duration', 'event']]
+    df = df[['event', 'duration']]
     df = df.reset_index(drop=True)
 
     filtered_prop = [prop_list[i] for i in matched_i]
     df_prop = pd.DataFrame(filtered_prop)
-    print("Data to concatenate:", df.shape, df_prop.shape)
-    df_concat = pd.concat([df, df_prop], axis=1)
-    print("New data strcuture:", df_concat.shape)
-    print(list(df_concat))
+    print("Data to regression:", df.shape, df_prop.shape)
+    print(list(df_prop))
 
     # COX regreession
-    cph = CoxPHFitter(penalizer=0.01, l1_ratio=0.9)
-    cph.fit(df_concat, duration_col='duration', event_col='event')
-    cph.print_summary()
-    cph.check_assumptions(df_concat, p_value_threshold=0.05)
-    plt.figure(figsize=(10, 10))
-    covariates = ["ADI.graph_assortativity", 
-                  "BACK.graph_assortativity", 
-                  "DEB.graph_assortativity",
-                  "LYM.graph_assortativity",
-                  "MUS.graph_assortativity",
-                  "NORM.graph_assortativity",
-                  "STR.graph_assortativity",
-                  "TUM.graph_assortativity"]
-    cph.plot_partial_effects_on_outcome("BACK.graph_assortativity", values=[-0.5, 0, 0.5])
-    plt.savefig("a_07explainable_AI/cox_regression.jpg")
+    if mode == "ridge":
+        alphas = 10.0 ** np.linspace(-4, 4, 50)
+        coefficients = {}
+        cph = CoxPHSurvivalAnalysis()
+        for alpha in alphas:
+            cph.set_params(alpha=alpha)
+            cph.fit(df_prop, df)
+            key = round(alpha, 5)
+            coefficients[key] = cph.coef_
+        coefficients = pd.DataFrame.from_dict(coefficients).rename_axis(index="feature", columns="alpha").set_index(df_prop.columns)
+    elif mode == "lasso":
+        cox_lasso = CoxnetSurvivalAnalysis(l1_ratio=1.0, alpha_min_ratio=0.01)
+        cox_lasso.fit(df_prop, df) 
+        coefficients = pd.DataFrame(cox_lasso.coef_, index=df_prop.columns, columns=np.round(cox_lasso.alphas_, 5))
+    elif mode == "elasticnet":
+        cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=0.9, alpha_min_ratio=0.01)
+        cox_elastic_net.fit(df_prop, df)
+        coefficients = pd.DataFrame(cox_elastic_net.coef_, index=df_prop.columns, columns=np.round(cox_elastic_net.alphas_, 5))
+    else:
+        raise NotImplementedError
+    plot_coefficients(coefficients, n_highlight=5)
+
+    # choosing penalty strength by cross validation
+    if mode == "ridge":
+        cox = CoxnetSurvivalAnalysis(l1_ratio=0.0, alpha_min_ratio=0.01, max_iter=100)
+    elif mode == "lasso":
+        cox = CoxnetSurvivalAnalysis(l1_ratio=1.0, alpha_min_ratio=0.01, max_iter=100)
+    elif mode == "elasticnet":
+        cox = CoxnetSurvivalAnalysis(l1_ratio=0.9, alpha_min_ratio=0.01, max_iter=100)
+    else:
+        raise NotImplementedError
+    coxnet_pipe = make_pipeline(StandardScaler(), cox)
+    warnings.simplefilter("ignore", UserWarning)
+    warnings.simplefilter("ignore", FitFailedWarning)
+    coxnet_pipe.fit(df_prop, df)
+    estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
+    cv = KFold(n_splits=5, shuffle=True, random_state=0)
+    if mode == "ridge":
+        cox = CoxnetSurvivalAnalysis(l1_ratio=0.0)
+    elif mode == "lasso":
+        cox = CoxnetSurvivalAnalysis(l1_ratio=1.0)
+    elif mode == "elasticnet":
+        cox = CoxnetSurvivalAnalysis(l1_ratio=0.9)
+    else:
+        raise NotImplementedError
+    gcv = GridSearchCV(
+        make_pipeline(StandardScaler(), cox),
+        param_grid={"coxnetsurvivalanalysis__alphas": [[v] for v in estimated_alphas]},
+        cv=cv,
+        error_score=0.5,
+        n_jobs=1,
+    ).fit(df_prop, df)
+
+    # plot cross validation results
+    cv_results = pd.DataFrame(gcv.cv_results_)
+    alphas = cv_results.param_coxnetsurvivalanalysis__alphas.map(lambda x: x[0])
+    mean = cv_results.mean_test_score
+    std = cv_results.std_test_score
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(alphas, mean)
+    ax.fill_between(alphas, mean - std, mean + std, alpha=0.15)
+    ax.set_xscale("log")
+    ax.set_ylabel("concordance index")
+    ax.set_xlabel("alpha")
+    ax.axvline(gcv.best_params_["coxnetsurvivalanalysis__alphas"][0], c="C1")
+    ax.axhline(0.5, color="grey", linestyle="--")
+    ax.grid(True)
+    plt.savefig("a_07explainable_AI/cross_validation.jpg")
+
+    # Visualize coefficients of the best estimator
+    best_model = gcv.best_estimator_.named_steps["coxnetsurvivalanalysis"]
+    best_coefs = pd.DataFrame(best_model.coef_, index=df_prop.columns, columns=["coefficient"])
+
+    non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
+    print(f"Number of non-zero coefficients: {non_zero}")
+
+    non_zero_coefs = best_coefs.query("coefficient != 0")
+    coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+
+    _, ax = plt.subplots(figsize=(6, 8))
+    non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
+    ax.set_xlabel("coefficient")
+    ax.grid(True)
+    plt.savefig("a_07explainable_AI/best_coefficients.jpg") 
+
+    # perform prediction using the best params
+    if mode == "ridge":
+        cox = CoxnetSurvivalAnalysis(l1_ratio=0.0, fit_baseline_model=True)
+    elif mode == "lasso":
+        cox = CoxnetSurvivalAnalysis(l1_ratio=1.0, fit_baseline_model=True)
+    elif mode == "elasticnet":
+        cox = CoxnetSurvivalAnalysis(l1_ratio=0.9, fit_baseline_model=True)
+    else:
+        raise NotImplementedError
+    coxnet_pred = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=0.9, fit_baseline_model=True))
+    coxnet_pred.set_params(**gcv.best_params_)
+    coxnet_pred.fit(df_prop, df)
+    print("Best performance:", coxnet_pred.score(df_prop, df))
     return
 
 if __name__ == "__main__":
