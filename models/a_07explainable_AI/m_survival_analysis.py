@@ -300,15 +300,15 @@ if __name__ == "__main__":
         "num_nodes", 
         "num_edges", 
         "num_components", 
-        # "degree", 
+        "degree", 
         "closeness", 
-        # "graph_diameter",
+        "graph_diameter",
         "graph_assortativity",
-        # "mean_neighbor_degree"
+        "mean_neighbor_degree"
     ]
     cox_proportional_hazard_regression(
         save_clinical_dir=save_clinical_dir,
         save_properties_paths=graph_prop_paths,
         prop_keys=graph_properties,
-        l1_ratio=1.0
+        l1_ratio=0.9
     )
