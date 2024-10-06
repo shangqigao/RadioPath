@@ -33,7 +33,7 @@ def request_survival_data(project_ids, save_dir):
         "demographic.vital_status",
         "demographic.days_to_death",
         "diagnoses.days_to_last_follow_up",
-        "diagnoses.ajcc_clinical_stage"
+        "diagnoses.ajcc_pathologic_stage"
         ]
 
     fields = ",".join(fields)
@@ -87,6 +87,7 @@ def request_survival_data(project_ids, save_dir):
             'submitter_id': case['submitter_id'],
             'project_id': case['project']['project_id'],
             'days_to_last_follow_up': case['diagnoses'][0].get('days_to_last_follow_up', None),
+            'ajcc_pathologic_stage': case['diagnoses'][0].get('ajcc_pathologic_stage', None),
             'days_to_death': case['demographic'].get('days_to_death', None),
             'vital_status': case['demographic'].get('vital_status', None)
         })
@@ -107,7 +108,7 @@ def plot_survival_curve(save_dir):
     df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
-    df = df[df['ajcc_clinical_stage'].isin(["Stage I", "Stage II"])]
+    df = df[df['ajcc_pathologic_stage'].isin(["Stage I", "Stage II"])]
     print("Data strcuture:", df.shape)
 
     # Fit the Kaplan-Meier estimator
@@ -186,7 +187,7 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
     df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
-    df = df[df['ajcc_clinical_stage'].isin(["Stage I", "Stage II"])]
+    df = df[df['ajcc_pathologic_stage'].isin(["Stage I", "Stage II"])]
     print("Survival data strcuture:", df.shape)
     
     # Prepare the graph features
