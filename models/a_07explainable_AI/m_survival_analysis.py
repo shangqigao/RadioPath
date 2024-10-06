@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
+from scipy.stats import zscore
+
 from sksurv.nonparametric import kaplan_meier_estimator
 from sksurv.linear_model import CoxPHSurvivalAnalysis, CoxnetSurvivalAnalysis
 from sksurv.preprocessing import OneHotEncoder
@@ -139,7 +141,7 @@ def prepare_graph_properties(data_dict, prop_keys):
                     else:
                         properties[key] = prop_dict[k][0]
                 else:
-                    properties[key] = np.array(prop_dict[k]).mean()
+                    properties[key] = np.std(prop_dict[k])
     return properties
 
 def prepare_graph_features(idx, graph_path, key='x', mode="mean"):
@@ -159,7 +161,7 @@ def prepare_graph_features(idx, graph_path, key='x', mode="mean"):
     for i, feat in enumerate(feat_list):
         k = f"graph.feature{i}"
         feat_dict[k] = feat
-    return {idx: feat_dict}
+    return {f"{idx}": feat_dict}
 
 def plot_coefficients(coefs, n_highlight):
     _, ax = plt.subplots(figsize=(9, 6))
@@ -205,15 +207,15 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
             if id in name:
                 matched_index.append(index)
                 matched_i.append(i)
-                
+                break
+       
     df = df.loc[matched_index]
     df = df[['event', 'duration']].to_records(index=False)
     print("Selected survival data:", df.shape)
-    print(df.head())
 
     filtered_prop = [prop_list[i] for i in matched_i]
     df_prop = pd.DataFrame(filtered_prop)
-    df_prop = OneHotEncoder().fit_transform(df_prop)
+    # df_prop = OneHotEncoder().fit_transform(df_prop)
     print("Selected graph properties:", df_prop.shape)
     print(df_prop.head())
 
@@ -223,11 +225,12 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
         joblib.delayed(prepare_graph_features)(idx, graph_path)
         for idx, graph_path in enumerate(selected_graph_paths)
     )
-    feat_list = [dict_list[i] for i in range(len(selected_graph_paths))]
+    feat_dict = {}
+    for d in dict_list: feat_dict.update(d)
+    feat_list = [feat_dict[f"{i}"] for i in range(len(selected_graph_paths))]
 
-    filtered_feat = [feat_list[i] for i in matched_i]
-    df_feat = pd.DataFrame(filtered_feat)
-    print("Selected graph features:", df_feat)
+    df_feat = pd.DataFrame(feat_list)
+    print("Selected graph features:", df_feat.shape)
     print(df_feat.head())
 
     # Concatenate graph features and properties
@@ -239,6 +242,7 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
         df_prop = df_feat
     else:
         raise NotImplementedError
+    # df_prop = df_prop.apply(zscore)
     print("Selected graph properties and features:", df_prop.shape)
     print(df_prop.head())
 
@@ -271,6 +275,7 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
     alphas = cv_results.param_coxnetsurvivalanalysis__alphas.map(lambda x: x[0])
     mean = cv_results.mean_test_score
     std = cv_results.std_test_score
+    print("Best CV performance:", np.max(mean))
 
     fig, ax = plt.subplots(figsize=(9, 6))
     ax.plot(alphas, mean)
@@ -340,11 +345,11 @@ if __name__ == "__main__":
     save_clinical_dir = pathlib.Path(f"{args.save_clinical_dir}")
 
     # request survial data by GDC API
-    project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
-    request_survival_data(project_ids, save_clinical_dir)
+    # project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
+    # request_survival_data(project_ids, save_clinical_dir)
 
     # plot survival curve
-    plot_survival_curve(save_clinical_dir)
+    # plot_survival_curve(save_clinical_dir)
 
     # survival analysis
     graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
@@ -352,12 +357,12 @@ if __name__ == "__main__":
     graph_properties = [
         "num_nodes", 
         "num_edges", 
-        "num_components", 
+        # "num_components", 
         "degree", 
         "closeness", 
         "graph_diameter",
         "graph_assortativity",
-        "mean_neighbor_degree"
+        # "mean_neighbor_degree"
     ]
     cox_proportional_hazard_regression(
         save_clinical_dir=save_clinical_dir,
@@ -365,6 +370,6 @@ if __name__ == "__main__":
         save_properties_paths=graph_prop_paths,
         prop_keys=graph_properties,
         l1_ratio=0.9,
-        used="graph_properties",
+        used="all",
         n_jobs=32
     )

@@ -162,6 +162,7 @@ def select_wsi(wsi_dir: str, excluded_wsi: list):
     def _filter_wsi(wsi_path):
         wsi = WSIReader.open(wsi_path)
         if wsi.info.mpp is None and wsi.info.objective_power is None:
+            print("No wsi info:", f"{wsi_path}".split("/")[-1].split(".")[0])
             selected_path = None
         else:
             selected_path = wsi_path
