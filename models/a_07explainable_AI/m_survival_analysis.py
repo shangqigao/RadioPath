@@ -20,6 +20,7 @@ from sklearn.exceptions import FitFailedWarning
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
 
 from common.m_utils import mkdir, select_wsi, load_json
 from lifelines import KaplanMeierFitter, CoxPHFitter 
@@ -31,7 +32,8 @@ def request_survival_data(project_ids, save_dir):
         "project.project_id",
         "demographic.vital_status",
         "demographic.days_to_death",
-        "diagnoses.days_to_last_follow_up"
+        "diagnoses.days_to_last_follow_up",
+        "diagnoses.ajcc_clinical_stage"
         ]
 
     fields = ",".join(fields)
@@ -105,6 +107,7 @@ def plot_survival_curve(save_dir):
     df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
+    df = df[df['ajcc_clinical_stage'].isin(["Stage I", "Stage II"])]
     print("Data strcuture:", df.shape)
 
     # Fit the Kaplan-Meier estimator
@@ -137,6 +140,24 @@ def prepare_graph_properties(data_dict, prop_keys):
                     properties[key] = np.array(prop_dict[k]).mean()
     return properties
 
+def prepare_graph_features(graph_dict, key='x', mode="mean"):
+    assert np.array(graph_dict[key]).ndim == 2
+    if mode == "mean":
+        feat_list = np.array(graph_dict[key]).mean(axis=0).tolist()
+    elif mode == "max":
+        feat_list = np.array(graph_dict[key]).max(axis=0).tolist()
+    elif mode == "min":
+        feat_list = np.array(graph_dict[key]).min(axis=0).tolist()
+    elif mode == "kmeans":
+        kmeans = KMeans(n_clusters=1)
+        feat_list = kmeans.fit(np.array(graph_dict[key])).cluster_centers_
+        feat_list = feat_list.squeeze().tolist()
+    feat_dict = {}
+    for i, feat in enumerate(feat_list):
+        k = f"graph.feature{i}"
+        feat_dict[k] = feat
+    return feat_dict
+
 def plot_coefficients(coefs, n_highlight):
     _, ax = plt.subplots(figsize=(9, 6))
     n_features = coefs.shape[0]
@@ -158,15 +179,20 @@ def plot_coefficients(coefs, n_highlight):
     plt.subplots_adjust(left=0.2)
     plt.savefig("a_07explainable_AI/coefficients.jpg")
 
-def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths, prop_keys, l1_ratio=1.0):
+def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save_properties_paths, prop_keys, l1_ratio=1.0, aggregation="mean", used="all"):
     df = pd.read_csv(f"{save_clinical_dir}/TCGA_PanKidney_survival_data.csv")
     
     # Prepare the survival data
     df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
-    print("Data strcuture:", df.shape)
+    df = df[df['ajcc_clinical_stage'].isin(["Stage I", "Stage II"])]
+    print("Survival data strcuture:", df.shape)
     
+    # Prepare the graph features
+    feat_list = [load_json(p) for p in save_graph_paths]
+    feat_list = [prepare_graph_features(p, aggregation) for p in feat_list]
+
     # Prepare the graph properties
     prop_list = [load_json(p) for p in save_properties_paths]
     prop_list = [prepare_graph_properties(p, prop_keys) for p in prop_list]
@@ -183,12 +209,31 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_properties_paths,
                 
     df = df.loc[matched_index]
     df = df[['event', 'duration']].to_records(index=False)
+    print("Selected survival data:", df.shape)
+    print(df.head())
 
     filtered_prop = [prop_list[i] for i in matched_i]
     df_prop = pd.DataFrame(filtered_prop)
     df_prop = OneHotEncoder().fit_transform(df_prop)
-    print("Data to regression:", df.shape, df_prop.shape)
-    print(list(df_prop))
+    print("Selected graph properties:", df_prop.shape)
+    print(df_prop.head())
+
+    filtered_feat = [feat_list[i] for i in matched_i]
+    df_feat = pd.DataFrame(filtered_feat)
+    print("Selected graph features:", df_feat)
+    print(df_feat.head())
+
+    # Concatenate graph features and properties
+    if used == "all":
+        df_prop = pd.concat([df_prop, df_feat], axis=1)
+    elif used == "graph_properties":
+        df_prop = df_prop
+    elif used == "graph_features":
+        df_prop = df_feat
+    else:
+        raise NotImplementedError
+    print("Selected graph properties and features:", df_prop.shape)
+    print(df_prop.head())
 
     # COX regreession
     cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.01)
@@ -288,13 +333,14 @@ if __name__ == "__main__":
     save_clinical_dir = pathlib.Path(f"{args.save_clinical_dir}")
 
     # request survial data by GDC API
-    # project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
-    # request_survival_data(["TCGA-KIRC"], save_clinical_dir)
+    project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
+    request_survival_data(project_ids, save_clinical_dir)
 
     # plot survival curve
-    # plot_survival_curve(save_clinical_dir)
+    plot_survival_curve(save_clinical_dir)
 
     # survival analysis
+    graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
     graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
     graph_properties = [
         "num_nodes", 
@@ -308,7 +354,10 @@ if __name__ == "__main__":
     ]
     cox_proportional_hazard_regression(
         save_clinical_dir=save_clinical_dir,
+        save_graph_paths=graph_paths,
         save_properties_paths=graph_prop_paths,
         prop_keys=graph_properties,
-        l1_ratio=0.9
+        l1_ratio=0.9,
+        aggregation="mean",
+        used="graph_properties"
     )
