@@ -6,6 +6,7 @@ import argparse
 import pathlib
 import logging
 import warnings
+import joblib
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -141,7 +142,8 @@ def prepare_graph_properties(data_dict, prop_keys):
                     properties[key] = np.array(prop_dict[k]).mean()
     return properties
 
-def prepare_graph_features(graph_dict, key='x', mode="mean"):
+def prepare_graph_features(idx, graph_path, key='x', mode="mean"):
+    graph_dict = load_json(graph_path)
     assert np.array(graph_dict[key]).ndim == 2
     if mode == "mean":
         feat_list = np.array(graph_dict[key]).mean(axis=0).tolist()
@@ -157,7 +159,7 @@ def prepare_graph_features(graph_dict, key='x', mode="mean"):
     for i, feat in enumerate(feat_list):
         k = f"graph.feature{i}"
         feat_dict[k] = feat
-    return feat_dict
+    return {idx: feat_dict}
 
 def plot_coefficients(coefs, n_highlight):
     _, ax = plt.subplots(figsize=(9, 6))
@@ -180,7 +182,7 @@ def plot_coefficients(coefs, n_highlight):
     plt.subplots_adjust(left=0.2)
     plt.savefig("a_07explainable_AI/coefficients.jpg")
 
-def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save_properties_paths, prop_keys, l1_ratio=1.0, aggregation="mean", used="all"):
+def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save_properties_paths, prop_keys, l1_ratio=1.0, used="all", n_jobs=32):
     df = pd.read_csv(f"{save_clinical_dir}/TCGA_PanKidney_survival_data.csv")
     
     # Prepare the survival data
@@ -189,10 +191,6 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
     df = df[df['duration'].notna()]
     df = df[df['ajcc_pathologic_stage'].isin(["Stage I", "Stage II"])]
     print("Survival data strcuture:", df.shape)
-    
-    # Prepare the graph features
-    feat_list = [load_json(p) for p in save_graph_paths]
-    feat_list = [prepare_graph_features(p, aggregation) for p in feat_list]
 
     # Prepare the graph properties
     prop_list = [load_json(p) for p in save_properties_paths]
@@ -218,6 +216,14 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
     df_prop = OneHotEncoder().fit_transform(df_prop)
     print("Selected graph properties:", df_prop.shape)
     print(df_prop.head())
+
+    # Prepare the graph features in parallel
+    selected_graph_paths = [save_graph_paths[i] for i in matched_i]
+    dict_list = joblib.Parallel(n_jobs=n_jobs)(
+        joblib.delayed(prepare_graph_features)(idx, graph_path)
+        for idx, graph_path in enumerate(selected_graph_paths)
+    )
+    feat_list = [dict_list[i] for i in range(len(selected_graph_paths))]
 
     filtered_feat = [feat_list[i] for i in matched_i]
     df_feat = pd.DataFrame(filtered_feat)
@@ -359,6 +365,6 @@ if __name__ == "__main__":
         save_properties_paths=graph_prop_paths,
         prop_keys=graph_properties,
         l1_ratio=0.9,
-        aggregation="mean",
-        used="graph_properties"
+        used="graph_properties",
+        n_jobs=32
     )
