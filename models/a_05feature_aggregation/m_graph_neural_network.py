@@ -310,7 +310,7 @@ class Attn_Net_Gated(nn.Module):
         b = self.attention_b(x)
         A = a.mul(b)
         A = self.attention_c(A)  # N x n_classes
-        return A, x
+        return A
 
 class SurvivalGraphArch(nn.Module):
     """define Graph architecture for survival analysis
@@ -406,7 +406,7 @@ class SurvivalGraphArch(nn.Module):
                 feature = self.convs[layer - 1](feature, edge_index)
             feature = self.linears[layer - 1](feature)
 
-        feature = self.global_attention(feature)
+        feature = self.global_attention(feature, index=batch)
         output = self.classifier(feature)
         return output
     

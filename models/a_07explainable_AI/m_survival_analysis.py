@@ -420,7 +420,8 @@ def run_once(
     loss = CoxSurvLoss()
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
-    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[30, 40], gamma=0.1)
+    # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-6)
 
     loader_dict = {}
     for subset_name, subset in dataset_dict.items():
@@ -538,8 +539,8 @@ def training(
     }
     model_dir = model_dir / f"Survival_Prediction_{conv}"
     optim_kwargs = {
-        "lr": 1.0e-3,
-        "weight_decay": 1.0e-4,  # 1.0e-4
+        "lr": 3e-4,
+        "weight_decay": 1.0e-5,  # 1.0e-4
     }
     for split_idx, split in enumerate(splits):
         new_split = {
@@ -625,7 +626,7 @@ def inference(
 
         # * Calculate split statistics
         true = np.array([v[1] for v in split["test"]])
-        event_status = true[:, 1] < 1
+        event_status = true[:, 1] > 0
         event_time = true[:, 0]
         cindex = concordance_index_censored(event_status, event_time, prob)[0]
 
@@ -651,7 +652,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_pathomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
-    parser.add_argument('--epochs', default=50, type=int)
+    parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch"], type=str)
     parser.add_argument('--node_features', default=1024, choices=[2048, 384, 1024, 35], type=int)
     parser.add_argument('--resolution', default=20, type=float)
@@ -734,7 +735,7 @@ if __name__ == "__main__":
         scaler_path=scaler_path,
         num_node_features=args.node_features,
         model_dir=save_model_dir,
-        conv="GINConv",
+        conv="MLP",
         n_works=8,
         batch_size=32
     )
