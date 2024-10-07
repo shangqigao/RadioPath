@@ -7,16 +7,22 @@ import pathlib
 import logging
 import warnings
 import joblib
+import copy
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import torch
 
 from scipy.stats import zscore
+from torch_geometric.loader import DataLoader
+from tiatoolbox import logger
+from tiatoolbox.utils.misc import save_as_json
 
 from sksurv.nonparametric import kaplan_meier_estimator
 from sksurv.linear_model import CoxPHSurvivalAnalysis, CoxnetSurvivalAnalysis
 from sksurv.preprocessing import OneHotEncoder
+from sksurv.metrics import concordance_index_censored
 
 from sklearn import set_config
 from sklearn.exceptions import FitFailedWarning
@@ -24,9 +30,15 @@ from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
+from sklearn.model_selection import StratifiedShuffleSplit
+from sklearn.linear_model import LogisticRegression as PlattScaling
 
-from common.m_utils import mkdir, select_wsi, load_json
-from lifelines import KaplanMeierFitter, CoxPHFitter 
+from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
+
+from models.a_05feature_aggregation.m_graph_neural_network import SurvivalGraphDataset, SurvivalGraphArch
+from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage, CoxSurvLoss
+
+
 
 def request_survival_data(project_ids, save_dir):
     fields = [
@@ -184,7 +196,7 @@ def plot_coefficients(coefs, n_highlight):
     plt.subplots_adjust(left=0.2)
     plt.savefig("a_07explainable_AI/coefficients.jpg")
 
-def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save_properties_paths, prop_keys, l1_ratio=1.0, used="all", n_jobs=32):
+def matched_survival_graph(save_clinical_dir, save_graph_paths):
     df = pd.read_csv(f"{save_clinical_dir}/TCGA_PanKidney_survival_data.csv")
     
     # Prepare the survival data
@@ -194,13 +206,9 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
     df = df[df['ajcc_pathologic_stage'].isin(["Stage I", "Stage II"])]
     print("Survival data strcuture:", df.shape)
 
-    # Prepare the graph properties
-    prop_list = [load_json(p) for p in save_properties_paths]
-    prop_list = [prepare_graph_properties(p, prop_keys) for p in prop_list]
-
     # filter graph properties 
     ids = df['submitter_id']
-    names = [p.stem for p in save_properties_paths]
+    names = [p.stem for p in save_graph_paths]
     matched_index, matched_i = [], []
     for index, id in ids.items():
         for i, name in enumerate(names):
@@ -208,13 +216,19 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
                 matched_index.append(index)
                 matched_i.append(i)
                 break
-       
     df = df.loc[matched_index]
+    return df, matched_i
+
+def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save_properties_paths, prop_keys, l1_ratio=1.0, used="all", n_jobs=32):
+    df, matched_i = matched_survival_graph(save_clinical_dir, save_properties_paths)
     df = df[['event', 'duration']].to_records(index=False)
     print("Selected survival data:", df.shape)
 
-    filtered_prop = [prop_list[i] for i in matched_i]
-    df_prop = pd.DataFrame(filtered_prop)
+    # Prepare the graph properties
+    matched_properties_paths = [save_properties_paths[i] for i in matched_i]
+    prop_list = [load_json(p) for p in matched_properties_paths]
+    prop_list = [prepare_graph_properties(p, prop_keys) for p in prop_list]
+    df_prop = pd.DataFrame(prop_list)
     # df_prop = OneHotEncoder().fit_transform(df_prop)
     print("Selected graph properties:", df_prop.shape)
     print(df_prop.head())
@@ -314,6 +328,318 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
     print("Best performance:", coxnet_pred.score(df_prop, df))
     return
 
+def generate_data_split(
+        x: list,
+        y: list,
+        train: float,
+        valid: float,
+        test: float,
+        num_folds: int,
+        seed: int = 5,
+):
+    """Helper to generate splits
+    Args:
+        x (list): a list of image paths
+        y (list): a list of annotation paths
+        train (float): ratio of training samples
+        valid (float): ratio of validating samples
+        test (float): ratio of testing samples
+        num_folds (int): number of folds for cross-validation
+        seed (int): random seed
+    Returns:
+        splits (list): a list of folds, each fold consists of train, valid, and test splits
+    """
+    assert train + valid + test - 1.0 < 1.0e-10, "Ratios must sum to 1.0"
+
+    outer_splitter = StratifiedShuffleSplit(
+        n_splits=num_folds,
+        train_size=train + valid,
+        random_state=seed,
+    )
+    inner_splitter = StratifiedShuffleSplit(
+        n_splits=1,
+        train_size=train / (train + valid),
+        random_state=seed,
+    )
+
+    l = np.array([status for _, status in y])
+
+    splits = []
+    for train_valid_idx, test_idx in outer_splitter.split(x, l):
+        test_x = [x[idx] for idx in test_idx]
+        test_y = [y[idx] for idx in test_idx]
+        x_ = [x[idx] for idx in train_valid_idx]
+        y_ = [y[idx] for idx in train_valid_idx]
+        l_ = [l[idx] for idx in train_valid_idx]
+
+        train_idx, valid_idx = next(iter(inner_splitter.split(x_, l_)))
+        valid_x = [x_[idx] for idx in valid_idx]
+        valid_y = [y_[idx] for idx in valid_idx]
+        train_x = [x_[idx] for idx in train_idx]
+        train_y = [y_[idx] for idx in train_idx]
+
+        assert len(set(train_x).intersection(set(valid_x))) == 0
+        assert len(set(valid_x).intersection(set(test_x))) == 0
+        assert len(set(train_x).intersection(set(test_x))) == 0
+
+        splits.append(
+            {
+                "train": list(zip(train_x, train_y)),
+                "valid": list(zip(valid_x, valid_y)),
+                "test": list(zip(test_x, test_y)),
+            }
+        )
+    return splits
+
+def run_once(
+        dataset_dict,
+        num_epochs,
+        save_dir,
+        on_gpu=True,
+        preproc_func=None,
+        pretrained=None,
+        loader_kwargs=None,
+        arch_kwargs=None,
+        optim_kwargs=None
+):
+    """running the inference or training loop once"""
+    if loader_kwargs is None:
+        loader_kwargs = {}
+
+    if arch_kwargs is None:
+        arch_kwargs = {}
+
+    if optim_kwargs is None:
+        optim_kwargs = {}
+
+    
+    model = SurvivalGraphArch(**arch_kwargs)
+    if pretrained is not None:
+        model.load(*pretrained)
+    model = model.to("cuda")
+    loss = CoxSurvLoss
+    optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
+    # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[30, 40], gamma=0.1)
+
+    loader_dict = {}
+    for subset_name, subset in dataset_dict.items():
+        _loader_kwargs = copy.deepcopy(loader_kwargs)
+        ds = SurvivalGraphDataset(
+            subset, 
+            mode=subset_name, 
+            preproc=preproc_func
+        )
+        loader_dict[subset_name] = DataLoader(
+            ds,
+            drop_last=subset_name == "train",
+            shuffle=subset_name == "train",
+            **_loader_kwargs,
+        )
+
+    for epoch in range(num_epochs):
+        logger.info("EPOCH: %03d", epoch)
+        for loader_name, loader in loader_dict.items():
+            step_output = []
+            ema = ScalarMovingAverage()
+            pbar = create_pbar(loader_name, len(loader))
+            for step, batch_data in enumerate(loader):
+                if loader_name == "train":
+                    output = model.train_batch(model, batch_data, on_gpu, loss, optimizer)
+                    ema({"loss": output[0]})
+                    pbar.postfix[1]["step"] = step
+                    pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
+                else:
+                    output = model.infer_batch(model, batch_data, on_gpu)
+                    batch_size = output[0].shape[0]
+                    output = [np.split(v, batch_size, axis=0) for v in output]
+                    output = list(zip(*output))
+                    step_output += output
+                pbar.update()
+            pbar.close()
+
+            logging_dict = {}
+            if loader_name == "train":
+                for val_name, val in ema.tracking_dict.items():
+                    logging_dict[f"train-EMA-{val_name}"] = val
+            elif "infer" in loader_name and any(v in loader_name for v in ["train", "valid"]):
+                output = list(zip(*step_output))
+                logit, true = output
+                event_status = np.array([y[1] for y in true]) > 0
+                event_time = np.array([y[0] for y in true])
+                cindex = concordance_index_censored(event_status, event_time, logit)
+                logging_dict[f"{loader_name}-Cindex"] = cindex
+
+                logging_dict[f"{loader_name}-raw-logit"] = logit
+                logging_dict[f"{loader_name}-raw-true"] = true
+
+            for val_name, val in logging_dict.items():
+                if "raw" not in val_name:
+                    logging.info("%s: %0.5f\n", val_name, val)
+            
+            if "train" not in loader_dict:
+                continue
+
+            if (epoch + 1) % 10 == 0:
+                new_stats = {}
+                if (save_dir / "stats.json").exists():
+                    old_stats = load_json(f"{save_dir}/stats.json")
+                    save_as_json(old_stats, f"{save_dir}/stats.old.json", exist_ok=True)
+                    new_stats = copy.deepcopy(old_stats)
+                    new_stats = {int(k): v for k, v in new_stats.items()}
+
+                old_epoch_stats = {}
+                if epoch in new_stats:
+                    old_epoch_stats = new_stats[epoch]
+                old_epoch_stats.update(logging_dict)
+                new_stats[epoch] = old_epoch_stats
+                save_as_json(new_stats, f"{save_dir}/stats.json", exist_ok=True)
+                model.save(
+                    f"{save_dir}/epoch={epoch:03d}.weights.pth",
+                )
+        lr_scheduler.step()
+    
+    return step_output
+
+
+def training(
+        num_epochs,
+        split_path,
+        scaler_path,
+        num_node_features,
+        model_dir,
+        n_works=32,
+        batch_size=32
+):
+    """train node classification neural networks
+    Args:
+        num_epochs (int): the number of epochs for training
+        split_path (str): the path of storing data splits
+        scaler_path (str): the path of storing data normalization
+        num_node_features (int): the dimension of node feature
+        model_dir (str): directory of saving models
+    """
+    splits = joblib.load(split_path)
+    node_scaler = joblib.load(scaler_path)
+    
+    loader_kwargs = {
+        "num_workers": n_works, 
+        "batch_size": batch_size,
+    }
+    arch_kwargs = {
+        "dim_features": num_node_features,
+        "dim_target": 1,
+        "layers": [16, 16, 8], # [16, 16, 8]
+        "dropout": 0.5,  #0.5
+        "conv": "GATConv",
+    }
+    model_dir = model_dir / f"Survival_Prediction_{arch_kwargs['conv']}"
+    optim_kwargs = {
+        "lr": 1.0e-3,
+        "weight_decay": 1.0e-4,  # 1.0e-4
+    }
+    for split_idx, split in enumerate(splits):
+        new_split = {
+            "train": split["train"],
+            "infer-train": split["train"],
+            "infer-valid-A": split["valid"],
+            "infer-valid-B": split["test"],
+        }
+        split_save_dir = pathlib.Path(f"{model_dir}/{split_idx:02d}/")
+        rm_n_mkdir(split_save_dir)
+        reset_logging(split_save_dir)
+        run_once(
+            new_split,
+            num_epochs,
+            save_dir=split_save_dir,
+            arch_kwargs=arch_kwargs,
+            loader_kwargs=loader_kwargs,
+            optim_kwargs=optim_kwargs,
+            preproc_func=node_scaler.transform,
+        )
+    return
+
+def inference(
+        split_path,
+        scaler_path,
+        num_node_features,
+        pretrained_dir,
+        n_works=32,
+        batch_size=32
+):
+    """survival prediction
+    """
+    splits = joblib.load(split_path)
+    node_scaler = joblib.load(scaler_path)
+    
+    loader_kwargs = {
+        "num_workers": n_works,
+        "batch_size": batch_size,
+    }
+    arch_kwargs = {
+        "dim_features": num_node_features,
+        "dim_target": 1,
+        "layers": [16, 16, 8],
+        "dropout": 0.5,
+        "conv": "GATConv"
+    }
+    pretrained_dir = pretrained_dir / f"Survival_Prediction_{arch_kwargs['conv']}"
+    cum_stats = []
+    for split_idx, split in enumerate(splits):
+        new_split = {"infer": [v[0] for v in split["test"]]}
+
+        stat_files = recur_find_ext(f"{pretrained_dir}/{split_idx:02d}/", [".json"])
+        stat_files = [v for v in stat_files if ".old.json" not in v]
+        assert len(stat_files) == 1
+        chkpts, _ = select_checkpoints(
+            stat_files[0],
+            top_k=1,
+            metric="infer-valid-A-auroc",
+        )
+        # Perform ensembling by averaging probabilities
+        # across checkpoint predictions
+
+        cum_results = []
+        for i, chkpt_info in enumerate(chkpts):
+            chkpt_results = run_once(
+                new_split,
+                num_epochs=1,
+                save_dir=None,
+                pretrained=chkpt_info,
+                arch_kwargs=arch_kwargs,
+                loader_kwargs=loader_kwargs,
+                preproc_func=node_scaler.transform,
+            )
+            chkpt_results = list(zip(*chkpt_results))
+            chkpt_results = np.array(chkpt_results).squeeze()
+            cum_results.append(chkpt_results)
+        cum_results = np.array(cum_results)
+        cum_results = np.squeeze(cum_results)
+
+        prob = cum_results
+        if len(cum_results.shape) == 2:
+            prob = np.mean(cum_results, axis=0)
+
+        # * Calculate split statistics
+        true = np.array([v[1] for v in split["test"]])
+        event_status = true[:, 1] > 0
+        event_time = true[:, 0]
+        cindex = concordance_index_censored(event_status, event_time, prob)
+
+        cum_stats.append(
+            {
+                "C-Index": np.array(cindex)
+            }
+        )
+        print(f"Fold-{split_idx}:", cum_stats[-1])
+    cindex_list = [stat["C-Index"] for stat in cum_stats]
+    avg_stat = {
+        "C-Index mean": np.stack(cindex_list, axis=0).mean(axis=0),
+        "C-Index std": np.stack(cindex_list, axis=0).std(axis=0),
+    }
+    print(f"Avg:", avg_stat)
+    return cum_stats
+
 if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
@@ -324,7 +650,7 @@ if __name__ == "__main__":
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
     parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch"], type=str)
-    parser.add_argument('--node_features', default=384, choices=[2048, 384, 1024, 35], type=int)
+    parser.add_argument('--node_features', default=1024, choices=[2048, 384, 1024, 35], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
@@ -343,6 +669,7 @@ if __name__ == "__main__":
     ## set save dir
     save_pathomics_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.feature_mode}")
     save_clinical_dir = pathlib.Path(f"{args.save_clinical_dir}")
+    save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models/{args.feature_mode}")
 
     # request survial data by GDC API
     # project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
@@ -351,25 +678,82 @@ if __name__ == "__main__":
     # plot survival curve
     # plot_survival_curve(save_clinical_dir)
 
-    # survival analysis
+    # split data set
+    num_folds = 5
+    test_ratio = 0.2
+    train_ratio = 0.8 * 0.9
+    valid_ratio = 0.8 * 0.1
     graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
-    graph_properties = [
-        "num_nodes", 
-        "num_edges", 
-        # "num_components", 
-        "degree", 
-        "closeness", 
-        "graph_diameter",
-        "graph_assortativity",
-        # "mean_neighbor_degree"
-    ]
-    cox_proportional_hazard_regression(
-        save_clinical_dir=save_clinical_dir,
-        save_graph_paths=graph_paths,
-        save_properties_paths=graph_prop_paths,
-        prop_keys=graph_properties,
-        l1_ratio=0.9,
-        used="all",
-        n_jobs=32
+    df, matched_i = matched_survival_graph(save_clinical_dir, graph_paths)
+    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    matched_graph_paths = [graph_paths[i] for i in matched_i]
+    splits = generate_data_split(
+        x=matched_graph_paths,
+        y=y,
+        train=train_ratio,
+        valid=valid_ratio,
+        test=test_ratio,
+        num_folds=num_folds,
     )
+    mkdir(save_model_dir)
+    split_path = f"{save_model_dir}/survival_splits.dat"
+    joblib.dump(splits, split_path)
+    splits = joblib.load(split_path)
+    num_train = len(splits[0]["train"])
+    logging.info(f"Number of training samples: {num_train}.")
+    num_valid = len(splits[0]["valid"])
+    logging.info(f"Number of validating samples: {num_valid}.")
+    num_test = len(splits[0]["test"])
+    logging.info(f"Number of testing samples: {num_test}.")
+
+    # compute mean and std on training data for normalization 
+    splits = joblib.load(split_path)
+    train_graph_paths = [path for path, _ in splits[0]["train"]]
+    loader = SurvivalGraphDataset(train_graph_paths, mode="infer")
+    loader = DataLoader(
+        loader,
+        num_workers=8,
+        batch_size=1,
+        shuffle=False,
+        drop_last=False,
+    )
+    node_features = [v.x.numpy() for v in loader]
+    node_features = np.concatenate(node_features, axis=0)
+    node_scaler = StandardScaler(copy=False)
+    node_scaler.fit(node_features)
+    scaler_path = f"{save_model_dir}/survival_node_scaler.dat"
+    joblib.dump(node_scaler, scaler_path)
+
+    # training
+    training(
+        num_epochs=args.epochs,
+        split_path=split_path,
+        scaler_path=scaler_path,
+        num_node_features=args.node_features,
+        model_dir=save_model_dir,
+        n_works=32,
+        batch_size=32
+    )
+
+    # survival analysis
+    # graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    # graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
+    # graph_properties = [
+    #     "num_nodes", 
+    #     "num_edges", 
+    #     # "num_components", 
+    #     "degree", 
+    #     "closeness", 
+    #     "graph_diameter",
+    #     "graph_assortativity",
+    #     # "mean_neighbor_degree"
+    # ]
+    # cox_proportional_hazard_regression(
+    #     save_clinical_dir=save_clinical_dir,
+    #     save_graph_paths=graph_paths,
+    #     save_properties_paths=graph_prop_paths,
+    #     prop_keys=graph_properties,
+    #     l1_ratio=0.9,
+    #     used="all",
+    #     n_jobs=32
+    # )

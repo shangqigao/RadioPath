@@ -13,6 +13,8 @@ from torch.nn import BatchNorm1d, Linear, ReLU
 from torch_geometric.data import Data, Dataset
 from torch_geometric.utils import subgraph
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATConv
+from torch_geometric.nn import global_mean_pool
+
 
 
 class SlideGraphDataset(Dataset):
@@ -57,6 +59,40 @@ class SlideGraphDataset(Dataset):
                 # graph_dict["x"] = graph_dict["x"][positive]
                 edge_index, _ = subgraph(positive, graph_dict["edge_index"], relabel_nodes=False)
                 graph_dict["edge_index"] = edge_index
+
+        graph = Data(**graph_dict)
+        return graph
+    
+    def len(self):
+        return len(self.info_list)
+    
+class SurvivalGraphDataset(Dataset):
+    """loading graph data for survival analysis
+    """
+    def __init__(self, info_list, mode="train", preproc=None):
+        super().__init__()
+        self.info_list = info_list
+        self.mode = mode
+        self.preproc = preproc
+    
+    def get(self, idx):
+        info = self.info_list[idx]
+        if any(v in self.mode for v in ["train", "valid"]):
+            wsi_path, label = info
+            label = torch.tensor(label)
+        else:
+            wsi_path = info
+        
+        with pathlib.Path(wsi_path).open() as fptr:
+            graph_dict = json.load(fptr)
+        graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
+
+        if self.preproc is not None:
+            graph_dict["x"] = self.preproc(graph_dict["x"])
+
+        graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items()}
+        if any(v in self.mode for v in ["train", "valid"]):
+            graph_dict.update({"y": label})
 
         graph = Data(**graph_dict)
         return graph
@@ -249,6 +285,130 @@ class SlideGraphArch(nn.Module):
                 wsi_labels = np.concatenate([low_labels, high_labels], axis=0)
             return [wsi_outputs, wsi_labels]
         return [wsi_outputs, feature]
+    
+class SurvivalGraphArch(nn.Module):
+    """define Graph architecture for survival analysis
+    """
+    def __init__(
+            self, 
+            dim_features, 
+            dim_target,
+            layers=None,
+            dropout=0.0,
+            conv="GINConv",
+            **kwargs,
+    ):
+        super().__init__()
+        if layers is None:
+            layers = [6, 6]
+        self.dropout = dropout
+        self.embedding_dims = layers
+        self.num_layers = len(self.embedding_dims)
+        self.convs = nn.ModuleList()
+        self.linears = nn.ModuleList()
+        self.conv_name = conv
+
+        conv_dict = {
+            "MLP": [Linear, 1],
+            "GCNConv": [GCNConv, 1],
+            "GATConv": [GATConv, 1],
+            "GINConv": [GINConv, 1], 
+            "EdgeConv": [EdgeConv, 2]
+        }
+        if self.conv_name not in conv_dict:
+            raise ValueError(f"Not support conv={conv}.")
+        
+        def create_block(in_dims, out_dims):
+            return nn.Sequential(
+                Linear(in_dims, out_dims),
+                BatchNorm1d(out_dims),
+                ReLU(),
+            )
+        
+        input_emb_dim = dim_features
+        out_emb_dim = self.embedding_dims[0]
+        self.head = create_block(input_emb_dim, out_emb_dim)
+        self.classifier = Linear(self.embedding_dims[-1], dim_target)
+
+        input_emb_dim = out_emb_dim
+        for out_emb_dim in self.embedding_dims[1:]:
+            conv_class, alpha = conv_dict[self.conv_name]
+            if self.conv_name in ["GINConv", "EdgeConv"]:
+                block = create_block(alpha * input_emb_dim, out_emb_dim)
+                subnet = conv_class(block, **kwargs)
+                self.convs.append(subnet)
+                self.linears.append(Linear(out_emb_dim, out_emb_dim))
+            elif self.conv_name in ["GCNConv", "GATConv"]:
+                subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
+                self.convs.append(subnet)
+                self.linears.append(create_block(out_emb_dim, out_emb_dim))
+            else:
+                subnet = create_block(alpha * input_emb_dim, out_emb_dim)
+                self.convs.append(subnet)
+                self.linears.append(nn.Sequential())
+                
+            input_emb_dim = out_emb_dim
+
+    def save(self, path):
+        state_dict = self.state_dict()
+        torch.save(state_dict, path)
+
+    def load(self, path):
+        state_dict = torch.load(path)
+        self.load_state_dict(state_dict)
+
+    def forward(self, data):
+        feature, edge_index, batch = data.x, data.edge_index, data.batch
+
+        feature = self.head(feature)
+        for layer in range(1, self.num_layers):
+            feature = F.dropout(feature, p=self.dropout, training=self.training)
+            if self.conv_name in ["MLP"]:
+                feature = self.convs[layer - 1](feature)
+            else:
+                feature = self.convs[layer - 1](feature, edge_index)
+            feature = self.linears[layer - 1](feature)
+
+        feature = global_mean_pool(feature, batch)
+        output = self.classifier(feature)
+        return output
+    
+    @staticmethod
+    def train_batch(model, batch_data, on_gpu, loss, optimizer):
+        device = "cuda" if on_gpu else "cpu"
+        wsi_graphs = batch_data.to(device)
+
+        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
+
+        model.train()
+        optimizer.zero_grad()
+        wsi_outputs = model(wsi_graphs)
+        wsi_outputs = wsi_outputs.squeeze()
+        wsi_labels = wsi_graphs.y.squeeze()
+        loss = loss(wsi_outputs, wsi_labels[0], wsi_labels[1])
+        loss.backward()
+        optimizer.step()
+
+        loss = loss.detach().cpu().numpy()
+        assert not np.isnan(loss)
+        wsi_labels = wsi_labels.cpu().numpy()
+        return [loss, wsi_outputs, wsi_labels]
+    
+    @staticmethod
+    def infer_batch(model, batch_data, on_gpu):
+        device = "cuda" if on_gpu else "cpu"
+        wsi_graphs = batch_data.to(device)
+        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
+
+        model.eval()
+        with torch.inference_mode():
+            wsi_outputs = model(wsi_graphs)
+        wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
+        if wsi_graphs.y is not None:
+            wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
+
+            return [wsi_outputs, wsi_labels]
+        return [wsi_outputs]
 
 class SlideBayesGraphArch(nn.Module):
     """define SlideBayesGraph architecture
@@ -504,6 +664,25 @@ class LHCELoss(nn.Module):
         input = torch.concat([input_lowgrade, input_highgrade])
         target = torch.concat([target_lowgrade, target_highgrade])
         return self.CrossEntropy(input, target)
+    
+class CoxSurvLoss(object):
+    def __call__(self, hazards, time, c, **kwargs):
+        # This calculation credit to Travers Ching https://github.com/traversc/cox-nnet
+        # Cox-nnet: An artificial neural network method for prognosis prediction of high-throughput omics data
+        current_batch_len = len(time)
+        R_mat = np.zeros([current_batch_len, current_batch_len], dtype=int)
+        for i in range(current_batch_len):
+            for j in range(current_batch_len):
+                R_mat[i,j] = time[j] >= time[i]
+
+        c = torch.FloatTensor(c).to(hazards.device)
+        R_mat = torch.FloatTensor(R_mat).to(hazards.device)
+        theta = hazards.reshape(-1)
+        exp_theta = torch.exp(theta)
+        loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * (1-c))
+        # print(loss_cox)
+        # print(R_mat)
+        return loss_cox
     
 def update_loss(mode, prior=0.5):
     loss = {
