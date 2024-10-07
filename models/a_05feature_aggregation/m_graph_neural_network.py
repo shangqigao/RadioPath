@@ -14,6 +14,7 @@ from torch_geometric.data import Data, Dataset
 from torch_geometric.utils import subgraph, softmax
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATConv
 from torch_geometric.nn import global_mean_pool
+from torch_geometric.nn.aggr import AttentionalAggregation
 
 
 
@@ -285,7 +286,32 @@ class SlideGraphArch(nn.Module):
                 wsi_labels = np.concatenate([low_labels, high_labels], axis=0)
             return [wsi_outputs, wsi_labels]
         return [wsi_outputs, feature]
-    
+
+class Attn_Net_Gated(nn.Module):
+    def __init__(self, L=1024, D=256, dropout=False, n_classes=1):
+        super(Attn_Net_Gated, self).__init__()
+        self.attention_a = [
+            nn.Linear(L, D),
+            nn.Tanh()]
+
+        self.attention_b = [nn.Linear(L, D),
+                            nn.Sigmoid()]
+        if dropout:
+            self.attention_a.append(nn.Dropout(0.25))
+            self.attention_b.append(nn.Dropout(0.25))
+
+        self.attention_a = nn.Sequential(*self.attention_a)
+        self.attention_b = nn.Sequential(*self.attention_b)
+
+        self.attention_c = nn.Linear(D, n_classes)
+
+    def forward(self, x):
+        a = self.attention_a(x)
+        b = self.attention_b(x)
+        A = a.mul(b)
+        A = self.attention_c(A)  # N x n_classes
+        return A, x
+
 class SurvivalGraphArch(nn.Module):
     """define Graph architecture for survival analysis
     """
@@ -322,13 +348,12 @@ class SurvivalGraphArch(nn.Module):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
                 # BatchNorm1d(out_dims),
-                # ReLU(),
+                ReLU(),
             )
         
         input_emb_dim = dim_features
         out_emb_dim = self.embedding_dims[0]
         self.head = create_block(input_emb_dim, out_emb_dim)
-        self.classifier = Linear(self.embedding_dims[-1], dim_target)
 
         input_emb_dim = out_emb_dim
         for out_emb_dim in self.embedding_dims[1:]:
@@ -348,6 +373,18 @@ class SurvivalGraphArch(nn.Module):
                 self.linears.append(nn.Sequential())
                 
             input_emb_dim = out_emb_dim
+            
+        self.attention_net = Attn_Net_Gated(
+            L=self.embedding_dims[-1],
+            D=self.embedding_dims[-1],
+            dropout=self.dropout > 0,
+            n_classes=1
+        )
+        self.global_attention = AttentionalAggregation(
+            gate_nn=self.attention_net,
+            nn=None
+        )
+        self.classifier = Linear(self.embedding_dims[-1], dim_target)
 
     def save(self, path):
         state_dict = self.state_dict()
@@ -369,8 +406,7 @@ class SurvivalGraphArch(nn.Module):
                 feature = self.convs[layer - 1](feature, edge_index)
             feature = self.linears[layer - 1](feature)
 
-        att = softmax(feature, index=batch)
-        feature = global_mean_pool(feature * att, batch)
+        feature = self.global_attention(feature)
         output = self.classifier(feature)
         return output
     
@@ -680,7 +716,7 @@ class CoxSurvLoss(object):
         R_mat = torch.tensor(R_mat).to(hazards.device)
         theta = hazards.reshape(-1)
         exp_theta = torch.exp(theta)
-        loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * (1-c))
+        loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * c)
         # print(loss_cox)
         # print(R_mat)
         return loss_cox

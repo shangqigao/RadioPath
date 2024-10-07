@@ -467,7 +467,7 @@ def run_once(
                 logit, true = output
                 logit = np.array(logit).squeeze()
                 true = np.array(true).squeeze()
-                event_status = true[:, 1] < 1
+                event_status = true[:, 1] > 0
                 event_time = true[:, 0]
                 cindex = concordance_index_censored(event_status, event_time, logit)[0]
                 logging_dict[f"{loader_name}-Cindex"] = cindex
@@ -532,8 +532,8 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [256, 64], # [16, 16, 8]
-        "dropout": 0,  #0.5
+        "layers": [512, 384], # [16, 16, 8]
+        "dropout": 0.25,  #0.5
         "conv": conv,
     }
     model_dir = model_dir / f"Survival_Prediction_{conv}"
@@ -734,7 +734,7 @@ if __name__ == "__main__":
         scaler_path=scaler_path,
         num_node_features=args.node_features,
         model_dir=save_model_dir,
-        conv="MLP",
+        conv="GINConv",
         n_works=8,
         batch_size=32
     )
