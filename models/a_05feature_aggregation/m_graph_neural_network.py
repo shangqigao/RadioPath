@@ -11,7 +11,7 @@ import torchbnn as bnn
 
 from torch.nn import BatchNorm1d, Linear, ReLU
 from torch_geometric.data import Data, Dataset
-from torch_geometric.utils import subgraph
+from torch_geometric.utils import subgraph, softmax
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATConv
 from torch_geometric.nn import global_mean_pool
 
@@ -79,7 +79,7 @@ class SurvivalGraphDataset(Dataset):
         info = self.info_list[idx]
         if any(v in self.mode for v in ["train", "valid"]):
             wsi_path, label = info
-            label = torch.tensor(label)
+            label = torch.tensor(label).unsqueeze(0)
         else:
             wsi_path = info
         
@@ -321,8 +321,8 @@ class SurvivalGraphArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                BatchNorm1d(out_dims),
-                ReLU(),
+                # BatchNorm1d(out_dims),
+                # ReLU(),
             )
         
         input_emb_dim = dim_features
@@ -369,7 +369,8 @@ class SurvivalGraphArch(nn.Module):
                 feature = self.convs[layer - 1](feature, edge_index)
             feature = self.linears[layer - 1](feature)
 
-        feature = global_mean_pool(feature, batch)
+        att = softmax(feature, index=batch)
+        feature = global_mean_pool(feature * att, batch)
         output = self.classifier(feature)
         return output
     
@@ -385,7 +386,7 @@ class SurvivalGraphArch(nn.Module):
         wsi_outputs = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze()
         wsi_labels = wsi_graphs.y.squeeze()
-        loss = loss(wsi_outputs, wsi_labels[0], wsi_labels[1])
+        loss = loss(wsi_outputs, wsi_labels[:, 0], wsi_labels[:, 1])
         loss.backward()
         optimizer.step()
 
@@ -675,8 +676,8 @@ class CoxSurvLoss(object):
             for j in range(current_batch_len):
                 R_mat[i,j] = time[j] >= time[i]
 
-        c = torch.FloatTensor(c).to(hazards.device)
-        R_mat = torch.FloatTensor(R_mat).to(hazards.device)
+        # c = torch.tensor(c).to(hazards.device)
+        R_mat = torch.tensor(R_mat).to(hazards.device)
         theta = hazards.reshape(-1)
         exp_theta = torch.exp(theta)
         loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * (1-c))

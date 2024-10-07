@@ -417,7 +417,7 @@ def run_once(
     if pretrained is not None:
         model.load(*pretrained)
     model = model.to("cuda")
-    loss = CoxSurvLoss
+    loss = CoxSurvLoss()
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[30, 40], gamma=0.1)
@@ -465,9 +465,11 @@ def run_once(
             elif "infer" in loader_name and any(v in loader_name for v in ["train", "valid"]):
                 output = list(zip(*step_output))
                 logit, true = output
-                event_status = np.array([y[1] for y in true]) > 0
-                event_time = np.array([y[0] for y in true])
-                cindex = concordance_index_censored(event_status, event_time, logit)
+                logit = np.array(logit).squeeze()
+                true = np.array(true).squeeze()
+                event_status = true[:, 1] < 1
+                event_time = true[:, 0]
+                cindex = concordance_index_censored(event_status, event_time, logit)[0]
                 logging_dict[f"{loader_name}-Cindex"] = cindex
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
@@ -508,6 +510,7 @@ def training(
         scaler_path,
         num_node_features,
         model_dir,
+        conv="GCNConv",
         n_works=32,
         batch_size=32
 ):
@@ -529,11 +532,11 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [16, 16, 8], # [16, 16, 8]
-        "dropout": 0.5,  #0.5
-        "conv": "GATConv",
+        "layers": [256, 64], # [16, 16, 8]
+        "dropout": 0,  #0.5
+        "conv": conv,
     }
-    model_dir = model_dir / f"Survival_Prediction_{arch_kwargs['conv']}"
+    model_dir = model_dir / f"Survival_Prediction_{conv}"
     optim_kwargs = {
         "lr": 1.0e-3,
         "weight_decay": 1.0e-4,  # 1.0e-4
@@ -622,9 +625,9 @@ def inference(
 
         # * Calculate split statistics
         true = np.array([v[1] for v in split["test"]])
-        event_status = true[:, 1] > 0
+        event_status = true[:, 1] < 1
         event_time = true[:, 0]
-        cindex = concordance_index_censored(event_status, event_time, prob)
+        cindex = concordance_index_censored(event_status, event_time, prob)[0]
 
         cum_stats.append(
             {
@@ -731,7 +734,8 @@ if __name__ == "__main__":
         scaler_path=scaler_path,
         num_node_features=args.node_features,
         model_dir=save_model_dir,
-        n_works=32,
+        conv="MLP",
+        n_works=8,
         batch_size=32
     )
 
