@@ -156,18 +156,45 @@ def prepare_graph_properties(data_dict, prop_keys):
                     properties[key] = np.std(prop_dict[k])
     return properties
 
-def prepare_graph_features(idx, graph_path, key='x', mode="mean"):
+def prepare_graph_features(idx, graph_path, label_path, subgraphs=None, mode="mean"):
+    if subgraphs is None:
+        subgraph_ids = None
+    else:
+        subgraph_dict = {
+            "ADI": [0, 4],
+            "BACK": [5, 8],
+            "DEB": [9, 11],
+            "LYM": [12, 16],
+            "MUC": [17, 20],
+            "MUS": [21, 25],
+            "NORM": [26, 26],
+            "STR": [27, 31],
+            "TUM": [32, 34]
+        }
+        subgraph_ids = [subgraph_dict[k] for k in subgraphs]
     graph_dict = load_json(graph_path)
-    assert np.array(graph_dict[key]).ndim == 2
+    label = np.load(label_path)
+    feature = np.array(graph_dict["x"])
+    assert feature.ndim == 2
+    if subgraph_ids is not None:
+        subset = label < 0
+        for ids in subgraph_ids:
+            ids_subset = torch.logical_and(label >= ids[0], label <= ids[1])
+            subset = torch.logical_or(subset, ids_subset)
+        if subset.sum().item() < 1:
+            feature = np.zeros_like(feature)
+        else:
+            feature = feature[subset]
+
     if mode == "mean":
-        feat_list = np.array(graph_dict[key]).mean(axis=0).tolist()
+        feat_list = np.mean(feature, axis=0).tolist()
     elif mode == "max":
-        feat_list = np.array(graph_dict[key]).max(axis=0).tolist()
+        feat_list = np.max(feature, axis=0).tolist()
     elif mode == "min":
-        feat_list = np.array(graph_dict[key]).min(axis=0).tolist()
+        feat_list = np.min(feature, axis=0).tolist()
     elif mode == "kmeans":
         kmeans = KMeans(n_clusters=1)
-        feat_list = kmeans.fit(np.array(graph_dict[key])).cluster_centers_
+        feat_list = kmeans.fit(feature).cluster_centers_
         feat_list = feat_list.squeeze().tolist()
     feat_dict = {}
     for i, feat in enumerate(feat_list):
@@ -203,7 +230,8 @@ def matched_survival_graph(save_clinical_dir, save_graph_paths):
     df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
-    df = df[df['ajcc_pathologic_stage'].isin(["Stage I", "Stage II"])]
+    # df = df[df['ajcc_pathologic_stage'].isin(["Stage I", "Stage II"])]
+    df = df[df['ajcc_pathologic_stage'].isin(["Stage III"])]
     print("Survival data strcuture:", df.shape)
 
     # filter graph properties 
@@ -533,7 +561,7 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [512, 384], # [16, 16, 8]
+        "layers": [384, 384], # [16, 16, 8]
         "dropout": 0.25,  #0.5
         "conv": conv,
     }
@@ -652,8 +680,8 @@ if __name__ == "__main__":
     parser.add_argument('--save_pathomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
-    parser.add_argument('--epochs', default=100, type=int)
-    parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch"], type=str)
+    parser.add_argument('--epochs', default=50, type=int)
+    parser.add_argument('--feature_mode', default="vit", choices=["cnn", "vit", "uni", "conch"], type=str)
     parser.add_argument('--node_features', default=1024, choices=[2048, 384, 1024, 35], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
@@ -682,83 +710,83 @@ if __name__ == "__main__":
     # plot survival curve
     # plot_survival_curve(save_clinical_dir)
 
-    # split data set
-    num_folds = 5
-    test_ratio = 0.2
-    train_ratio = 0.8 * 0.9
-    valid_ratio = 0.8 * 0.1
-    graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    df, matched_i = matched_survival_graph(save_clinical_dir, graph_paths)
-    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    matched_graph_paths = [graph_paths[i] for i in matched_i]
-    splits = generate_data_split(
-        x=matched_graph_paths,
-        y=y,
-        train=train_ratio,
-        valid=valid_ratio,
-        test=test_ratio,
-        num_folds=num_folds,
-    )
-    mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/survival_splits.dat"
-    joblib.dump(splits, split_path)
-    splits = joblib.load(split_path)
-    num_train = len(splits[0]["train"])
-    logging.info(f"Number of training samples: {num_train}.")
-    num_valid = len(splits[0]["valid"])
-    logging.info(f"Number of validating samples: {num_valid}.")
-    num_test = len(splits[0]["test"])
-    logging.info(f"Number of testing samples: {num_test}.")
+    # # split data set
+    # num_folds = 5
+    # test_ratio = 0.2
+    # train_ratio = 0.8 * 0.9
+    # valid_ratio = 0.8 * 0.1
+    # graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    # df, matched_i = matched_survival_graph(save_clinical_dir, graph_paths)
+    # y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    # matched_graph_paths = [graph_paths[i] for i in matched_i]
+    # splits = generate_data_split(
+    #     x=matched_graph_paths,
+    #     y=y,
+    #     train=train_ratio,
+    #     valid=valid_ratio,
+    #     test=test_ratio,
+    #     num_folds=num_folds,
+    # )
+    # mkdir(save_model_dir)
+    # split_path = f"{save_model_dir}/survival_splits.dat"
+    # joblib.dump(splits, split_path)
+    # splits = joblib.load(split_path)
+    # num_train = len(splits[0]["train"])
+    # logging.info(f"Number of training samples: {num_train}.")
+    # num_valid = len(splits[0]["valid"])
+    # logging.info(f"Number of validating samples: {num_valid}.")
+    # num_test = len(splits[0]["test"])
+    # logging.info(f"Number of testing samples: {num_test}.")
 
-    # compute mean and std on training data for normalization 
-    splits = joblib.load(split_path)
-    train_graph_paths = [path for path, _ in splits[0]["train"]]
-    loader = SurvivalGraphDataset(train_graph_paths, mode="infer")
-    loader = DataLoader(
-        loader,
-        num_workers=8,
-        batch_size=1,
-        shuffle=False,
-        drop_last=False,
-    )
-    node_features = [v.x.numpy() for v in loader]
-    node_features = np.concatenate(node_features, axis=0)
-    node_scaler = StandardScaler(copy=False)
-    node_scaler.fit(node_features)
-    scaler_path = f"{save_model_dir}/survival_node_scaler.dat"
-    joblib.dump(node_scaler, scaler_path)
+    # # compute mean and std on training data for normalization 
+    # splits = joblib.load(split_path)
+    # train_graph_paths = [path for path, _ in splits[0]["train"]]
+    # loader = SurvivalGraphDataset(train_graph_paths, mode="infer")
+    # loader = DataLoader(
+    #     loader,
+    #     num_workers=8,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     drop_last=False,
+    # )
+    # node_features = [v.x.numpy() for v in loader]
+    # node_features = np.concatenate(node_features, axis=0)
+    # node_scaler = StandardScaler(copy=False)
+    # node_scaler.fit(node_features)
+    # scaler_path = f"{save_model_dir}/survival_node_scaler.dat"
+    # joblib.dump(node_scaler, scaler_path)
 
-    # training
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_path,
-        num_node_features=args.node_features,
-        model_dir=save_model_dir,
-        conv="MLP",
-        n_works=8,
-        batch_size=32
-    )
+    # # training
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_path,
+    #     num_node_features=args.node_features,
+    #     model_dir=save_model_dir,
+    #     conv="MLP",
+    #     n_works=8,
+    #     batch_size=32
+    # )
 
     # survival analysis
-    # graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    # graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
-    # graph_properties = [
-    #     "num_nodes", 
-    #     "num_edges", 
-    #     # "num_components", 
-    #     "degree", 
-    #     "closeness", 
-    #     "graph_diameter",
-    #     "graph_assortativity",
-    #     # "mean_neighbor_degree"
-    # ]
-    # cox_proportional_hazard_regression(
-    #     save_clinical_dir=save_clinical_dir,
-    #     save_graph_paths=graph_paths,
-    #     save_properties_paths=graph_prop_paths,
-    #     prop_keys=graph_properties,
-    #     l1_ratio=0.9,
-    #     used="all",
-    #     n_jobs=32
-    # )
+    graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
+    graph_properties = [
+        "num_nodes", 
+        "num_edges", 
+        # "num_components", 
+        "degree", 
+        # "closeness", 
+        # "graph_diameter",
+        "graph_assortativity",
+        # "mean_neighbor_degree"
+    ]
+    cox_proportional_hazard_regression(
+        save_clinical_dir=save_clinical_dir,
+        save_graph_paths=graph_paths,
+        save_properties_paths=graph_prop_paths,
+        prop_keys=graph_properties,
+        l1_ratio=0.9,
+        used="all",
+        n_jobs=32
+    )

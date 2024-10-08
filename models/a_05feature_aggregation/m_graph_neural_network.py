@@ -387,35 +387,37 @@ class SurvivalGraphArch(nn.Module):
         input_emb_dim = dim_features
         out_emb_dim = self.embedding_dims[0]
         self.head = create_block(input_emb_dim, out_emb_dim)
-
         input_emb_dim = out_emb_dim
-        for out_emb_dim in self.embedding_dims[1:]:
-            conv_class, alpha = conv_dict[self.conv_name]
-            if self.conv_name in ["GINConv", "EdgeConv"]:
-                block = create_block(alpha * input_emb_dim, out_emb_dim)
-                subnet = conv_class(block, **kwargs)
-                self.convs.append(subnet)
-                self.linears.append(Linear(out_emb_dim, out_emb_dim))
-            elif self.conv_name in ["GCNConv", "GATConv"]:
-                subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
-                self.convs.append(subnet)
-                self.linears.append(create_block(out_emb_dim, out_emb_dim))
-            else:
-                subnet = create_block(alpha * input_emb_dim, out_emb_dim)
-                self.convs.append(subnet)
-                self.linears.append(nn.Sequential())
+        out_emb_dim = self.embedding_dims[-1]
+
+        # input_emb_dim = out_emb_dim
+        # for out_emb_dim in self.embedding_dims[1:]:
+        #     conv_class, alpha = conv_dict[self.conv_name]
+        #     if self.conv_name in ["GINConv", "EdgeConv"]:
+        #         block = create_block(alpha * input_emb_dim, out_emb_dim)
+        #         subnet = conv_class(block, **kwargs)
+        #         self.convs.append(subnet)
+        #         self.linears.append(Linear(out_emb_dim, out_emb_dim))
+        #     elif self.conv_name in ["GCNConv", "GATConv"]:
+        #         subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
+        #         self.convs.append(subnet)
+        #         self.linears.append(create_block(out_emb_dim, out_emb_dim))
+        #     else:
+        #         subnet = create_block(alpha * input_emb_dim, out_emb_dim)
+        #         self.convs.append(subnet)
+        #         self.linears.append(nn.Sequential())
                 
-            input_emb_dim = out_emb_dim
+        #     input_emb_dim = out_emb_dim
             
         self.attention_net = Attn_Net_Gated(
-            L=self.embedding_dims[-1],
-            D=self.embedding_dims[-1],
+            L=input_emb_dim,
+            D=out_emb_dim,
             dropout=self.dropout > 0,
             n_classes=1
         )
         self.global_attention = AttentionalAggregation(
             gate_nn=self.attention_net,
-            nn=None
+            nn=create_block(input_emb_dim, out_emb_dim)
         )
         self.classifier = Linear(self.embedding_dims[-1], dim_target)
 
@@ -431,13 +433,13 @@ class SurvivalGraphArch(nn.Module):
         feature, edge_index, batch = data.x, data.edge_index, data.batch
 
         feature = self.head(feature)
-        for layer in range(1, self.num_layers):
-            feature = F.dropout(feature, p=self.dropout, training=self.training)
-            if self.conv_name in ["MLP"]:
-                feature = self.convs[layer - 1](feature)
-            else:
-                feature = self.convs[layer - 1](feature, edge_index)
-            feature = self.linears[layer - 1](feature)
+        # for layer in range(1, self.num_layers):
+        #     feature = F.dropout(feature, p=self.dropout, training=self.training)
+        #     if self.conv_name in ["MLP"]:
+        #         feature = self.convs[layer - 1](feature)
+        #     else:
+        #         feature = self.convs[layer - 1](feature, edge_index)
+        #     feature = self.linears[layer - 1](feature)
 
         feature = self.global_attention(feature, index=batch)
         output = self.classifier(feature)
