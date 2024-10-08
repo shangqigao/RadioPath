@@ -156,7 +156,7 @@ def prepare_graph_properties(data_dict, prop_keys):
                     properties[key] = np.std(prop_dict[k])
     return properties
 
-def prepare_graph_features(idx, graph_path, label_path, subgraphs=None, mode="mean"):
+def prepare_graph_features(idx, graph_path, subgraphs=None, mode="mean"):
     if subgraphs is None:
         subgraph_ids = None
     else:
@@ -173,14 +173,15 @@ def prepare_graph_features(idx, graph_path, label_path, subgraphs=None, mode="me
         }
         subgraph_ids = [subgraph_dict[k] for k in subgraphs]
     graph_dict = load_json(graph_path)
+    label_path = f"{graph_path}".replace(".MST.json", ".label.npy")
     label = np.load(label_path)
     feature = np.array(graph_dict["x"])
     assert feature.ndim == 2
     if subgraph_ids is not None:
         subset = label < 0
         for ids in subgraph_ids:
-            ids_subset = torch.logical_and(label >= ids[0], label <= ids[1])
-            subset = torch.logical_or(subset, ids_subset)
+            ids_subset = np.logical_and(label >= ids[0], label <= ids[1])
+            subset = np.logical_or(subset, ids_subset)
         if subset.sum().item() < 1:
             feature = np.zeros_like(feature)
         else:
@@ -196,6 +197,7 @@ def prepare_graph_features(idx, graph_path, label_path, subgraphs=None, mode="me
         kmeans = KMeans(n_clusters=1)
         feat_list = kmeans.fit(feature).cluster_centers_
         feat_list = feat_list.squeeze().tolist()
+        
     feat_dict = {}
     for i, feat in enumerate(feat_list):
         k = f"graph.feature{i}"
