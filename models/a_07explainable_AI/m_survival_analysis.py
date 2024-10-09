@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import torch
-
+import torchbnn as bnn
 from scipy.stats import zscore
 from torch_geometric.loader import DataLoader
 from tiatoolbox import logger
@@ -35,7 +35,7 @@ from sklearn.linear_model import LogisticRegression as PlattScaling
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
-from models.a_05feature_aggregation.m_graph_neural_network import SurvivalGraphDataset, SurvivalGraphArch
+from models.a_05feature_aggregation.m_graph_neural_network import SurvivalGraphDataset, SurvivalGraphArch, SurvivalBayesGraphArch
 from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage, CoxSurvLoss
 
 
@@ -438,7 +438,8 @@ def run_once(
         pretrained=None,
         loader_kwargs=None,
         arch_kwargs=None,
-        optim_kwargs=None
+        optim_kwargs=None,
+        BayesGNN=False
 ):
     """running the inference or training loop once"""
     if loader_kwargs is None:
@@ -450,8 +451,12 @@ def run_once(
     if optim_kwargs is None:
         optim_kwargs = {}
 
-    
-    model = SurvivalGraphArch(**arch_kwargs)
+    if BayesGNN:
+        model = SurvivalBayesGraphArch(**arch_kwargs)
+        kl = {"loss": bnn.BKLLoss(), "weight": 0.1}
+    else:
+        model = SurvivalGraphArch(**arch_kwargs)
+        kl = None
     if pretrained is not None:
         model.load(*pretrained)
     model = model.to("cuda")
@@ -484,7 +489,7 @@ def run_once(
             pbar = create_pbar(loader_name, len(loader))
             for step, batch_data in enumerate(loader):
                 if loader_name == "train":
-                    output = model.train_batch(model, batch_data, on_gpu, loss, optimizer)
+                    output = model.train_batch(model, batch_data, on_gpu, loss, optimizer, kl),
                     ema({"loss": output[0]})
                     pbar.postfix[1]["step"] = step
                     pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
@@ -551,7 +556,8 @@ def training(
         model_dir,
         conv="GCNConv",
         n_works=32,
-        batch_size=32
+        batch_size=32,
+        BayesGNN=False
 ):
     """train node classification neural networks
     Args:
@@ -575,7 +581,10 @@ def training(
         "dropout": 0.5,  #0.5
         "conv": conv,
     }
-    model_dir = model_dir / f"Survival_Prediction_{conv}"
+    if BayesGNN:
+        model_dir = model_dir / f"Bayes_Survival_Prediction_{conv}"
+    else:
+        model_dir = model_dir / f"Survival_Prediction_{conv}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
@@ -598,6 +607,7 @@ def training(
             loader_kwargs=loader_kwargs,
             optim_kwargs=optim_kwargs,
             preproc_func=node_scaler.transform,
+            BayesGNN=BayesGNN
         )
     return
 
@@ -607,7 +617,8 @@ def inference(
         num_node_features,
         pretrained_dir,
         n_works=32,
-        batch_size=32
+        batch_size=32,
+        BayesGNN=False
 ):
     """survival prediction
     """
@@ -775,7 +786,8 @@ if __name__ == "__main__":
         model_dir=save_model_dir,
         conv="MLP",
         n_works=8,
-        batch_size=32
+        batch_size=32,
+        BayesGNN=True
     )
 
     # survival analysis

@@ -344,8 +344,34 @@ class Attn_Net_Gated(nn.Module):
         A = a.mul(b)
         A = self.attention_c(A)  # N x n_classes
         return A
+    
+class Bayes_Attn_Net_Gated(nn.Module):
+    def __init__(self, L=1024, D=256, dropout=0., n_classes=1):
+        super(Attn_Net_Gated, self).__init__()
+        self.attention_a = [
+            bnn.BayesLinear(0, 0.1, L, D),
+            nn.Tanh()]
 
-class SurvivalBayesGraphArch(nn.Module):
+        self.attention_b = [
+            bnn.BayesLinear(0, 0.1, L, D),
+            nn.Sigmoid()]
+        if dropout > 0:
+            self.attention_a.append(nn.Dropout(dropout))
+            self.attention_b.append(nn.Dropout(dropout))
+
+        self.attention_a = nn.Sequential(*self.attention_a)
+        self.attention_b = nn.Sequential(*self.attention_b)
+
+        self.attention_c = bnn.BayesLinear(0, 0.1, D, n_classes)
+
+    def forward(self, x):
+        a = self.attention_a(x)
+        b = self.attention_b(x)
+        A = a.mul(b)
+        A = self.attention_c(A)  # N x n_classes
+        return A
+
+class SurvivalGraphArch(nn.Module):
     """define Graph architecture for survival analysis
     """
     def __init__(
@@ -483,7 +509,7 @@ class SurvivalBayesGraphArch(nn.Module):
             return [wsi_outputs, wsi_labels]
         return [wsi_outputs]
 
-class SurvivalGraphArch(nn.Module):
+class SurvivalBayesGraphArch(nn.Module):
     """define Graph architecture for survival analysis
     """
     def __init__(
@@ -506,7 +532,7 @@ class SurvivalGraphArch(nn.Module):
         self.conv_name = conv
 
         conv_dict = {
-            "MLP": [Linear, 1],
+            "MLP": [None, 1],
             "GCNConv": [GCNConv, 1],
             "GATConv": [GATConv, 1],
             "GINConv": [GINConv, 1], 
@@ -517,7 +543,7 @@ class SurvivalGraphArch(nn.Module):
         
         def create_block(in_dims, out_dims):
             return nn.Sequential(
-                Linear(in_dims, out_dims),
+                bnn.BayesLinear(0, 0.1, in_dims, out_dims),
                 BatchNorm1d(out_dims),
                 ReLU(),
                 Dropout(self.dropout)
@@ -548,7 +574,7 @@ class SurvivalGraphArch(nn.Module):
                 
         #     input_emb_dim = out_emb_dim
             
-        self.gate_nn = Attn_Net_Gated(
+        self.gate_nn = Bayes_Attn_Net_Gated(
             L=input_emb_dim,
             D=out_emb_dim,
             dropout=self.dropout,
@@ -558,7 +584,7 @@ class SurvivalGraphArch(nn.Module):
             gate_nn=self.gate_nn,
             nn=create_block(input_emb_dim, out_emb_dim)
         )
-        self.classifier = Linear(self.embedding_dims[-1], dim_target)
+        self.classifier = bnn.BayesLinear(0, 0.1, self.embedding_dims[-1], dim_target)
 
     def save(self, path):
         state_dict = self.state_dict()
@@ -585,7 +611,7 @@ class SurvivalGraphArch(nn.Module):
         return output
     
     @staticmethod
-    def train_batch(model, batch_data, on_gpu, loss, optimizer):
+    def train_batch(model, batch_data, on_gpu, loss, optimizer, kl):
         device = "cuda" if on_gpu else "cpu"
         wsi_graphs = batch_data.to(device)
 
@@ -597,6 +623,9 @@ class SurvivalGraphArch(nn.Module):
         wsi_outputs = wsi_outputs.squeeze()
         wsi_labels = wsi_graphs.y.squeeze()
         loss = loss(wsi_outputs, wsi_labels[:, 0], wsi_labels[:, 1])
+        if kl is not None:
+            kl_loss, kl_weight = kl["loss"](model)[0], kl["weight"]
+            loss = loss + kl_weight * kl_loss
         loss.backward()
         optimizer.step()
 
