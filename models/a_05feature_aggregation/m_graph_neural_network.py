@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 import torchbnn as bnn
 
-from torch.nn import BatchNorm1d, Linear, ReLU
+from torch.nn import BatchNorm1d, Linear, ReLU, Dropout
 from torch_geometric.data import Data, Dataset
 from torch_geometric.utils import subgraph, softmax
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATConv
@@ -321,7 +321,7 @@ class SlideGraphArch(nn.Module):
         return [wsi_outputs, feature]
 
 class Attn_Net_Gated(nn.Module):
-    def __init__(self, L=1024, D=256, dropout=False, n_classes=1):
+    def __init__(self, L=1024, D=256, dropout=0., n_classes=1):
         super(Attn_Net_Gated, self).__init__()
         self.attention_a = [
             nn.Linear(L, D),
@@ -329,9 +329,9 @@ class Attn_Net_Gated(nn.Module):
 
         self.attention_b = [nn.Linear(L, D),
                             nn.Sigmoid()]
-        if dropout:
-            self.attention_a.append(nn.Dropout(0.25))
-            self.attention_b.append(nn.Dropout(0.25))
+        if dropout > 0:
+            self.attention_a.append(nn.Dropout(dropout))
+            self.attention_b.append(nn.Dropout(dropout))
 
         self.attention_a = nn.Sequential(*self.attention_a)
         self.attention_b = nn.Sequential(*self.attention_b)
@@ -344,6 +344,144 @@ class Attn_Net_Gated(nn.Module):
         A = a.mul(b)
         A = self.attention_c(A)  # N x n_classes
         return A
+
+class SurvivalBayesGraphArch(nn.Module):
+    """define Graph architecture for survival analysis
+    """
+    def __init__(
+            self, 
+            dim_features, 
+            dim_target,
+            layers=None,
+            dropout=0.0,
+            conv="GINConv",
+            **kwargs,
+    ):
+        super().__init__()
+        if layers is None:
+            layers = [6, 6]
+        self.dropout = dropout
+        self.embedding_dims = layers
+        self.num_layers = len(self.embedding_dims)
+        self.convs = nn.ModuleList()
+        self.linears = nn.ModuleList()
+        self.conv_name = conv
+
+        conv_dict = {
+            "MLP": [Linear, 1],
+            "GCNConv": [GCNConv, 1],
+            "GATConv": [GATConv, 1],
+            "GINConv": [GINConv, 1], 
+            "EdgeConv": [EdgeConv, 2]
+        }
+        if self.conv_name not in conv_dict:
+            raise ValueError(f"Not support conv={conv}.")
+        
+        def create_block(in_dims, out_dims):
+            return nn.Sequential(
+                Linear(in_dims, out_dims),
+                BatchNorm1d(out_dims),
+                ReLU(),
+                Dropout(self.dropout)
+            )
+        
+        input_emb_dim = dim_features
+        out_emb_dim = self.embedding_dims[0]
+        self.head = create_block(input_emb_dim, out_emb_dim)
+        input_emb_dim = out_emb_dim
+        out_emb_dim = self.embedding_dims[-1]
+
+        # input_emb_dim = out_emb_dim
+        # for out_emb_dim in self.embedding_dims[1:]:
+        #     conv_class, alpha = conv_dict[self.conv_name]
+        #     if self.conv_name in ["GINConv", "EdgeConv"]:
+        #         block = create_block(alpha * input_emb_dim, out_emb_dim)
+        #         subnet = conv_class(block, **kwargs)
+        #         self.convs.append(subnet)
+        #         self.linears.append(Linear(out_emb_dim, out_emb_dim))
+        #     elif self.conv_name in ["GCNConv", "GATConv"]:
+        #         subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
+        #         self.convs.append(subnet)
+        #         self.linears.append(create_block(out_emb_dim, out_emb_dim))
+        #     else:
+        #         subnet = create_block(alpha * input_emb_dim, out_emb_dim)
+        #         self.convs.append(subnet)
+        #         self.linears.append(nn.Sequential())
+                
+        #     input_emb_dim = out_emb_dim
+            
+        self.gate_nn = Attn_Net_Gated(
+            L=input_emb_dim,
+            D=out_emb_dim,
+            dropout=self.dropout,
+            n_classes=1
+        )
+        self.global_attention = AttentionalAggregation(
+            gate_nn=self.gate_nn,
+            nn=create_block(input_emb_dim, out_emb_dim)
+        )
+        self.classifier = Linear(self.embedding_dims[-1], dim_target)
+
+    def save(self, path):
+        state_dict = self.state_dict()
+        torch.save(state_dict, path)
+
+    def load(self, path):
+        state_dict = torch.load(path)
+        self.load_state_dict(state_dict)
+
+    def forward(self, data):
+        feature, edge_index, batch = data.x, data.edge_index, data.batch
+
+        feature = self.head(feature)
+        # for layer in range(1, self.num_layers):
+        #     feature = F.dropout(feature, p=self.dropout, training=self.training)
+        #     if self.conv_name in ["MLP"]:
+        #         feature = self.convs[layer - 1](feature)
+        #     else:
+        #         feature = self.convs[layer - 1](feature, edge_index)
+        #     feature = self.linears[layer - 1](feature)
+
+        feature = self.global_attention(feature, index=batch)
+        output = self.classifier(feature)
+        return output
+    
+    @staticmethod
+    def train_batch(model, batch_data, on_gpu, loss, optimizer):
+        device = "cuda" if on_gpu else "cpu"
+        wsi_graphs = batch_data.to(device)
+
+        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
+
+        model.train()
+        optimizer.zero_grad()
+        wsi_outputs = model(wsi_graphs)
+        wsi_outputs = wsi_outputs.squeeze()
+        wsi_labels = wsi_graphs.y.squeeze()
+        loss = loss(wsi_outputs, wsi_labels[:, 0], wsi_labels[:, 1])
+        loss.backward()
+        optimizer.step()
+
+        loss = loss.detach().cpu().numpy()
+        assert not np.isnan(loss)
+        wsi_labels = wsi_labels.cpu().numpy()
+        return [loss, wsi_outputs, wsi_labels]
+    
+    @staticmethod
+    def infer_batch(model, batch_data, on_gpu):
+        device = "cuda" if on_gpu else "cpu"
+        wsi_graphs = batch_data.to(device)
+        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
+
+        model.eval()
+        with torch.inference_mode():
+            wsi_outputs = model(wsi_graphs)
+        wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
+        if wsi_graphs.y is not None:
+            wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
+
+            return [wsi_outputs, wsi_labels]
+        return [wsi_outputs]
 
 class SurvivalGraphArch(nn.Module):
     """define Graph architecture for survival analysis
@@ -380,8 +518,9 @@ class SurvivalGraphArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                # BatchNorm1d(out_dims),
+                BatchNorm1d(out_dims),
                 ReLU(),
+                Dropout(self.dropout)
             )
         
         input_emb_dim = dim_features
@@ -409,14 +548,14 @@ class SurvivalGraphArch(nn.Module):
                 
         #     input_emb_dim = out_emb_dim
             
-        self.attention_net = Attn_Net_Gated(
+        self.gate_nn = Attn_Net_Gated(
             L=input_emb_dim,
             D=out_emb_dim,
-            dropout=self.dropout > 0,
+            dropout=self.dropout,
             n_classes=1
         )
         self.global_attention = AttentionalAggregation(
-            gate_nn=self.attention_net,
+            gate_nn=self.gate_nn,
             nn=create_block(input_emb_dim, out_emb_dim)
         )
         self.classifier = Linear(self.embedding_dims[-1], dim_target)

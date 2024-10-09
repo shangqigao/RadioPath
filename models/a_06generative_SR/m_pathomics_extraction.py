@@ -147,16 +147,16 @@ if __name__ == "__main__":
     # )
 
     # label graph node
-    wsi_cls_paths = [save_classification_dir / f"{p.stem}.features.npy" for p in wsi_paths]
-    wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
-    generate_node_label(
-        wsi_paths=wsi_paths,
-        wsi_annot_paths=wsi_cls_paths,
-        wsi_graph_paths=wsi_graph_paths,
-        save_lab_dir=save_feature_dir,
-        anno_type="classification",
-        n_jobs=32
-    )
+    # wsi_cls_paths = [save_classification_dir / f"{p.stem}.features.npy" for p in wsi_paths]
+    # wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
+    # generate_node_label(
+    #     wsi_paths=wsi_paths,
+    #     wsi_annot_paths=wsi_cls_paths,
+    #     wsi_graph_paths=wsi_graph_paths,
+    #     save_lab_dir=save_feature_dir,
+    #     anno_type="classification",
+    #     n_jobs=32
+    # )
 
     # measure graph properties
     wsi_graph_paths = [save_feature_dir / f"{p.stem}.MST.json" for p in wsi_paths]
@@ -176,7 +176,7 @@ if __name__ == "__main__":
         graph_paths=wsi_graph_paths,
         label_paths=wsi_label_paths,
         save_dir=save_feature_dir,
-        subgraph_dict=None,
+        subgraph_dict=subgraph_dict,
         n_jobs=32
     )
 
