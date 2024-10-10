@@ -1,5 +1,5 @@
-from timm.models.layers.helpers import to_2tuple
-import timm
+from tiatoolbox.models.architecture.chief.timm.timm.models.layers.helpers import to_2tuple
+from tiatoolbox.models.architecture.chief.timm import timm
 import torch.nn as nn
 
 

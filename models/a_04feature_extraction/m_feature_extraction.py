@@ -20,6 +20,7 @@ from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig, NucleusIn
 from tiatoolbox.models.architecture.vanilla import CNNBackbone, CNNModel
 from tiatoolbox.models.architecture.hipt import get_vit256
 from tiatoolbox.models.architecture.chief.ctran import ConvStem
+from tiatoolbox.models.architecture.chief.timm.timm import create_model
 from tiatoolbox.tools.stainnorm import get_normalizer
 from tiatoolbox.data import stain_norm_target
 from tiatoolbox.wsicore.wsireader import WSIReader
@@ -384,7 +385,7 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
 class CHIEF(torch.nn.Module):
     def __init__(self, model_path):
         super().__init__()
-        self.model = timm.create_model(
+        self.model = create_model(
             'swin_tiny_patch4_window7_224', 
             embed_layer=ConvStem, 
             pretrained=False,

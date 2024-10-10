@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utils.utils import initialize_weights
+from tiatoolbox.models.architecture.chief.utils import initialize_weights
 import numpy as np
 # from utils.loss import loss_fg,loss_bg,SupConLoss
 # from utils.memory import Memory
