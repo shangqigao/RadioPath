@@ -19,6 +19,7 @@ from common.m_utils import recur_find_ext, rmdir, select_checkpoints
 from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig, NucleusInstanceSegmentor
 from tiatoolbox.models.architecture.vanilla import CNNBackbone, CNNModel
 from tiatoolbox.models.architecture.hipt import get_vit256
+from tiatoolbox.models.architecture.chief.ctran import ConvStem
 from tiatoolbox.tools.stainnorm import get_normalizer
 from tiatoolbox.data import stain_norm_target
 from tiatoolbox.wsicore.wsireader import WSIReader
@@ -77,6 +78,15 @@ def extract_pathomic_feature(
         )
     elif feature_mode == "uni":
         _ = extract_uni_pathomic_features(
+            wsi_paths,
+            wsi_msk_paths,
+            save_dir,
+            mode,
+            resolution,
+            units
+        )
+    elif feature_mode == "chief":
+        _ = extract_chief_pathomic_features(
             wsi_paths,
             wsi_msk_paths,
             save_dir,
@@ -295,7 +305,8 @@ class UNI(torch.nn.Module):
             patch_size=16, 
             init_values=1e-5, 
             num_classes=0, 
-            dynamic_img_size=True
+            dynamic_img_size=True,
+            checkpoint_path=model_path
         )
     
     def forward(self, imgs):
@@ -323,6 +334,88 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
     
     pretrained_path = "../checkpoints/UNI/pytorch_model.bin"
     model = UNI(pretrained_path)
+    ## define preprocessing function
+    mean = (0.485, 0.456, 0.406)
+    std = (0.229, 0.224, 0.225)
+    TS = A.Compose([A.Resize(224, 224, cv2.INTER_CUBIC), A.Normalize(mean, std), ToTensorV2()])
+    def _preproc_func(img):
+        return TS(image=img)["image"]
+    def _postproc_func(img):
+        return img
+    model.preproc_func = _preproc_func
+    model.postproc_func = _postproc_func
+
+    extractor = DeepFeatureExtractor(
+        batch_size=128, 
+        model=model, 
+        num_loader_workers=32, 
+    )
+
+    # create temporary dir
+    tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
+    rmdir(tmp_save_dir)
+    output_map_list = extractor.predict(
+        wsi_paths,
+        msk_paths,
+        mode=mode,
+        ioconfig=ioconfig,
+        on_gpu=True,
+        crash_on_exception=True,
+        save_dir=tmp_save_dir,
+    )
+    
+    for input_path, output_path in output_map_list:
+        input_name = pathlib.Path(input_path).stem
+        output_parent_dir = pathlib.Path(output_path).parent.parent
+
+        src_path = pathlib.Path(f"{output_path}.position.npy")
+        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.position.npy")
+        src_path.rename(new_path)
+
+        src_path = pathlib.Path(f"{output_path}.features.0.npy")
+        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.features.npy")
+        src_path.rename(new_path)
+
+    # remove temporary dir
+    rmdir(tmp_save_dir)
+
+    return output_map_list
+
+class CHIEF(torch.nn.Module):
+    def __init__(self, model_path):
+        super().__init__()
+        self.model = timm.create_model(
+            'swin_tiny_patch4_window7_224', 
+            embed_layer=ConvStem, 
+            pretrained=False,
+            checkpoint_path=model_path
+        )
+    
+    def forward(self, imgs):
+        feat = self.model(imgs)
+        return torch.flatten(feat, 1)
+
+    @staticmethod
+    def infer_batch(model, batch_data, on_gpu):
+        device = "cuda" if on_gpu else "cpu"
+        image = batch_data.to(device).type(torch.float32)
+        model.eval()
+        with torch.inference_mode():
+            output = model(image)
+        return [output.cpu().numpy()]
+
+def extract_chief_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.5, units="mpp"):
+    ioconfig = IOSegmentorConfig(
+        input_resolutions=[{"units": units, "resolution": resolution},],
+        output_resolutions=[{"units": units, "resolution": resolution},],
+        patch_input_shape=[256, 256],
+        patch_output_shape=[256, 256],
+        stride_shape=[256, 256],
+        save_resolution={"units": "mpp", "resolution": 8.0}
+    )
+    
+    pretrained_path = "../checkpoints/CHIEF/CHIEF_CTransPath.pth"
+    model = CHIEF(pretrained_path)
     ## define preprocessing function
     mean = (0.485, 0.456, 0.406)
     std = (0.229, 0.224, 0.225)
