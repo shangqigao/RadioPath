@@ -14,6 +14,7 @@ import pandas as pd
 import numpy as np
 import torch
 import torchbnn as bnn
+
 from scipy.stats import zscore
 from torch_geometric.loader import DataLoader
 from tiatoolbox import logger
@@ -489,7 +490,7 @@ def run_once(
             pbar = create_pbar(loader_name, len(loader))
             for step, batch_data in enumerate(loader):
                 if loader_name == "train":
-                    output = model.train_batch(model, batch_data, on_gpu, loss, optimizer, kl),
+                    output = model.train_batch(model, batch_data, on_gpu, loss, optimizer, kl)
                     ema({"loss": output[0]})
                     pbar.postfix[1]["step"] = step
                     pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
@@ -557,6 +558,7 @@ def training(
         conv="GCNConv",
         n_works=32,
         batch_size=32,
+        dropout=0,
         BayesGNN=False
 ):
     """train node classification neural networks
@@ -577,8 +579,8 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [16, 8], # [16, 16, 8]
-        "dropout": 0.5,  #0.5
+        "layers": [256, 64], # [16, 16, 8]
+        "dropout": dropout,  #0.5
         "conv": conv,
     }
     if BayesGNN:
@@ -787,6 +789,7 @@ if __name__ == "__main__":
         conv="MLP",
         n_works=8,
         batch_size=32,
+        dropout=0.,
         BayesGNN=True
     )
 

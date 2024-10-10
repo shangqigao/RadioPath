@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import torch
-
+import torchbnn as bnn
 from scipy.stats import zscore
 from torch_geometric.loader import DataLoader
 from tiatoolbox import logger
@@ -28,7 +28,7 @@ from sklearn.metrics import accuracy_score as acc_scorer
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
-from models.a_05feature_aggregation.m_graph_neural_network import SubtypingGraphDataset, SubtypingGraphArch
+from models.a_05feature_aggregation.m_graph_neural_network import SubtypingGraphDataset, SubtypingGraphArch, SubtypingBayesGraphArch
 from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage, CoxSurvLoss
 from models.a_05feature_aggregation.m_graph_neural_network import update_loss
 
@@ -198,7 +198,8 @@ def run_once(
         pretrained=None,
         loader_kwargs=None,
         arch_kwargs=None,
-        optim_kwargs=None
+        optim_kwargs=None,
+        BayesGNN=False
 ):
     """running the inference or training loop once"""
     if loader_kwargs is None:
@@ -211,7 +212,12 @@ def run_once(
         optim_kwargs = {}
 
     
-    model = SubtypingGraphArch(**arch_kwargs)
+    if BayesGNN:
+        model = SubtypingBayesGraphArch(**arch_kwargs)
+        kl = {"loss": bnn.BKLLoss(), "weight": 0.1}
+    else:
+        model = SubtypingGraphArch(**arch_kwargs)
+        kl = None
     if pretrained is not None:
         model.load(*pretrained)
     model = model.to("cuda")
@@ -244,7 +250,7 @@ def run_once(
             pbar = create_pbar(loader_name, len(loader))
             for step, batch_data in enumerate(loader):
                 if loader_name == "train":
-                    output = model.train_batch(model, batch_data, on_gpu, loss, optimizer)
+                    output = model.train_batch(model, batch_data, on_gpu, loss, optimizer, kl)
                     ema({"loss": output[0]})
                     pbar.postfix[1]["step"] = step
                     pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
@@ -323,7 +329,9 @@ def training(
         model_dir,
         conv="GCNConv",
         n_works=32,
-        batch_size=32
+        batch_size=32,
+        dropout=0.,
+        BayesGNN=False
 ):
     """train node classification neural networks
     Args:
@@ -344,7 +352,7 @@ def training(
         "dim_features": num_node_features,
         "dim_target": 3,
         "layers": [512, 384], # [16, 16, 8]
-        "dropout": 0.25,  #0.5
+        "dropout": dropout,  #0.5
         "conv": conv,
     }
     model_dir = model_dir / f"Cancer_Subtyping_{conv}"
@@ -370,6 +378,7 @@ def training(
             loader_kwargs=loader_kwargs,
             optim_kwargs=optim_kwargs,
             preproc_func=node_scaler.transform,
+            BayesGNN=BayesGNN
         )
     return
 
@@ -531,7 +540,7 @@ if __name__ == "__main__":
         num_folds=num_folds,
     )
     mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/survival_splits.dat"
+    split_path = f"{save_model_dir}/subtyping_splits.dat"
     joblib.dump(splits, split_path)
     splits = joblib.load(split_path)
     num_train = len(splits[0]["train"])
@@ -556,7 +565,7 @@ if __name__ == "__main__":
     node_features = np.concatenate(node_features, axis=0)
     node_scaler = StandardScaler(copy=False)
     node_scaler.fit(node_features)
-    scaler_path = f"{save_model_dir}/survival_node_scaler.dat"
+    scaler_path = f"{save_model_dir}/subtyping_node_scaler.dat"
     joblib.dump(node_scaler, scaler_path)
 
     # training
@@ -568,5 +577,7 @@ if __name__ == "__main__":
         model_dir=save_model_dir,
         conv="MLP",
         n_works=8,
-        batch_size=32
+        batch_size=32,
+        BayesGNN=False,
+        dropout=0.25
     )

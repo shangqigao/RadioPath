@@ -346,14 +346,14 @@ class Attn_Net_Gated(nn.Module):
         return A
     
 class Bayes_Attn_Net_Gated(nn.Module):
-    def __init__(self, L=1024, D=256, dropout=0., n_classes=1):
-        super(Attn_Net_Gated, self).__init__()
+    def __init__(self, L=1024, D=256, dropout=0., n_classes=1, Bayes_std=0.1):
+        super(Bayes_Attn_Net_Gated, self).__init__()
         self.attention_a = [
-            bnn.BayesLinear(0, 0.1, L, D),
+            bnn.BayesLinear(0, Bayes_std, L, D),
             nn.Tanh()]
 
         self.attention_b = [
-            bnn.BayesLinear(0, 0.1, L, D),
+            bnn.BayesLinear(0, Bayes_std, L, D),
             nn.Sigmoid()]
         if dropout > 0:
             self.attention_a.append(nn.Dropout(dropout))
@@ -362,7 +362,7 @@ class Bayes_Attn_Net_Gated(nn.Module):
         self.attention_a = nn.Sequential(*self.attention_a)
         self.attention_b = nn.Sequential(*self.attention_b)
 
-        self.attention_c = bnn.BayesLinear(0, 0.1, D, n_classes)
+        self.attention_c = bnn.BayesLinear(0, Bayes_std, D, n_classes)
 
     def forward(self, x):
         a = self.attention_a(x)
@@ -394,7 +394,7 @@ class SurvivalGraphArch(nn.Module):
         self.conv_name = conv
 
         conv_dict = {
-            "MLP": [Linear, 1],
+            "MLP": [None, 1],
             "GCNConv": [GCNConv, 1],
             "GATConv": [GATConv, 1],
             "GINConv": [GINConv, 1], 
@@ -473,7 +473,7 @@ class SurvivalGraphArch(nn.Module):
         return output
     
     @staticmethod
-    def train_batch(model, batch_data, on_gpu, loss, optimizer):
+    def train_batch(model, batch_data, on_gpu, loss, optimizer, kl=None):
         device = "cuda" if on_gpu else "cpu"
         wsi_graphs = batch_data.to(device)
 
@@ -519,6 +519,7 @@ class SurvivalBayesGraphArch(nn.Module):
             layers=None,
             dropout=0.0,
             conv="GINConv",
+            Bayes_std=0.05,
             **kwargs,
     ):
         super().__init__()
@@ -543,7 +544,7 @@ class SurvivalBayesGraphArch(nn.Module):
         
         def create_block(in_dims, out_dims):
             return nn.Sequential(
-                bnn.BayesLinear(0, 0.1, in_dims, out_dims),
+                bnn.BayesLinear(0, Bayes_std, in_dims, out_dims),
                 BatchNorm1d(out_dims),
                 ReLU(),
                 Dropout(self.dropout)
@@ -578,13 +579,14 @@ class SurvivalBayesGraphArch(nn.Module):
             L=input_emb_dim,
             D=out_emb_dim,
             dropout=self.dropout,
-            n_classes=1
+            n_classes=1,
+            Bayes_std=Bayes_std
         )
         self.global_attention = AttentionalAggregation(
             gate_nn=self.gate_nn,
             nn=create_block(input_emb_dim, out_emb_dim)
         )
-        self.classifier = bnn.BayesLinear(0, 0.1, self.embedding_dims[-1], dim_target)
+        self.classifier = bnn.BayesLinear(0, Bayes_std, self.embedding_dims[-1], dim_target)
 
     def save(self, path):
         state_dict = self.state_dict()
@@ -623,9 +625,8 @@ class SurvivalBayesGraphArch(nn.Module):
         wsi_outputs = wsi_outputs.squeeze()
         wsi_labels = wsi_graphs.y.squeeze()
         loss = loss(wsi_outputs, wsi_labels[:, 0], wsi_labels[:, 1])
-        if kl is not None:
-            kl_loss, kl_weight = kl["loss"](model)[0], kl["weight"]
-            loss = loss + kl_weight * kl_loss
+        kl_loss, kl_weight = kl["loss"](model)[0], kl["weight"]
+        loss = loss + kl_weight * kl_loss
         loss.backward()
         optimizer.step()
 
@@ -673,7 +674,7 @@ class SubtypingGraphArch(nn.Module):
         self.conv_name = conv
 
         conv_dict = {
-            "MLP": [Linear, 1],
+            "MLP": [None, 1],
             "GCNConv": [GCNConv, 1],
             "GATConv": [GATConv, 1],
             "GINConv": [GINConv, 1], 
@@ -685,8 +686,151 @@ class SubtypingGraphArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                # BatchNorm1d(out_dims),
+                BatchNorm1d(out_dims),
                 ReLU(),
+                Dropout(self.dropout)
+            )
+        
+        input_emb_dim = dim_features
+        out_emb_dim = self.embedding_dims[0]
+        self.head = create_block(input_emb_dim, out_emb_dim)
+        input_emb_dim = out_emb_dim
+        out_emb_dim = self.embedding_dims[-1]
+
+        # input_emb_dim = out_emb_dim
+        # for out_emb_dim in self.embedding_dims[1:]:
+        #     conv_class, alpha = conv_dict[self.conv_name]
+        #     if self.conv_name in ["GINConv", "EdgeConv"]:
+        #         block = create_block(alpha * input_emb_dim, out_emb_dim)
+        #         subnet = conv_class(block, **kwargs)
+        #         self.convs.append(subnet)
+        #         self.linears.append(Linear(out_emb_dim, out_emb_dim))
+        #     elif self.conv_name in ["GCNConv", "GATConv"]:
+        #         subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
+        #         self.convs.append(subnet)
+        #         self.linears.append(create_block(out_emb_dim, out_emb_dim))
+        #     else:
+        #         subnet = create_block(alpha * input_emb_dim, out_emb_dim)
+        #         self.convs.append(subnet)
+        #         self.linears.append(nn.Sequential())
+                
+        #     input_emb_dim = out_emb_dim
+            
+        self.gate_nn = Attn_Net_Gated(
+            L=input_emb_dim,
+            D=out_emb_dim,
+            dropout=self.dropout,
+            n_classes=1
+        )
+        self.global_attention = AttentionalAggregation(
+            gate_nn=self.gate_nn,
+            nn=create_block(input_emb_dim, out_emb_dim)
+        )
+        self.classifier = Linear(out_emb_dim, dim_target)
+
+        self.aux_model = {}
+
+    def save(self, path, aux_path):
+        state_dict = self.state_dict()
+        torch.save(state_dict, path)
+        joblib.dump(self.aux_model, aux_path)
+
+    def load(self, path, aux_path):
+        state_dict = torch.load(path)
+        self.load_state_dict(state_dict)
+        self.aux_model = joblib.load(aux_path)
+
+    def forward(self, data):
+        feature, edge_index, batch = data.x, data.edge_index, data.batch
+
+        feature = self.head(feature)
+        # for layer in range(1, self.num_layers):
+        #     # feature = F.dropout(feature, p=self.dropout, training=self.training)
+        #     if self.conv_name in ["MLP"]:
+        #         feature = self.convs[layer - 1](feature)
+        #     else:
+        #         feature = self.convs[layer - 1](feature, edge_index)
+        #     feature = self.linears[layer - 1](feature)
+
+        feature = self.global_attention(feature, index=batch)
+        output = self.classifier(feature)
+        return output
+    
+    @staticmethod
+    def train_batch(model, batch_data, on_gpu, loss, optimizer, kl=None):
+        device = "cuda" if on_gpu else "cpu"
+        wsi_graphs = batch_data.to(device)
+
+        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
+
+        model.train()
+        optimizer.zero_grad()
+        wsi_outputs = model(wsi_graphs)
+        wsi_outputs = wsi_outputs.squeeze()
+        wsi_labels = wsi_graphs.y.squeeze()
+        loss = loss(wsi_outputs, wsi_labels)
+        loss.backward()
+        optimizer.step()
+
+        loss = loss.detach().cpu().numpy()
+        assert not np.isnan(loss)
+        wsi_labels = wsi_labels.cpu().numpy()
+        return [loss, wsi_outputs, wsi_labels]
+    
+    @staticmethod
+    def infer_batch(model, batch_data, on_gpu):
+        device = "cuda" if on_gpu else "cpu"
+        wsi_graphs = batch_data.to(device)
+        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
+
+        model.eval()
+        with torch.inference_mode():
+            wsi_outputs = model(wsi_graphs)
+        wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
+        if wsi_graphs.y is not None:
+            wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
+            return [wsi_outputs, wsi_labels]
+        return [wsi_outputs]
+
+class SubtypingBayesGraphArch(nn.Module):
+    """define Graph architecture for cancer subtyping
+    """
+    def __init__(
+            self, 
+            dim_features, 
+            dim_target,
+            layers=None,
+            dropout=0.0,
+            conv="GINConv",
+            Bayes_std=0.1,
+            **kwargs,
+    ):
+        super().__init__()
+        if layers is None:
+            layers = [6, 6]
+        self.dropout = dropout
+        self.embedding_dims = layers
+        self.num_layers = len(self.embedding_dims)
+        self.convs = nn.ModuleList()
+        self.linears = nn.ModuleList()
+        self.conv_name = conv
+
+        conv_dict = {
+            "MLP": [None, 1],
+            "GCNConv": [GCNConv, 1],
+            "GATConv": [GATConv, 1],
+            "GINConv": [GINConv, 1], 
+            "EdgeConv": [EdgeConv, 2]
+        }
+        if self.conv_name not in conv_dict:
+            raise ValueError(f"Not support conv={conv}.")
+        
+        def create_block(in_dims, out_dims):
+            return nn.Sequential(
+                bnn.BayesLinear(0, Bayes_std, in_dims, out_dims),
+                BatchNorm1d(out_dims),
+                ReLU(),
+                Dropout(self.dropout)
             )
         
         input_emb_dim = dim_features
@@ -700,7 +844,7 @@ class SubtypingGraphArch(nn.Module):
                 block = create_block(alpha * input_emb_dim, out_emb_dim)
                 subnet = conv_class(block, **kwargs)
                 self.convs.append(subnet)
-                self.linears.append(Linear(out_emb_dim, out_emb_dim))
+                self.linears.append(bnn.BayesLinear(0, Bayes_std, input_emb_dim, out_emb_dim))
             elif self.conv_name in ["GCNConv", "GATConv"]:
                 subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
                 self.convs.append(subnet)
@@ -712,17 +856,18 @@ class SubtypingGraphArch(nn.Module):
                 
             input_emb_dim = out_emb_dim
             
-        self.attention_net = Attn_Net_Gated(
-            L=self.embedding_dims[-1],
-            D=self.embedding_dims[-1],
-            dropout=self.dropout > 0,
-            n_classes=1
+        self.gate_nn = Bayes_Attn_Net_Gated(
+            L=input_emb_dim,
+            D=out_emb_dim,
+            dropout=self.dropout,
+            n_classes=1,
+            Bayes_std=Bayes_std
         )
         self.global_attention = AttentionalAggregation(
-            gate_nn=self.attention_net,
-            nn=None
+            gate_nn=self.gate_nn,
+            nn=create_block(input_emb_dim, out_emb_dim)
         )
-        self.classifier = Linear(self.embedding_dims[-1], dim_target)
+        self.classifier = bnn.BayesLinear(0, Bayes_std, out_emb_dim, dim_target)
 
         self.aux_model = {}
 
@@ -741,7 +886,7 @@ class SubtypingGraphArch(nn.Module):
 
         feature = self.head(feature)
         for layer in range(1, self.num_layers):
-            feature = F.dropout(feature, p=self.dropout, training=self.training)
+            # feature = F.dropout(feature, p=self.dropout, training=self.training)
             if self.conv_name in ["MLP"]:
                 feature = self.convs[layer - 1](feature)
             else:
@@ -753,7 +898,7 @@ class SubtypingGraphArch(nn.Module):
         return output
     
     @staticmethod
-    def train_batch(model, batch_data, on_gpu, loss, optimizer):
+    def train_batch(model, batch_data, on_gpu, loss, optimizer, kl):
         device = "cuda" if on_gpu else "cpu"
         wsi_graphs = batch_data.to(device)
 
@@ -765,6 +910,8 @@ class SubtypingGraphArch(nn.Module):
         wsi_outputs = wsi_outputs.squeeze()
         wsi_labels = wsi_graphs.y.squeeze()
         loss = loss(wsi_outputs, wsi_labels)
+        kl_loss, kl_weight = kl["loss"](model)[0], kl["weight"]
+        loss = loss + kl_weight * kl_loss
         loss.backward()
         optimizer.step()
 
