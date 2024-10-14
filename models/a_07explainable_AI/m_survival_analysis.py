@@ -160,7 +160,7 @@ def prepare_graph_properties(data_dict, prop_keys):
 def prepare_graph_features(
     idx, 
     graph_path, 
-    subgraphs=["TUM", "STR", "LYM"], 
+    subgraphs=["TUM", "NORM", "DEB"], 
     mode="mean"
     ):
     if subgraphs is None:
@@ -579,7 +579,7 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [256, 64], # [16, 16, 8]
+        "layers": [512, 384], # [16, 16, 8]
         "dropout": dropout,  #0.5
         "conv": conv,
     }
@@ -704,8 +704,8 @@ if __name__ == "__main__":
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--feature_mode', default="vit", choices=["cnn", "vit", "uni", "conch"], type=str)
-    parser.add_argument('--node_features', default=384, choices=[2048, 384, 1024, 35], type=int)
+    parser.add_argument('--feature_mode', default="chief", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--node_features', default=768, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
@@ -789,8 +789,8 @@ if __name__ == "__main__":
         conv="MLP",
         n_works=8,
         batch_size=32,
-        dropout=0.,
-        BayesGNN=True
+        dropout=0.25,
+        BayesGNN=False
     )
 
     # survival analysis
@@ -801,8 +801,8 @@ if __name__ == "__main__":
     #     "num_edges", 
     #     # "num_components", 
     #     "degree", 
-    #     "closeness", 
-    #     "graph_diameter",
+    #     # "closeness", 
+    #     # "graph_diameter",
     #     "graph_assortativity",
     #     # "mean_neighbor_degree"
     # ]

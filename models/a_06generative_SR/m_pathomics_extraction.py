@@ -35,7 +35,7 @@ if __name__ == "__main__":
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
     parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
-    parser.add_argument('--node_features', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
+    parser.add_argument('--node_features', default=768, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
@@ -73,29 +73,29 @@ if __name__ == "__main__":
     #         )
 
     # extract wsi feature patch by patch
-    if args.mode == "wsi":
-        msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
-        logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
-    else:
-        msk_paths = None
-    if args.mode == "wsi":
-        bs = 32
-        nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-        for i in range(0, nb):
-            logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
-            start = i * bs
-            end = min(len(wsi_paths), (i + 1) * bs)
-            batch_wsi_paths = wsi_paths[start:end]
-            batch_msk_paths = msk_paths[start:end]
-            extract_pathomic_feature(
-                wsi_paths=batch_wsi_paths,
-                wsi_msk_paths=batch_msk_paths,
-                feature_mode=args.feature_mode,
-                save_dir=save_feature_dir,
-                mode=args.mode,
-                resolution=args.resolution,
-                units=args.units
-            )
+    # if args.mode == "wsi":
+    #     msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
+    #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
+    # else:
+    #     msk_paths = None
+    # if args.mode == "wsi":
+    #     bs = 32
+    #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
+    #     for i in range(19, nb):
+    #         logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+    #         start = i * bs
+    #         end = min(len(wsi_paths), (i + 1) * bs)
+    #         batch_wsi_paths = wsi_paths[start:end]
+    #         batch_msk_paths = msk_paths[start:end]
+    #         extract_pathomic_feature(
+    #             wsi_paths=batch_wsi_paths,
+    #             wsi_msk_paths=batch_msk_paths,
+    #             feature_mode=args.feature_mode,
+    #             save_dir=save_feature_dir,
+    #             mode=args.mode,
+    #             resolution=args.resolution,
+    #             units=args.units
+    #         )
 
     # zero-shot classification
     # if args.mode == "wsi":
@@ -138,7 +138,7 @@ if __name__ == "__main__":
     #         n_jobs=8
     #     )
 
-    # extract minimum spanning tree
+    # # extract minimum spanning tree
     # wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
     # extract_minimum_spanning_tree(
     #     wsi_graph_paths=wsi_graph_paths,
@@ -181,50 +181,55 @@ if __name__ == "__main__":
     # )
 
     # visualize feature
+    # graph_feature = True
+    # if graph_feature:
+    #     save_label_dir = save_feature_dir
+    # else:
+    #     save_label_dir = save_classification_dir
     # feature_visualization(
     #     wsi_paths=wsi_paths[0:900:90],
     #     save_feature_dir=save_feature_dir,
-    #     mode="tsne",
-    #     save_label_dir=None,
-    #     graph=True,
-    #     n_class=10
+    #     mode="umap",
+    #     save_label_dir=save_label_dir,
+    #     graph=graph_feature
     # )
 
     # visualize graph properties
     # graph_prop_paths = [save_feature_dir / f"{p.stem}.MST.graph.properties.json" for p in wsi_paths]
-    # # graph_prop_paths = [save_feature_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
-    # subgraph_dict = {
-    #     "ADI": [0, 4],
-    #     "BACK": [5, 8],
-    #     "DEB": [9, 11],
-    #     "LYM": [12, 16],
-    #     "MUC": [17, 20],
-    #     "MUS": [21, 25],
-    #     "NORM": [26, 26],
-    #     "STR": [27, 31],
-    #     "TUM": [32, 34]
-    # }
-    # graph_properties = [
-    #     "num_nodes", 
-    #     "num_edges", 
-    #     "num_components", 
-    #     "degree", 
-    #     "closeness", 
-    #     "graph_diameter",
-    #     "graph_assortativity",
-    #     "mean_neighbor_degree"
-    # ]
-    # plot_types = ["bar", "stem", "hist", "box", "voilin", "plot"]
-    # percentile = [90, 90, 90, 100, 90, 90, 100, 100]
-    # for i in range(len(graph_properties)):
-    #     plot_graph_properties(
-    #         prop_paths=graph_prop_paths,
-    #         subgraph_dict=None,
-    #         prop_key=graph_properties[i],
-    #         plotted=plot_types[2],
-    #         min_percentile=0,
-    #         max_percentile=percentile[i]
-    #     )
+    # subgraph_dict = None
+    graph_prop_paths = [save_feature_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
+    subgraph_dict = {
+        "ADI": [0, 4],
+        "BACK": [5, 8],
+        "DEB": [9, 11],
+        "LYM": [12, 16],
+        "MUC": [17, 20],
+        "MUS": [21, 25],
+        "NORM": [26, 26],
+        "STR": [27, 31],
+        "TUM": [32, 34]
+    }
+    graph_properties = [
+        "num_nodes", 
+        "num_edges", 
+        "num_components", 
+        "degree", 
+        "closeness", 
+        "graph_diameter",
+        "graph_assortativity",
+        "mean_neighbor_degree"
+    ]
+    plot_types = ["bar", "stem", "hist", "box", "voilin", "plot"]
+    percentile = [90, 90, 90, 100, 90, 90, 100, 100]
+    for i in range(len(graph_properties)):
+        plot_graph_properties(
+            prop_paths=graph_prop_paths,
+            subgraph_dict=subgraph_dict,
+            prop_key=graph_properties[i],
+            plotted=plot_types[4],
+            min_percentile=0,
+            max_percentile=percentile[i]
+        )
 
 
     ## visualize graph on wsi
@@ -233,7 +238,7 @@ if __name__ == "__main__":
     # logging.info(f"Visualizing graph of {wsi_name}...")
     # graph_path = save_feature_dir / f"{wsi_name}.MST.json"
     # label_path = save_feature_dir / f"{wsi_name}.label.npy"
-    # subgraph_id = [32, 34]
+    # subgraph_id = None #[32, 34]
     # if subgraph_id is not None: 
     #     prompts = load_prompts(args.prompts, index=0)
     #     class_start = prompts[subgraph_id[0]]

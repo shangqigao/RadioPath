@@ -19,8 +19,6 @@ from common.m_utils import recur_find_ext, rmdir, select_checkpoints
 from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig, NucleusInstanceSegmentor
 from tiatoolbox.models.architecture.vanilla import CNNBackbone, CNNModel
 from tiatoolbox.models.architecture.hipt import get_vit256
-from tiatoolbox.models.architecture.chief.ctran import ConvStem
-from tiatoolbox.models.architecture.chief.timm.timm import create_model
 from tiatoolbox.tools.stainnorm import get_normalizer
 from tiatoolbox.data import stain_norm_target
 from tiatoolbox.wsicore.wsireader import WSIReader
@@ -385,12 +383,16 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
 class CHIEF(torch.nn.Module):
     def __init__(self, model_path):
         super().__init__()
+        from tiatoolbox.models.architecture.chief.ctran import ConvStem
+        from tiatoolbox.models.architecture.chief.timm.timm import create_model
         self.model = create_model(
             'swin_tiny_patch4_window7_224', 
             embed_layer=ConvStem, 
-            pretrained=False,
-            checkpoint_path=model_path
+            pretrained=False
         )
+        self.model.head = torch.nn.Identity()
+        td = torch.load(model_path)
+        self.model.load_state_dict(td['model'], strict=True)
     
     def forward(self, imgs):
         feat = self.model(imgs)

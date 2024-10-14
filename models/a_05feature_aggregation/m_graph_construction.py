@@ -732,7 +732,8 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
     plt.ylim(-25, 25)
     ax.axis('off')
     ax.axis('tight') 
-    plt.savefig('a_05feature_aggregation/feature_visualization.jpg')
+    plt.savefig(f'a_05feature_aggregation/{mode}_visualization.jpg')
+    print("Visualization done!")
 
 
 if __name__ == "__main__":
