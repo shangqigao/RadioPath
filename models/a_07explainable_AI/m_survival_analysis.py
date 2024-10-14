@@ -213,6 +213,14 @@ def prepare_graph_features(
         feat_dict[k] = feat
     return {f"{idx}": feat_dict}
 
+def load_wsi_level_features(idx, wsi_feature_path):
+    feat_list = np.array(np.load(wsi_feature_path)).tolist()
+    feat_dict = {}
+    for i, feat in enumerate(feat_list):
+        k = f"graph.feature{i}"
+        feat_dict[k] = feat
+    return {f"{idx}": feat_dict}
+
 def plot_coefficients(coefs, n_highlight):
     _, ax = plt.subplots(figsize=(9, 6))
     n_features = coefs.shape[0]
@@ -258,7 +266,16 @@ def matched_survival_graph(save_clinical_dir, save_graph_paths):
     df = df.loc[matched_index]
     return df, matched_i
 
-def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save_properties_paths, prop_keys, l1_ratio=1.0, used="all", n_jobs=32):
+def cox_proportional_hazard_regression(
+        save_clinical_dir, 
+        save_graph_paths, 
+        save_properties_paths, 
+        prop_keys, 
+        l1_ratio=1.0, 
+        used="all", 
+        n_jobs=32,
+        aggregation=True
+        ):
     df, matched_i = matched_survival_graph(save_clinical_dir, save_properties_paths)
     df = df[['event', 'duration']].to_records(index=False)
     print("Selected survival data:", df.shape)
@@ -274,10 +291,16 @@ def cox_proportional_hazard_regression(save_clinical_dir, save_graph_paths, save
 
     # Prepare the graph features in parallel
     selected_graph_paths = [save_graph_paths[i] for i in matched_i]
-    dict_list = joblib.Parallel(n_jobs=n_jobs)(
-        joblib.delayed(prepare_graph_features)(idx, graph_path)
-        for idx, graph_path in enumerate(selected_graph_paths)
-    )
+    if aggregation:
+        dict_list = joblib.Parallel(n_jobs=n_jobs)(
+            joblib.delayed(prepare_graph_features)(idx, graph_path)
+            for idx, graph_path in enumerate(selected_graph_paths)
+        )
+    else:
+        dict_list = joblib.Parallel(n_jobs=n_jobs)(
+            joblib.delayed(load_wsi_level_features)(idx, graph_path)
+            for idx, graph_path in enumerate(selected_graph_paths)
+        )
     feat_dict = {}
     for d in dict_list: feat_dict.update(d)
     feat_list = [feat_dict[f"{i}"] for i in range(len(selected_graph_paths))]
@@ -733,85 +756,90 @@ if __name__ == "__main__":
     # plot survival curve
     # plot_survival_curve(save_clinical_dir)
 
-    # split data set
-    num_folds = 5
-    test_ratio = 0.2
-    train_ratio = 0.8 * 0.9
-    valid_ratio = 0.8 * 0.1
-    graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    df, matched_i = matched_survival_graph(save_clinical_dir, graph_paths)
-    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    matched_graph_paths = [graph_paths[i] for i in matched_i]
-    splits = generate_data_split(
-        x=matched_graph_paths,
-        y=y,
-        train=train_ratio,
-        valid=valid_ratio,
-        test=test_ratio,
-        num_folds=num_folds,
-    )
-    mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/survival_splits.dat"
-    joblib.dump(splits, split_path)
-    splits = joblib.load(split_path)
-    num_train = len(splits[0]["train"])
-    logging.info(f"Number of training samples: {num_train}.")
-    num_valid = len(splits[0]["valid"])
-    logging.info(f"Number of validating samples: {num_valid}.")
-    num_test = len(splits[0]["test"])
-    logging.info(f"Number of testing samples: {num_test}.")
+    # # split data set
+    # num_folds = 5
+    # test_ratio = 0.2
+    # train_ratio = 0.8 * 0.9
+    # valid_ratio = 0.8 * 0.1
+    # graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    # df, matched_i = matched_survival_graph(save_clinical_dir, graph_paths)
+    # y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    # matched_graph_paths = [graph_paths[i] for i in matched_i]
+    # splits = generate_data_split(
+    #     x=matched_graph_paths,
+    #     y=y,
+    #     train=train_ratio,
+    #     valid=valid_ratio,
+    #     test=test_ratio,
+    #     num_folds=num_folds,
+    # )
+    # mkdir(save_model_dir)
+    # split_path = f"{save_model_dir}/survival_splits.dat"
+    # joblib.dump(splits, split_path)
+    # splits = joblib.load(split_path)
+    # num_train = len(splits[0]["train"])
+    # logging.info(f"Number of training samples: {num_train}.")
+    # num_valid = len(splits[0]["valid"])
+    # logging.info(f"Number of validating samples: {num_valid}.")
+    # num_test = len(splits[0]["test"])
+    # logging.info(f"Number of testing samples: {num_test}.")
 
-    # compute mean and std on training data for normalization 
-    splits = joblib.load(split_path)
-    train_graph_paths = [path for path, _ in splits[0]["train"]]
-    loader = SurvivalGraphDataset(train_graph_paths, mode="infer")
-    loader = DataLoader(
-        loader,
-        num_workers=8,
-        batch_size=1,
-        shuffle=False,
-        drop_last=False,
-    )
-    node_features = [v.x.numpy() for v in loader]
-    node_features = np.concatenate(node_features, axis=0)
-    node_scaler = StandardScaler(copy=False)
-    node_scaler.fit(node_features)
-    scaler_path = f"{save_model_dir}/survival_node_scaler.dat"
-    joblib.dump(node_scaler, scaler_path)
+    # # compute mean and std on training data for normalization 
+    # splits = joblib.load(split_path)
+    # train_graph_paths = [path for path, _ in splits[0]["train"]]
+    # loader = SurvivalGraphDataset(train_graph_paths, mode="infer")
+    # loader = DataLoader(
+    #     loader,
+    #     num_workers=8,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     drop_last=False,
+    # )
+    # node_features = [v.x.numpy() for v in loader]
+    # node_features = np.concatenate(node_features, axis=0)
+    # node_scaler = StandardScaler(copy=False)
+    # node_scaler.fit(node_features)
+    # scaler_path = f"{save_model_dir}/survival_node_scaler.dat"
+    # joblib.dump(node_scaler, scaler_path)
 
-    # training
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_path,
-        num_node_features=args.node_features,
-        model_dir=save_model_dir,
-        conv="MLP",
-        n_works=8,
-        batch_size=32,
-        dropout=0.,
-        BayesGNN=True
-    )
+    # # training
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_path,
+    #     num_node_features=args.node_features,
+    #     model_dir=save_model_dir,
+    #     conv="MLP",
+    #     n_works=8,
+    #     batch_size=32,
+    #     dropout=0.,
+    #     BayesGNN=True
+    # )
 
     # survival analysis
-    # graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    # graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
-    # graph_properties = [
-    #     "num_nodes", 
-    #     "num_edges", 
-    #     # "num_components", 
-    #     "degree", 
-    #     # "closeness", 
-    #     # "graph_diameter",
-    #     "graph_assortativity",
-    #     # "mean_neighbor_degree"
-    # ]
-    # cox_proportional_hazard_regression(
-    #     save_clinical_dir=save_clinical_dir,
-    #     save_graph_paths=graph_paths,
-    #     save_properties_paths=graph_prop_paths,
-    #     prop_keys=graph_properties,
-    #     l1_ratio=0.9,
-    #     used=["all", "graph_properties", "graph_features"][0],
-    #     n_jobs=32
-    # )
+    aggregation = False
+    if aggregation:
+        graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    else:
+        graph_paths = [save_pathomics_dir / f"{p.stem}.WSI.features.npy" for p in wsi_paths]
+    graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
+    graph_properties = [
+        "num_nodes", 
+        "num_edges", 
+        # "num_components", 
+        "degree", 
+        # "closeness", 
+        # "graph_diameter",
+        "graph_assortativity",
+        # "mean_neighbor_degree"
+    ]
+    cox_proportional_hazard_regression(
+        save_clinical_dir=save_clinical_dir,
+        save_graph_paths=graph_paths,
+        save_properties_paths=graph_prop_paths,
+        prop_keys=graph_properties,
+        l1_ratio=0.9,
+        used=["all", "graph_properties", "graph_features"][0],
+        n_jobs=32,
+        aggregation=aggregation
+    )
