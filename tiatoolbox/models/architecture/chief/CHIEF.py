@@ -81,7 +81,9 @@ class Attn_Net_Gated(nn.Module):
 
 class CHIEF(nn.Module):
     def __init__(self, gate=True, size_arg="large", dropout=True, n_classes=2,
-                 instance_loss_fn=nn.CrossEntropyLoss(),**kwargs):
+                 instance_loss_fn=nn.CrossEntropyLoss(), 
+                 text_embedding_path='./model_weight/Text_emdding.pth',
+                 **kwargs):
         super(CHIEF, self).__init__()
         self.size_dict = {'xs': [384, 256, 256], "small": [768, 512, 256], "big": [1024, 512, 384], 'large': [2048, 1024, 512]}
         size = self.size_dict[size_arg]
@@ -106,7 +108,7 @@ class CHIEF(nn.Module):
         self.text_to_vision=nn.Sequential(nn.Linear(768, size[1]), nn.ReLU(), nn.Dropout(p=0.25))
 
         self.register_buffer('organ_embedding', torch.randn(19, 768))
-        word_embedding = torch.load(r'./model_weight/Text_emdding.pth')
+        word_embedding = torch.load(text_embedding_path)
         self.organ_embedding.data = word_embedding.float()
         self.text_to_vision=nn.Sequential(nn.Linear(768, size[1]), nn.ReLU(), nn.Dropout(p=0.25))
 

@@ -469,7 +469,8 @@ def extract_chief_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolu
 
 def extract_chief_wsi_level_features(patch_feature_paths, anatomic=13, on_gpu=True):
     from tiatoolbox.models.architecture.chief.CHIEF import CHIEF
-    model = CHIEF(size_arg="small", dropout=True, n_classes=2)
+    text_embedding_path = './checkpoints/CHIEF/Text_emdding.pth'
+    model = CHIEF(size_arg="small", dropout=True, n_classes=2, text_embedding_path=text_embedding_path)
     td = torch.load('./checkpoints/CHIEF/CHIEF_pretraining.pth')
     model.load_state_dict(td, strict=True)
     device = "cuda" if on_gpu else "cpu"
