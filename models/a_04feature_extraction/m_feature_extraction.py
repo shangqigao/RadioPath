@@ -10,6 +10,7 @@ import argparse
 import pathlib
 import timm
 import cv2
+import logging
 
 import numpy as np
 import albumentations as A
@@ -465,6 +466,28 @@ def extract_chief_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolu
     rmdir(tmp_save_dir)
 
     return output_map_list
+
+def extract_chief_wsi_level_features(patch_feature_paths, anatomic=13, on_gpu=True):
+    from tiatoolbox.models.architecture.chief.CHIEF import CHIEF
+    model = CHIEF(size_arg="small", dropout=True, n_classes=2)
+    td = torch.load('./checkpoints/CHIEF/CHIEF_pretraining.pth')
+    model.load_state_dict(td, strict=True)
+    device = "cuda" if on_gpu else "cpu"
+    model.to(device)
+    model.eval()
+
+    for path in patch_feature_paths:
+        features = np.load(path)
+        with torch.no_grad():
+            x = torch.tensor(features).unsqueeze(0).to(device)
+            anatomic = torch.tensor([anatomic]).to(device)
+            result = model(x, anatomic)
+            wsi_feature_emb = result['WSI_feature'].squeeze().cpu().numpy()
+        save_path = f"{path}".replace(".features.npy", ".WSI.features.npy")
+        save_name = save_path.split("/")[-1]
+        logging.info(f"Saving WSI-level features as {save_name} ...")
+        np.save(save_path, wsi_feature_emb)
+    return
 
 def extract_composition_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.5, units="mpp"):
     inst_segmentor = NucleusInstanceSegmentor(

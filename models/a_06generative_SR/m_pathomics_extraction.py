@@ -10,6 +10,7 @@ from common.m_utils import select_wsi
 
 from models.a_02tissue_masking.m_tissue_masking import generate_wsi_tissue_mask
 from models.a_04feature_extraction.m_feature_extraction import extract_pathomic_feature
+from models.a_04feature_extraction.m_feature_extraction import extract_chief_wsi_level_features
 from models.a_05feature_aggregation.m_graph_construction import construct_wsi_graph
 from models.a_05feature_aggregation.m_graph_construction import visualize_graph
 from models.a_05feature_aggregation.m_graph_construction import feature_visualization
@@ -96,6 +97,17 @@ if __name__ == "__main__":
     #             resolution=args.resolution,
     #             units=args.units
     #         )
+
+    # extract WSI-level features
+    label_dict = {'Prostate': 0, 'Lung': 1, 'Endometrial': 2, 'Breast': 3, 'Head Neck': 4, 'Colorectal': 5,
+        'Thyroid': 6, 'Skin': 7, 'Esophagogastric': 8, 'Ovarian': 9, 'Glioma': 10, 'Bladder': 11,
+        'Adrenal': 12, 'Renal': 13, 'Germ Cell': 14, 'Pancreatobiliary': 15, 'Liver': 16, 'Cervix': 17}
+    if args.feature_mode == "chief":
+        wsi_feature_paths = [save_feature_dir / f"{p.stem}.features.npy" for p in wsi_paths]
+        extract_chief_wsi_level_features(
+            patch_feature_paths=wsi_feature_paths,
+            anatomic=label_dict["Renal"]
+        )
 
     # zero-shot classification
     # if args.mode == "wsi":
@@ -197,39 +209,39 @@ if __name__ == "__main__":
     # visualize graph properties
     # graph_prop_paths = [save_feature_dir / f"{p.stem}.MST.graph.properties.json" for p in wsi_paths]
     # subgraph_dict = None
-    graph_prop_paths = [save_feature_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
-    subgraph_dict = {
-        "ADI": [0, 4],
-        "BACK": [5, 8],
-        "DEB": [9, 11],
-        "LYM": [12, 16],
-        "MUC": [17, 20],
-        "MUS": [21, 25],
-        "NORM": [26, 26],
-        "STR": [27, 31],
-        "TUM": [32, 34]
-    }
-    graph_properties = [
-        "num_nodes", 
-        "num_edges", 
-        "num_components", 
-        "degree", 
-        "closeness", 
-        "graph_diameter",
-        "graph_assortativity",
-        "mean_neighbor_degree"
-    ]
-    plot_types = ["bar", "stem", "hist", "box", "voilin", "plot"]
-    percentile = [90, 90, 90, 100, 90, 90, 100, 100]
-    for i in range(len(graph_properties)):
-        plot_graph_properties(
-            prop_paths=graph_prop_paths,
-            subgraph_dict=subgraph_dict,
-            prop_key=graph_properties[i],
-            plotted=plot_types[4],
-            min_percentile=0,
-            max_percentile=percentile[i]
-        )
+    # graph_prop_paths = [save_feature_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
+    # subgraph_dict = {
+    #     "ADI": [0, 4],
+    #     "BACK": [5, 8],
+    #     "DEB": [9, 11],
+    #     "LYM": [12, 16],
+    #     "MUC": [17, 20],
+    #     "MUS": [21, 25],
+    #     "NORM": [26, 26],
+    #     "STR": [27, 31],
+    #     "TUM": [32, 34]
+    # }
+    # graph_properties = [
+    #     "num_nodes", 
+    #     "num_edges", 
+    #     "num_components", 
+    #     "degree", 
+    #     "closeness", 
+    #     "graph_diameter",
+    #     "graph_assortativity",
+    #     "mean_neighbor_degree"
+    # ]
+    # plot_types = ["bar", "stem", "hist", "box", "voilin", "plot"]
+    # percentile = [90, 90, 90, 100, 90, 90, 100, 100]
+    # for i in range(len(graph_properties)):
+    #     plot_graph_properties(
+    #         prop_paths=graph_prop_paths,
+    #         subgraph_dict=subgraph_dict,
+    #         prop_key=graph_properties[i],
+    #         plotted=plot_types[4],
+    #         min_percentile=0,
+    #         max_percentile=percentile[i]
+    #     )
 
 
     ## visualize graph on wsi
