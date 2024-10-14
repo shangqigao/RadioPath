@@ -789,8 +789,8 @@ if __name__ == "__main__":
         conv="MLP",
         n_works=8,
         batch_size=32,
-        dropout=0.25,
-        BayesGNN=False
+        dropout=0.,
+        BayesGNN=True
     )
 
     # survival analysis
