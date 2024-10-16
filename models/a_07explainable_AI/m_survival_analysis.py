@@ -242,14 +242,15 @@ def plot_coefficients(coefs, n_highlight):
     plt.subplots_adjust(left=0.2)
     plt.savefig("a_07explainable_AI/coefficients.jpg")
 
-def matched_survival_graph(save_clinical_dir, save_graph_paths):
+def matched_survival_graph(save_clinical_dir, save_graph_paths, stages=None):
     df = pd.read_csv(f"{save_clinical_dir}/TCGA_PanKidney_survival_data.csv")
     
     # Prepare the survival data
     df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
     df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
     df = df[df['duration'].notna()]
-    df = df[df['ajcc_pathologic_stage'].isin(["Stage I", "Stage II"])]
+    if stages is not None:
+        df = df[df['ajcc_pathologic_stage'].isin(stages)]
     # df = df[df['ajcc_pathologic_stage'].isin(["Stage III"])]
     print("Survival data strcuture:", df.shape)
 
@@ -272,11 +273,12 @@ def cox_proportional_hazard_regression(
         save_properties_paths, 
         prop_keys, 
         l1_ratio=1.0, 
+        stages=None,
         used="all", 
         n_jobs=32,
         aggregation=True
         ):
-    df, matched_i = matched_survival_graph(save_clinical_dir, save_properties_paths)
+    df, matched_i = matched_survival_graph(save_clinical_dir, save_properties_paths, stages)
     df = df[['event', 'duration']].to_records(index=False)
     print("Selected survival data:", df.shape)
 
@@ -817,7 +819,7 @@ if __name__ == "__main__":
     # )
 
     # survival analysis
-    aggregation = False
+    aggregation = False # false if load wsi-level features else true
     if aggregation:
         graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
     else:
@@ -839,7 +841,8 @@ if __name__ == "__main__":
         save_properties_paths=graph_prop_paths,
         prop_keys=graph_properties,
         l1_ratio=0.9,
-        used=["all", "graph_properties", "graph_features"][0],
+        stages=["Stage I", "Stage II"],
+        used=["all", "graph_properties", "graph_features"][2],
         n_jobs=32,
         aggregation=aggregation
     )
