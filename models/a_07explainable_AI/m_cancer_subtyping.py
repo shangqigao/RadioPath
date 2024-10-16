@@ -25,7 +25,7 @@ from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegression as PlattScaling
 from sklearn.metrics import average_precision_score as auprc_scorer
 from sklearn.metrics import roc_auc_score as auroc_scorer
-from sklearn.metrics import accuracy_score as acc_scorer
+from sklearn.metrics import balanced_accuracy_score as acc_scorer
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
