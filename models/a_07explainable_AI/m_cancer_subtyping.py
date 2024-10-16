@@ -14,6 +14,7 @@ import pandas as pd
 import numpy as np
 import torch
 import torchbnn as bnn
+from collections import Counter
 from scipy.stats import zscore
 from torch_geometric.loader import DataLoader
 from tiatoolbox import logger
@@ -126,6 +127,42 @@ def matched_survival_graph(save_clinical_dir, save_graph_paths):
     df = df.loc[matched_index]
     return df, matched_i
 
+def BalancedShuffleSplitter(y, sample_size, random_seed=None):
+    uniq_levels = np.unique(y)
+
+    if not random_seed is None:
+        np.random.seed(random_seed)
+
+    # find observation index of each class levels
+    groupby_levels = {}
+    for level in uniq_levels:
+        obs_idx = [idx for idx, val in enumerate(y) if val == level]
+        groupby_levels[level] = obs_idx
+    # oversampling on observations of each label
+    train_idx = []
+    for gb_level, gb_idx in groupby_levels.items():
+        over_sample_idx = np.random.choice(gb_idx, size=sample_size, replace=True).tolist()
+        train_idx += over_sample_idx
+    np.random.shuffle(train_idx)
+
+    if  ((len(train_idx)) == (sample_size*len(uniq_levels))):
+        print('number of sampled example ', sample_size*len(uniq_levels), 'number of sample per class ', sample_size, ' #classes: ', len(list(set(uniq_levels))))
+    else:
+        print('number of samples is wrong ')
+
+    labels_train = y[train_idx]
+    labels, values = zip(*Counter(labels_train).items())
+    print('number of classes ', len(list(set(labels_train))))
+    check = all(x == values[0] for x in values)
+    print(check)
+    if check == True:
+        print('Good! all classes are balanced')
+    else:
+        print('Repeat again! classes are imbalanced')
+    
+    test_idx = [i for i in range(len(y))] - train_idx
+    return train_idx, test_idx
+
 def generate_data_split(
         x: list,
         y: list,
@@ -134,20 +171,26 @@ def generate_data_split(
         test: float,
         num_folds: int,
         seed: int = 5,
+        balanced=False
 ):
     """Helper to generate splits
     Args:
         x (list): a list of image paths
         y (list): a list of annotation paths
-        train (float): ratio of training samples
-        valid (float): ratio of validating samples
+        train (float or int): if int, number of training samples per class
+        if float, ratio of training samples
         test (float): ratio of testing samples
         num_folds (int): number of folds for cross-validation
         seed (int): random seed
+        balanced (bool): if true, sampling equal number of samples for each class
     Returns:
         splits (list): a list of folds, each fold consists of train, valid, and test splits
     """
-    assert train + valid + test - 1.0 < 1.0e-10, "Ratios must sum to 1.0"
+    if balanced:
+        assert train >= 1, "The number training samples should be no less than 1"
+        assert test < 1, "The ratio of testing samples should be less than 1"
+    else:
+        assert train + valid + test - 1.0 < 1.0e-10, "Ratios must sum to 1.0"
 
     outer_splitter = StratifiedShuffleSplit(
         n_splits=num_folds,
@@ -163,6 +206,7 @@ def generate_data_split(
     l = np.array(y)
 
     splits = []
+    random_seed = seed
     for train_valid_idx, test_idx in outer_splitter.split(x, l):
         test_x = [x[idx] for idx in test_idx]
         test_y = [y[idx] for idx in test_idx]
@@ -170,7 +214,12 @@ def generate_data_split(
         y_ = [y[idx] for idx in train_valid_idx]
         l_ = [l[idx] for idx in train_valid_idx]
 
-        train_idx, valid_idx = next(iter(inner_splitter.split(x_, l_)))
+        if balanced:
+            train_idx, valid_idx = BalancedShuffleSplitter(l_, train, random_seed)
+            random_seed += 1
+        else:
+            train_idx, valid_idx = next(iter(inner_splitter.split(x_, l_)))
+
         valid_x = [x_[idx] for idx in valid_idx]
         valid_y = [y_[idx] for idx in valid_idx]
         train_x = [x_[idx] for idx in train_idx]
@@ -521,23 +570,31 @@ if __name__ == "__main__":
     # plot survival curve
     # plot_survival_curve(save_clinical_dir)
 
-    # split data set
-    num_folds = 5
-    test_ratio = 0.2
-    train_ratio = 0.8 * 0.9
-    valid_ratio = 0.8 * 0.1
+    # match and split data set
     graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
     df, matched_i = matched_survival_graph(save_clinical_dir, graph_paths)
     lab_dict = {"TCGA-KIRC": 0, "TCGA-KIRP": 1, "TCGA-KICH": 2}
     y = df["project_id"].apply(lambda x: lab_dict[x]).to_numpy(dtype=np.int32).tolist()
     matched_graph_paths = [graph_paths[i] for i in matched_i]
+
+    num_folds = 5
+    balanced_sampling = True
+    if balanced_sampling:
+        test_ratio = 0.5
+        train = 1
+        valid_ratio = 1 - (train / len(matched_graph_paths)) - test_ratio
+    else:
+        test_ratio = 0.2
+        train = 0.8 * 0.9
+        valid_ratio = 0.8 * 0.1
     splits = generate_data_split(
         x=matched_graph_paths,
         y=y,
-        train=train_ratio,
+        train=train,
         valid=valid_ratio,
         test=test_ratio,
         num_folds=num_folds,
+        balanced=balanced_sampling
     )
     mkdir(save_model_dir)
     split_path = f"{save_model_dir}/subtyping_splits.dat"
@@ -578,6 +635,6 @@ if __name__ == "__main__":
         conv="MLP",
         n_works=8,
         batch_size=32,
-        BayesGNN=False,
-        dropout=0.25
+        dropout=0.25,
+        BayesGNN=False
     )
