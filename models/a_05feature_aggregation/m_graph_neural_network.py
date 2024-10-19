@@ -349,11 +349,13 @@ class Bayes_Attn_Net_Gated(nn.Module):
     def __init__(self, L=1024, D=256, dropout=0., n_classes=1, Bayes_std=0.1):
         super(Bayes_Attn_Net_Gated, self).__init__()
         self.attention_a = [
-            bnn.BayesLinear(0, Bayes_std, L, D),
+            # bnn.BayesLinear(0, Bayes_std, L, D),
+            nn.Linear(L, D),
             nn.Tanh()]
 
         self.attention_b = [
-            bnn.BayesLinear(0, Bayes_std, L, D),
+            # bnn.BayesLinear(0, Bayes_std, L, D),
+            nn.Linear(L, D),
             nn.Sigmoid()]
         if dropout > 0:
             self.attention_a.append(nn.Dropout(dropout))
@@ -363,6 +365,7 @@ class Bayes_Attn_Net_Gated(nn.Module):
         self.attention_b = nn.Sequential(*self.attention_b)
 
         self.attention_c = bnn.BayesLinear(0, Bayes_std, D, n_classes)
+        # self.attention_c = nn.Linear(D, n_classes)
 
     def forward(self, x):
         a = self.attention_a(x)
@@ -406,7 +409,6 @@ class SurvivalGraphArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                BatchNorm1d(out_dims),
                 ReLU(),
                 Dropout(self.dropout)
             )
@@ -439,14 +441,14 @@ class SurvivalGraphArch(nn.Module):
         self.gate_nn = Attn_Net_Gated(
             L=input_emb_dim,
             D=out_emb_dim,
-            dropout=self.dropout,
+            dropout=0.25,
             n_classes=1
         )
         self.global_attention = AttentionalAggregation(
             gate_nn=self.gate_nn,
-            nn=create_block(input_emb_dim, out_emb_dim)
+            nn=None
         )
-        self.classifier = Linear(self.embedding_dims[-1], dim_target)
+        self.classifier = Linear(input_emb_dim, dim_target)
 
     def save(self, path):
         state_dict = self.state_dict()
@@ -502,9 +504,9 @@ class SurvivalGraphArch(nn.Module):
         model.eval()
         with torch.inference_mode():
             wsi_outputs = model(wsi_graphs)
-        wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
+        wsi_outputs = wsi_outputs.cpu().numpy()
         if wsi_graphs.y is not None:
-            wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
+            wsi_labels = wsi_graphs.y.cpu().numpy()
 
             return [wsi_outputs, wsi_labels]
         return [wsi_outputs]
@@ -519,7 +521,7 @@ class SurvivalBayesGraphArch(nn.Module):
             layers=None,
             dropout=0.0,
             conv="GINConv",
-            Bayes_std=0.05,
+            Bayes_std=0.1,
             **kwargs,
     ):
         super().__init__()
@@ -544,8 +546,7 @@ class SurvivalBayesGraphArch(nn.Module):
         
         def create_block(in_dims, out_dims):
             return nn.Sequential(
-                bnn.BayesLinear(0, Bayes_std, in_dims, out_dims),
-                BatchNorm1d(out_dims),
+                Linear(in_dims, out_dims),
                 ReLU(),
                 Dropout(self.dropout)
             )
@@ -563,7 +564,7 @@ class SurvivalBayesGraphArch(nn.Module):
         #         block = create_block(alpha * input_emb_dim, out_emb_dim)
         #         subnet = conv_class(block, **kwargs)
         #         self.convs.append(subnet)
-        #         self.linears.append(Linear(out_emb_dim, out_emb_dim))
+        #         self.linears.append(bnn.BayesLinear(0, Bayes_std, input_emb_dim, out_emb_dim))
         #     elif self.conv_name in ["GCNConv", "GATConv"]:
         #         subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
         #         self.convs.append(subnet)
@@ -578,15 +579,15 @@ class SurvivalBayesGraphArch(nn.Module):
         self.gate_nn = Bayes_Attn_Net_Gated(
             L=input_emb_dim,
             D=out_emb_dim,
-            dropout=self.dropout,
+            dropout=0.25,
             n_classes=1,
             Bayes_std=Bayes_std
         )
         self.global_attention = AttentionalAggregation(
             gate_nn=self.gate_nn,
-            nn=create_block(input_emb_dim, out_emb_dim)
+            nn=None
         )
-        self.classifier = bnn.BayesLinear(0, Bayes_std, self.embedding_dims[-1], dim_target)
+        self.classifier = Linear(input_emb_dim, dim_target)
 
     def save(self, path):
         state_dict = self.state_dict()
@@ -644,9 +645,9 @@ class SurvivalBayesGraphArch(nn.Module):
         model.eval()
         with torch.inference_mode():
             wsi_outputs = model(wsi_graphs)
-        wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
+        wsi_outputs = wsi_outputs.cpu().numpy()
         if wsi_graphs.y is not None:
-            wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
+            wsi_labels = wsi_graphs.y.cpu().numpy()
 
             return [wsi_outputs, wsi_labels]
         return [wsi_outputs]
@@ -686,7 +687,6 @@ class SubtypingGraphArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                BatchNorm1d(out_dims),
                 ReLU(),
                 Dropout(self.dropout)
             )
@@ -719,14 +719,14 @@ class SubtypingGraphArch(nn.Module):
         self.gate_nn = Attn_Net_Gated(
             L=input_emb_dim,
             D=out_emb_dim,
-            dropout=self.dropout,
+            dropout=0.25,
             n_classes=1
         )
         self.global_attention = AttentionalAggregation(
             gate_nn=self.gate_nn,
-            nn=create_block(input_emb_dim, out_emb_dim)
+            nn=None
         )
-        self.classifier = Linear(out_emb_dim, dim_target)
+        self.classifier = Linear(input_emb_dim, dim_target)
 
         self.aux_model = {}
 
@@ -786,9 +786,9 @@ class SubtypingGraphArch(nn.Module):
         model.eval()
         with torch.inference_mode():
             wsi_outputs = model(wsi_graphs)
-        wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
+        wsi_outputs = wsi_outputs.cpu().numpy()
         if wsi_graphs.y is not None:
-            wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
+            wsi_labels = wsi_graphs.y.cpu().numpy()
             return [wsi_outputs, wsi_labels]
         return [wsi_outputs]
 
@@ -802,7 +802,7 @@ class SubtypingBayesGraphArch(nn.Module):
             layers=None,
             dropout=0.0,
             conv="GINConv",
-            Bayes_std=0.05,
+            Bayes_std=0.1,
             **kwargs,
     ):
         super().__init__()
@@ -827,8 +827,7 @@ class SubtypingBayesGraphArch(nn.Module):
         
         def create_block(in_dims, out_dims):
             return nn.Sequential(
-                bnn.BayesLinear(0, Bayes_std, in_dims, out_dims),
-                BatchNorm1d(out_dims),
+                Linear(in_dims, out_dims),
                 ReLU(),
                 Dropout(self.dropout)
             )
@@ -861,15 +860,15 @@ class SubtypingBayesGraphArch(nn.Module):
         self.gate_nn = Bayes_Attn_Net_Gated(
             L=input_emb_dim,
             D=out_emb_dim,
-            dropout=self.dropout,
+            dropout=0.25,
             n_classes=1,
             Bayes_std=Bayes_std
         )
         self.global_attention = AttentionalAggregation(
             gate_nn=self.gate_nn,
-            nn=create_block(input_emb_dim, out_emb_dim)
+            nn=None
         )
-        self.classifier = bnn.BayesLinear(0, Bayes_std, out_emb_dim, dim_target)
+        self.classifier = Linear(input_emb_dim, dim_target)
 
         self.aux_model = {}
 
@@ -931,9 +930,9 @@ class SubtypingBayesGraphArch(nn.Module):
         model.eval()
         with torch.inference_mode():
             wsi_outputs = model(wsi_graphs)
-        wsi_outputs = wsi_outputs.squeeze().cpu().numpy()
+        wsi_outputs = wsi_outputs.cpu().numpy()
         if wsi_graphs.y is not None:
-            wsi_labels = wsi_graphs.y.squeeze().cpu().numpy()
+            wsi_labels = wsi_graphs.y.cpu().numpy()
             return [wsi_outputs, wsi_labels]
         return [wsi_outputs]
 

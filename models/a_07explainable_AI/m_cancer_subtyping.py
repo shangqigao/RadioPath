@@ -146,7 +146,7 @@ def BalancedShuffleSplitter(y, sample_size, random_seed=None):
     np.random.shuffle(train_idx)
 
     if  ((len(train_idx)) == (sample_size*len(uniq_levels))):
-        print('number of sampled example ', sample_size*len(uniq_levels), 'number of sample per class ', sample_size, ' #classes: ', len(list(set(uniq_levels))))
+        print('number of sampled example:', sample_size*len(uniq_levels), 'number of sample per class:', sample_size, ' #classes:', len(list(set(uniq_levels))))
     else:
         print('number of samples is wrong ')
 
@@ -154,13 +154,12 @@ def BalancedShuffleSplitter(y, sample_size, random_seed=None):
     labels, values = zip(*Counter(labels_train).items())
     print('number of classes ', len(list(set(labels_train))))
     check = all(x == values[0] for x in values)
-    print(check)
     if check == True:
         print('Good! all classes are balanced')
     else:
         print('Repeat again! classes are imbalanced')
     
-    test_idx = [i for i in range(len(y))] - train_idx
+    test_idx = list(set([i for i in range(len(y))]) - set(train_idx))
     return train_idx, test_idx
 
 def generate_data_split(
@@ -189,19 +188,23 @@ def generate_data_split(
     if balanced:
         assert train >= 1, "The number training samples should be no less than 1"
         assert test < 1, "The ratio of testing samples should be less than 1"
+        outer_splitter = StratifiedShuffleSplit(
+            n_splits=num_folds,
+            test_size=test,
+            random_state=seed,
+        )
     else:
         assert train + valid + test - 1.0 < 1.0e-10, "Ratios must sum to 1.0"
-
-    outer_splitter = StratifiedShuffleSplit(
-        n_splits=num_folds,
-        train_size=train + valid,
-        random_state=seed,
-    )
-    inner_splitter = StratifiedShuffleSplit(
-        n_splits=1,
-        train_size=train / (train + valid),
-        random_state=seed,
-    )
+        outer_splitter = StratifiedShuffleSplit(
+            n_splits=num_folds,
+            train_size=train + valid,
+            random_state=seed,
+        )
+        inner_splitter = StratifiedShuffleSplit(
+            n_splits=1,
+            train_size=train / (train + valid),
+            random_state=seed,
+        )
 
     l = np.array(y)
 
@@ -214,6 +217,7 @@ def generate_data_split(
         y_ = [y[idx] for idx in train_valid_idx]
         l_ = [l[idx] for idx in train_valid_idx]
 
+        l_ = np.array(l_)
         if balanced:
             train_idx, valid_idx = BalancedShuffleSplitter(l_, train, random_seed)
             random_seed += 1
@@ -271,10 +275,11 @@ def run_once(
         model.load(*pretrained)
     model = model.to("cuda")
     loss = update_loss(mode="CE")
-    optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
+    # optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
+    optimizer = torch.optim.AdamW(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-6)
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20, eta_min=1e-6)
 
     loader_dict = {}
     for subset_name, subset in dataset_dict.items():
@@ -305,6 +310,7 @@ def run_once(
                     pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
                 else:
                     output = model.infer_batch(model, batch_data, on_gpu)
+                    batch_size = loader_kwargs["batch_size"]
                     batch_size = output[0].shape[0]
                     output = [np.split(v, batch_size, axis=0) for v in output]
                     output = list(zip(*output))
@@ -321,9 +327,6 @@ def run_once(
                 logit, true = output
                 logit = np.array(logit).squeeze()
                 true = np.array(true).squeeze()
-                label = np.argmax(logit, axis=1)
-                val = acc_scorer(label, true)
-                logging_dict[f"{loader_name}-acc"] = val
 
                 if "train" in loader_name:
                     scaler = PlattScaling(solver="saga", multi_class="multinomial")
@@ -331,6 +334,11 @@ def run_once(
                     model.aux_model["scaler"] = scaler
                 scaler = model.aux_model["scaler"]
                 prob = scaler.predict_proba(logit)
+
+                label = np.argmax(prob, axis=1)
+                val = acc_scorer(label, true)
+                logging_dict[f"{loader_name}-acc"] = val
+
                 val = auroc_scorer(true, prob, multi_class="ovr")
                 logging_dict[f"{loader_name}-auroc"] = val
 
@@ -404,9 +412,12 @@ def training(
         "dropout": dropout,  #0.5
         "conv": conv,
     }
-    model_dir = model_dir / f"Cancer_Subtyping_{conv}"
+    if BayesGNN:
+        model_dir = model_dir / f"Bayes_Cancer_Subtyping_{conv}"
+    else:
+        model_dir = model_dir / f"Cancer_Subtyping_{conv}"
     optim_kwargs = {
-        "lr": 3e-4,
+        "lr": 1e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
     }
     for split_idx, split in enumerate(splits):
@@ -540,7 +551,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_pathomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
-    parser.add_argument('--epochs', default=100, type=int)
+    parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch"], type=str)
     parser.add_argument('--node_features', default=1024, choices=[2048, 384, 1024, 35], type=int)
     parser.add_argument('--resolution', default=20, type=float)
@@ -581,7 +592,7 @@ if __name__ == "__main__":
     balanced_sampling = True
     if balanced_sampling:
         test_ratio = 0.5
-        train = 1
+        train = 2
         valid_ratio = 1 - (train / len(matched_graph_paths)) - test_ratio
     else:
         test_ratio = 0.2
@@ -634,7 +645,7 @@ if __name__ == "__main__":
         model_dir=save_model_dir,
         conv="MLP",
         n_works=8,
-        batch_size=32,
-        dropout=0.25,
-        BayesGNN=False
+        batch_size=1,
+        dropout=0.1,
+        BayesGNN=True
     )
