@@ -11,6 +11,7 @@ import pathlib
 import timm
 import cv2
 import logging
+import json
 
 import numpy as np
 import albumentations as A
@@ -29,6 +30,9 @@ from tiatoolbox.utils.misc import imwrite
 from shapely.geometry import box as shapely_box
 from shapely.strtree import STRtree
 from pprint import pprint
+
+from radiomics import featureextractor
+import radiomics
 
 SEED = 5
 random.seed(SEED)
@@ -100,38 +104,35 @@ def extract_pathomic_feature(
 
 def extract_radiomic_feature(
         img_paths, 
-        img_msk_paths, 
+        lab_paths, 
         feature_mode, 
         save_dir, 
-        resolution=1, 
-        units="mm"
+        label=1,
+        resolution=None, 
+        units="mm",
+        n_jobs=32
     ):
     """extract pathomic feature from wsi
     Args:
-        wsi_paths (list): a list of wsi paths
-        wsi_msk_paths (list): a list of tissue mask paths of wsi
+        img_paths (list): a list of image paths
+        lab_paths (list): a list of label paths
         fature_mode (str): mode of extracting features, 
-            "composition" for extracting features by segmenting and counting nucleus
-            "cnn" for extracting features by deep neural networks
+            "pyradiomics" for extracting radiomics
         save_dir (str): directory of saving features
+        label (int): value for which to extract features
         resolution (int): the resolution of extacting features
         units (str): the units of resolution, e.g., mpp  
+
     """
     if feature_mode == "cnn":
-        _ = extract_cnn_pathomic_features(
+        _ = extract_pyradiomics(
             img_paths,
-            img_msk_paths,
+            lab_paths,
             save_dir,
+            label,
             resolution,
-            units
-        )
-    elif feature_mode == "vit":
-        _ = extract_vit_pathomic_features(
-            img_paths,
-            img_msk_paths,
-            save_dir,
-            resolution,
-            units
+            units,
+            n_jobs
         )
     else:
         raise ValueError(f"Invalid feature mode: {feature_mode}")
@@ -508,6 +509,9 @@ def extract_composition_features(wsi_paths, msk_paths, save_dir, mode, resolutio
         return stain_normaliser.transform(img)
     inst_segmentor.model.preproc_func = _stain_norm_func
 
+    # create temporary dir
+    tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
+    rmdir(tmp_save_dir)
     output_map_list = inst_segmentor.predict(
         wsi_paths,
         msk_paths,
@@ -596,6 +600,36 @@ def get_cell_compositions(
     base_name = pathlib.Path(wsi_path).stem
     np.save(f"{save_dir}/{base_name}.position.npy", patch_inputs)
     np.save(f"{save_dir}/{base_name}.features.npy", bounds_compositions)
+
+def extract_pyradiomics(img_paths, lab_paths, save_dir, label=None, resolution=None, units="mm", n_jobs=32):
+    # Get the PyRadiomics logger (default log-level = INFO)
+    logger = radiomics.logger
+    logger.setLevel(logging.DEBUG)  # set level to DEBUG to include debug log messages in log file
+
+    # Write out all log entries to a file
+    handler = logging.FileHandler(filename='testLog.txt', mode='w')
+    formatter = logging.Formatter('%(levelname)s:%(name)s: %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    settings = {}
+    settings['resampledPixelSpacing'] = resolution
+
+    extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
+    def _extract_radiomics(idx, img_path, lab_path):
+        logging.info("extracting radiomics: {}/{}...".format(idx + 1, len(img_paths)))
+        features = extractor.execute(img_path, lab_path, label)
+        img_name = pathlib.Path(img_path).stem
+        save_path = pathlib.Path(f"{save_dir}/{img_name}.pyradiomics.json")
+        with save_path.open("w") as handle:
+            json.dump(features, handle)
+        return
+
+    # extract radiomics in parallel
+    joblib.Parallel(n_jobs=n_jobs)(
+        joblib.delayed(_extract_radiomics)(idx, img_path, lab_path)
+        for idx, (img_path, lab_path) in enumerate(zip(img_paths, lab_paths))
+    )
+    return
 
 
 if __name__ == "__main__":

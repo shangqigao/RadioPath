@@ -12,19 +12,15 @@
 source ~/.bashrc
 conda activate radiopath
 
-## test stain normalization
-# python a_01stain_normalization/m_stain_normalization.py
-
-## test nucleus instance segmentation
-# python a_04feature_extraction/m_nucleus_instance_segmentation.py
-
-## test feature extraction
-# python a_04feature_extraction/m_feature_extraction.py
-
-## test graph construction
+## extract pathomics
 # wsi_dir="/home/shared/su123/TCGA_ORI"
 # save_dir="/home/s/sg2162/projects/Experiments/pathomics"
 # python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --save_dir $save_dir
+
+## extract radiomics
+# wsi_dir="/home/shared/su123/TCGA_ORI"
+# save_dir="/home/s/sg2162/projects/Experiments/radiomics"
+# python a_06generative_SR/m_radiomics_extraction.py --wsi_dir $wsi_dir --save_dir $save_dir
 
 ## survival analysis
 wsi_dir="/home/shared/su123/TCGA_ORI"
