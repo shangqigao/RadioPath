@@ -31,7 +31,6 @@ if __name__ == "__main__":
     lab_paths = [f"{p}" for p in lab_paths]
     img_paths = [p.replace(args.lab_dir, args.img_dir) for p in lab_paths]
     img_paths = [p.replace(f"_ensemble/{class_name}.nii.gz", ".nii.gz") for p in img_paths]
-    print(lab_paths[0], img_paths[0])
     logging.info("The number of images on {}: {}".format(args.dataset, len(img_paths)))
     
     ## set save dir

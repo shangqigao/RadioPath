@@ -615,6 +615,7 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, 
     logger.addHandler(handler)
     settings = {}
     settings['resampledPixelSpacing'] = resolution
+    settings['correctMask'] = True
 
     extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
     os.makedirs(save_dir, exist_ok=True)
