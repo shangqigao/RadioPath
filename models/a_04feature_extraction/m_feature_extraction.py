@@ -107,6 +107,7 @@ def extract_radiomic_feature(
         lab_paths, 
         feature_mode, 
         save_dir, 
+        class_name,
         label=1,
         resolution=None, 
         units="mm",
@@ -124,11 +125,12 @@ def extract_radiomic_feature(
         units (str): the units of resolution, e.g., mpp  
 
     """
-    if feature_mode == "cnn":
+    if feature_mode == "pyradiomics":
         _ = extract_pyradiomics(
             img_paths,
             lab_paths,
             save_dir,
+            class_name,
             label,
             resolution,
             units,
@@ -601,13 +603,13 @@ def get_cell_compositions(
     np.save(f"{save_dir}/{base_name}.position.npy", patch_inputs)
     np.save(f"{save_dir}/{base_name}.features.npy", bounds_compositions)
 
-def extract_pyradiomics(img_paths, lab_paths, save_dir, label=None, resolution=None, units="mm", n_jobs=32):
+def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, resolution=None, units="mm", n_jobs=32):
     # Get the PyRadiomics logger (default log-level = INFO)
     logger = radiomics.logger
     logger.setLevel(logging.DEBUG)  # set level to DEBUG to include debug log messages in log file
 
     # Write out all log entries to a file
-    handler = logging.FileHandler(filename='testLog.txt', mode='w')
+    handler = logging.FileHandler(filename=f"testLog.{class_name}.txt", mode='w')
     formatter = logging.Formatter('%(levelname)s:%(name)s: %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
@@ -615,13 +617,17 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, label=None, resolution=N
     settings['resampledPixelSpacing'] = resolution
 
     extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
+    os.makedirs(save_dir, exist_ok=True)
     def _extract_radiomics(idx, img_path, lab_path):
         logging.info("extracting radiomics: {}/{}...".format(idx + 1, len(img_paths)))
         features = extractor.execute(img_path, lab_path, label)
-        img_name = pathlib.Path(img_path).stem
-        save_path = pathlib.Path(f"{save_dir}/{img_name}.pyradiomics.json")
+        for k, v in features.items():
+            if isinstance(v, np.ndarray):
+                features[k] = v.tolist()
+        img_name = f"{img_path}".split("/")[-1].replace(".nii.gz", "")
+        save_path = pathlib.Path(f"{save_dir}/{img_name}.{class_name}.pyradiomics.json")
         with save_path.open("w") as handle:
-            json.dump(features, handle)
+            json.dump(features, handle, indent=4)
         return
 
     # extract radiomics in parallel

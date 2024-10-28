@@ -18,15 +18,16 @@ conda activate radiopath
 # python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --save_dir $save_dir
 
 ## extract radiomics
-# wsi_dir="/home/shared/su123/TCGA_ORI"
-# save_dir="/home/s/sg2162/projects/Experiments/radiomics"
-# python a_06generative_SR/m_radiomics_extraction.py --wsi_dir $wsi_dir --save_dir $save_dir
+img_dir="/home/s/sg2162/projects/TCIA_NIFTI/image"
+lab_dir="/home/s/sg2162/projects/TCIA_NIFTI/binary_label"
+save_dir="/home/s/sg2162/projects/Experiments/radiomics"
+python a_06generative_SR/m_radiomics_extraction.py --img_dir $img_dir --lab_dir $lab_dir --save_dir $save_dir
 
 ## survival analysis
-wsi_dir="/home/shared/su123/TCGA_ORI"
-save_pathomics_dir="/home/s/sg2162/projects/Experiments/pathomics"
-save_clinical_dir="/home/s/sg2162/projects/Experiments/clinical"
-python a_07explainable_AI/m_survival_analysis.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir --save_clinical_dir $save_clinical_dir
+# wsi_dir="/home/shared/su123/TCGA_ORI"
+# save_pathomics_dir="/home/s/sg2162/projects/Experiments/pathomics"
+# save_clinical_dir="/home/s/sg2162/projects/Experiments/clinical"
+# python a_07explainable_AI/m_survival_analysis.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir --save_clinical_dir $save_clinical_dir
 
 ## cancer subtyping
 # wsi_dir="/home/shared/su123/TCGA_ORI"

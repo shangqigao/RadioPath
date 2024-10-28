@@ -25,10 +25,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     ## get image and label paths
-    img_dir = pathlib.Path(f"{args.img_dir}/{args.dataset}/{args.modality}")
-    img_paths = img_dir.rglob("*.nii.gz")
-    img_paths = [f"{p}" for p in img_paths]
-    lab_paths = [p.replace(args.img_dir, args.lab_dir) for p in img_paths]
+    class_name = ["kidney_and_mass", "mass", "tumour"][2]
+    lab_dir = pathlib.Path(f"{args.lab_dir}/{args.dataset}/{args.modality}")
+    lab_paths = lab_dir.rglob(f"{class_name}.nii.gz")
+    lab_paths = [f"{p}" for p in lab_paths]
+    img_paths = [p.replace(args.lab_dir, args.img_dir) for p in lab_paths]
+    img_paths = [p.replace(f"_ensemble/{class_name}.nii.gz", ".nii.gz") for p in img_paths]
+    print(lab_paths[0], img_paths[0])
     logging.info("The number of images on {}: {}".format(args.dataset, len(img_paths)))
     
     ## set save dir
@@ -48,6 +51,7 @@ if __name__ == "__main__":
             lab_paths=batch_lab_paths,
             feature_mode=args.feature_mode,
             save_dir=save_feature_dir,
-            label=3,
+            class_name=class_name,
+            label=1,
             n_jobs=32
         )
