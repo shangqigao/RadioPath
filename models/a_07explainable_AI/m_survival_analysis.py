@@ -157,6 +157,12 @@ def prepare_graph_properties(data_dict, prop_keys):
                     properties[key] = np.std(prop_dict[k])
     return properties
 
+def prepare_radiomic_properties(data_dict, prop_keys):
+    properties = {}
+    for key, value in data_dict.items():
+        if key in prop_keys: properties[key] = value
+    return properties
+
 def prepare_graph_features(
     idx, 
     graph_path, 
@@ -242,8 +248,8 @@ def plot_coefficients(coefs, n_highlight):
     plt.subplots_adjust(left=0.2)
     plt.savefig("a_07explainable_AI/coefficients.jpg")
 
-def matched_survival_graph(save_clinical_dir, save_graph_paths, stages=None):
-    df = pd.read_csv(f"{save_clinical_dir}/TCGA_PanKidney_survival_data.csv")
+def matched_survival_graph(save_clinical_dir, save_graph_paths, dataset="TCGA-RCC", stages=None):
+    df = pd.read_csv(f"{save_clinical_dir}/{dataset}_survival_data.csv")
     
     # Prepare the survival data
     df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
@@ -251,48 +257,83 @@ def matched_survival_graph(save_clinical_dir, save_graph_paths, stages=None):
     df = df[df['duration'].notna()]
     if stages is not None:
         df = df[df['ajcc_pathologic_stage'].isin(stages)]
-    # df = df[df['ajcc_pathologic_stage'].isin(["Stage III"])]
     print("Survival data strcuture:", df.shape)
 
     # filter graph properties 
-    ids = df['submitter_id']
-    names = [p.stem for p in save_graph_paths]
-    matched_index, matched_i = [], []
-    for index, id in ids.items():
-        for i, name in enumerate(names):
-            if id in name:
-                matched_index.append(index)
-                matched_i.append(i)
-                break
-    df = df.loc[matched_index]
-    return df, matched_i
+    graph_names = [pathlib.Path(p).stem for p in save_graph_paths]
+    graph_ids = [f"{n}".split("-")[0:3] for n in graph_names]
+    graph_ids = ["-".join(d) for d in graph_ids]
+    df = df[df["submitter_id"].isin(graph_ids)]
+    matched_indices = [graph_ids.index(d) for d in df["submitter_id"]]
+    return df, matched_indices
+
+def matched_pathomics_radiomics(save_pathomics_paths, save_radiomics_paths, save_clinical_dir, dataset="TCGA-RCC"):
+    df = pd.read_csv(f"{save_clinical_dir}/TCIA_{dataset}_mappings.csv")
+
+    df = df[["Subject ID", "Series ID"]]
+    pathomics_names = [pathlib.Path(p).stem for p in save_pathomics_paths]
+    pathomics_ids = [f"{n}".split("-")[0:3] for n in pathomics_names]
+    pathomics_ids = ["-".join(d) for d in pathomics_ids]
+    radiomics_names = [pathlib.Path(p).stem for p in save_radiomics_paths]
+    radiomics_all_ids = [f"{n}".split(".")[0:13] for n in radiomics_names]
+    radiomics_end_ids = [f"{d}".split("_")[0] for d in radiomics_ids]
+    radiomics_ids = [id1[0:12].append(id2) for id1, id2 in zip(radiomics_all_ids, radiomics_end_ids)]
+    radiomics_ids = [".".join(d) for d in radiomics_ids]
+
+    df = df[df["Subject ID"].isin(pathomics_ids) & df["Series ID"].isin(radiomics_ids)] 
+    matched_pathomics_indices, matched_radiomics_indices = [], []
+    for subject_id, series_id in zip(df["Subject ID"], df["Series ID"]):
+        matched_pathomics_indices.append(pathomics_ids.index(subject_id))
+        matched_radiomics_indices.append(radiomics_ids.index(series_id))
+    return matched_pathomics_indices, matched_radiomics_indices
 
 def cox_proportional_hazard_regression(
         save_clinical_dir, 
-        save_graph_paths, 
-        save_properties_paths, 
-        prop_keys, 
+        save_pathomics_paths,
+        save_radiomics_paths,
+        pathomics_keys, 
+        radiomics_keys,
         l1_ratio=1.0, 
         stages=None,
         used="all", 
         n_jobs=32,
-        aggregation=True
+        aggregation=False,
+        dataset="TCGA-RCC"
         ):
-    df, matched_i = matched_survival_graph(save_clinical_dir, save_properties_paths, stages)
-    df = df[['event', 'duration']].to_records(index=False)
-    print("Selected survival data:", df.shape)
+    # prepare clinical data
+    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, save_pathomics_paths, dataset, stages)
+    df_clinical = df_clinical[['event', 'duration']].to_records(index=False)
+    print("Selected survival data:", df_clinical.shape)
 
-    # Prepare the graph properties
+    # Prepare graph-based pathomics
+    save_properties_paths = []
+    for p in save_pathomics_paths:
+        name = pathlib.Path(p).stem
+        if ".WSI.features.npy" in name:
+            save_properties_paths.append(f"{p}".replace(".WSI.features.npy", ".MST.subgraphs.properties.json")) 
+        elif ".MST.json" in name:
+            save_properties_paths.append(f"{p}".replace(".MST", ".MST.subgraphs.properties"))
+        else:
+            raise NotImplementedError
     matched_properties_paths = [save_properties_paths[i] for i in matched_i]
-    prop_list = [load_json(p) for p in matched_properties_paths]
-    prop_list = [prepare_graph_properties(p, prop_keys) for p in prop_list]
-    df_prop = pd.DataFrame(prop_list)
+    pathomics_list = [load_json(p) for p in matched_properties_paths]
+    pathomics_list = [prepare_graph_properties(p, pathomics_keys) for p in pathomics_list]
+    df_pathomics = pd.DataFrame(pathomics_list)
     # df_prop = OneHotEncoder().fit_transform(df_prop)
-    print("Selected graph properties:", df_prop.shape)
-    print(df_prop.head())
+    print("Selected pathomic properties:", df_pathomics.shape)
+    print(df_pathomics.head())
 
-    # Prepare the graph features in parallel
-    selected_graph_paths = [save_graph_paths[i] for i in matched_i]
+    # prepare radiomics
+    matched_radiomics_paths = [save_radiomics_paths[i] for i in matched_i]
+    radiomics_list = [load_json(p) for p in matched_radiomics_paths]
+    radiomics_list = [prepare_radiomic_properties(p, radiomics_keys) for p in radiomics_list]
+    df_radiomics = pd.DataFrame(radiomics_list)
+    print("Selected radiomic properties:", df_radiomics.shape)
+    print(df_radiomics.head())
+
+
+    # Prepare WSI-level features
+    selected_graph_paths = [save_pathomics_paths[i] for i in matched_i]
     if aggregation:
         dict_list = joblib.Parallel(n_jobs=n_jobs)(
             joblib.delayed(prepare_graph_features)(idx, graph_path)
@@ -308,25 +349,27 @@ def cox_proportional_hazard_regression(
     feat_list = [feat_dict[f"{i}"] for i in range(len(selected_graph_paths))]
 
     df_feat = pd.DataFrame(feat_list)
-    print("Selected graph features:", df_feat.shape)
+    print("Selected WSI-level features:", df_feat.shape)
     print(df_feat.head())
 
-    # Concatenate graph features and properties
+    # Concatenate final features for regression
     if used == "all":
-        df_prop = pd.concat([df_prop, df_feat], axis=1)
-    elif used == "graph_properties":
-        df_prop = df_prop
-    elif used == "graph_features":
+        df_prop = pd.concat([df_pathomics, df_radiomics, df_feat], axis=1)
+    elif used == "pathomics":
+        df_prop = df_pathomics
+    elif used == "radiomics":
+        df_prop = df_radiomics
+    elif used == "deep_pathomics":
         df_prop = df_feat
     else:
         raise NotImplementedError
     # df_prop = df_prop.apply(zscore)
-    print("Selected graph properties and features:", df_prop.shape)
+    print("Selected features for regression:", df_prop.shape)
     print(df_prop.head())
 
     # COX regreession
     cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.01)
-    cox_elastic_net.fit(df_prop, df)
+    cox_elastic_net.fit(df_prop, df_clinical)
     coefficients = pd.DataFrame(cox_elastic_net.coef_, index=df_prop.columns, columns=np.round(cox_elastic_net.alphas_, 5))
     
     plot_coefficients(coefficients, n_highlight=5)
@@ -336,7 +379,7 @@ def cox_proportional_hazard_regression(
     coxnet_pipe = make_pipeline(StandardScaler(), cox)
     warnings.simplefilter("ignore", UserWarning)
     warnings.simplefilter("ignore", FitFailedWarning)
-    coxnet_pipe.fit(df_prop, df)
+    coxnet_pipe.fit(df_prop, df_clinical)
     estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
     cv = KFold(n_splits=10, shuffle=True, random_state=0)
     cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
@@ -346,7 +389,7 @@ def cox_proportional_hazard_regression(
         cv=cv,
         error_score=0.5,
         n_jobs=1,
-    ).fit(df_prop, df)
+    ).fit(df_prop, df_clinical)
 
     # plot cross validation results
     cv_results = pd.DataFrame(gcv.cv_results_)
@@ -388,8 +431,8 @@ def cox_proportional_hazard_regression(
 
     coxnet_pred = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True))
     coxnet_pred.set_params(**gcv.best_params_)
-    coxnet_pred.fit(df_prop, df)
-    print("Best performance:", coxnet_pred.score(df_prop, df))
+    coxnet_pred.fit(df_prop, df_clinical)
+    print("Best performance:", coxnet_pred.score(df_prop, df_clinical))
     return
 
 def generate_data_split(
@@ -727,13 +770,18 @@ if __name__ == "__main__":
     parser.add_argument('--wsi_dir', default="/home/sg2162/rds/rds-ge-sow2-imaging-MRNJucHuBik/TCGA/WSI")
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
     parser.add_argument('--save_pathomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
+    parser.add_argument('--save_radiomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/radiomics", type=str)
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
-    parser.add_argument('--node_features', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
-    parser.add_argument('--resolution', default=20, type=float)
-    parser.add_argument('--units', default="power", type=str)
+    parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
+    parser.add_argument('--radiomics_mode', default="pyradiomics", choices=["pyradiomics"], type=str)
+    parser.add_argument('--radiomics_dim', default=1024, choices=[1024], type=int)
+    parser.add_argument('--pathomics_resolution', default=20, type=float)
+    parser.add_argument('--pathomics_units', default="power", type=str)
+    parser.add_argument('--radiomics_resolution', default=1, type=float)
+    parser.add_argument('--radiomics_units', default="mm", type=str)
     args = parser.parse_args()
 
     ## get wsi path
@@ -748,7 +796,8 @@ if __name__ == "__main__":
     
     
     ## set save dir
-    save_pathomics_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.feature_mode}")
+    save_pathomics_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.pathomics_mode}")
+    save_radiomics_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.radiomics_mode}")
     save_clinical_dir = pathlib.Path(f"{args.save_clinical_dir}")
     save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models/{args.feature_mode}")
 
@@ -759,92 +808,112 @@ if __name__ == "__main__":
     # plot survival curve
     # plot_survival_curve(save_clinical_dir)
 
-    # split data set
-    num_folds = 5
-    test_ratio = 0.2
-    train_ratio = 0.8 * 0.9
-    valid_ratio = 0.8 * 0.1
-    graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    # stages=["Stage I", "Stage II"]
-    df, matched_i = matched_survival_graph(save_clinical_dir, graph_paths)
-    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    matched_graph_paths = [graph_paths[i] for i in matched_i]
-    splits = generate_data_split(
-        x=matched_graph_paths,
-        y=y,
-        train=train_ratio,
-        valid=valid_ratio,
-        test=test_ratio,
-        num_folds=num_folds,
-    )
-    mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/survival_splits.dat"
-    joblib.dump(splits, split_path)
-    splits = joblib.load(split_path)
-    num_train = len(splits[0]["train"])
-    logging.info(f"Number of training samples: {num_train}.")
-    num_valid = len(splits[0]["valid"])
-    logging.info(f"Number of validating samples: {num_valid}.")
-    num_test = len(splits[0]["test"])
-    logging.info(f"Number of testing samples: {num_test}.")
+    # # split data set
+    # num_folds = 5
+    # test_ratio = 0.2
+    # train_ratio = 0.8 * 0.9
+    # valid_ratio = 0.8 * 0.1
+    # graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    # # stages=["Stage I", "Stage II"]
+    # df, matched_i = matched_survival_graph(save_clinical_dir, graph_paths)
+    # y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    # matched_graph_paths = [graph_paths[i] for i in matched_i]
+    # splits = generate_data_split(
+    #     x=matched_graph_paths,
+    #     y=y,
+    #     train=train_ratio,
+    #     valid=valid_ratio,
+    #     test=test_ratio,
+    #     num_folds=num_folds,
+    # )
+    # mkdir(save_model_dir)
+    # split_path = f"{save_model_dir}/survival_splits.dat"
+    # joblib.dump(splits, split_path)
+    # splits = joblib.load(split_path)
+    # num_train = len(splits[0]["train"])
+    # logging.info(f"Number of training samples: {num_train}.")
+    # num_valid = len(splits[0]["valid"])
+    # logging.info(f"Number of validating samples: {num_valid}.")
+    # num_test = len(splits[0]["test"])
+    # logging.info(f"Number of testing samples: {num_test}.")
 
-    # compute mean and std on training data for normalization 
-    splits = joblib.load(split_path)
-    train_graph_paths = [path for path, _ in splits[0]["train"]]
-    loader = SurvivalGraphDataset(train_graph_paths, mode="infer")
-    loader = DataLoader(
-        loader,
-        num_workers=8,
-        batch_size=1,
-        shuffle=False,
-        drop_last=False,
-    )
-    node_features = [v.x.numpy() for v in loader]
-    node_features = np.concatenate(node_features, axis=0)
-    node_scaler = StandardScaler(copy=False)
-    node_scaler.fit(node_features)
-    scaler_path = f"{save_model_dir}/survival_node_scaler.dat"
-    joblib.dump(node_scaler, scaler_path)
+    # # compute mean and std on training data for normalization 
+    # splits = joblib.load(split_path)
+    # train_graph_paths = [path for path, _ in splits[0]["train"]]
+    # loader = SurvivalGraphDataset(train_graph_paths, mode="infer")
+    # loader = DataLoader(
+    #     loader,
+    #     num_workers=8,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     drop_last=False,
+    # )
+    # node_features = [v.x.numpy() for v in loader]
+    # node_features = np.concatenate(node_features, axis=0)
+    # node_scaler = StandardScaler(copy=False)
+    # node_scaler.fit(node_features)
+    # scaler_path = f"{save_model_dir}/survival_node_scaler.dat"
+    # joblib.dump(node_scaler, scaler_path)
 
-    # training
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_path,
-        num_node_features=args.node_features,
-        model_dir=save_model_dir,
-        conv="MLP",
-        n_works=8,
-        batch_size=32,
-        dropout=0.1,
-        BayesGNN=True
-    )
+    # # training
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_path,
+    #     num_node_features=args.node_features,
+    #     model_dir=save_model_dir,
+    #     conv="MLP",
+    #     n_works=8,
+    #     batch_size=32,
+    #     dropout=0.1,
+    #     BayesGNN=True
+    # )
 
     # survival analysis
-    # aggregation = False # false if load wsi-level features else true
-    # if aggregation:
-    #     graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    # else:
-    #     graph_paths = [save_pathomics_dir / f"{p.stem}.WSI.features.npy" for p in wsi_paths]
-    # graph_prop_paths = [save_pathomics_dir / f"{p.stem}.MST.subgraphs.properties.json" for p in wsi_paths]
-    # graph_properties = [
-    #     "num_nodes", 
-    #     "num_edges", 
-    #     # "num_components", 
-    #     "degree", 
-    #     # "closeness", 
-    #     # "graph_diameter",
-    #     "graph_assortativity",
-    #     # "mean_neighbor_degree"
-    # ]
-    # cox_proportional_hazard_regression(
-    #     save_clinical_dir=save_clinical_dir,
-    #     save_graph_paths=graph_paths,
-    #     save_properties_paths=graph_prop_paths,
-    #     prop_keys=graph_properties,
-    #     l1_ratio=0.9,
-    #     stages=["Stage I", "Stage II"],
-    #     used=["all", "graph_properties", "graph_features"][2],
-    #     n_jobs=32,
-    #     aggregation=aggregation
-    # )
+    aggregation = False # false if load wsi-level features else true
+    if aggregation:
+        pathomics_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    else:
+        pathomics_paths = [save_pathomics_dir / f"{p.stem}.WSI.features.npy" for p in wsi_paths]
+    class_name = ["kidney_and_mass", "mass", "tumour"][0]
+    radiomics_paths = save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json")
+    matched_pathomics_indices, matched_radiomics_indices = matched_pathomics_radiomics(
+        save_pathomics_paths=pathomics_paths,
+        save_radiomics_paths=radiomics_paths,
+        save_clinical_dir=save_clinical_dir,
+        dataset=args.dataset
+    )
+    matched_pathomics_paths = [pathomics_paths[i] for i in matched_pathomics_indices]
+    matched_radiomics_paths = [radiomics_paths[i] for i in matched_radiomics_indices]
+    pathomic_properties = [
+        "num_nodes", 
+        "num_edges", 
+        # "num_components", 
+        "degree", 
+        # "closeness", 
+        # "graph_diameter",
+        "graph_assortativity",
+        # "mean_neighbor_degree"
+    ]
+    radiomic_propereties = [
+        "original_shape",
+        "original_firstorder",
+        "original_glcm",
+        "original_gldm",
+        "original_glrlm",
+        "original_glszm",
+        "original_ngtdm"
+    ]
+    cox_proportional_hazard_regression(
+        save_clinical_dir=save_clinical_dir,
+        save_pathomics_paths=matched_pathomics_paths,
+        save_radiomics_paths=matched_radiomics_paths,
+        pathomics_keys=pathomic_properties,
+        radiomics_keys=radiomic_propereties,
+        l1_ratio=0.9,
+        stages=None, #["Stage I", "Stage II"],
+        used=["all", "pathomics", "radiomics", "deep_pathomics"][2],
+        n_jobs=32,
+        aggregation=aggregation,
+        dataset=args.dataset
+    )
