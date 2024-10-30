@@ -160,7 +160,8 @@ def prepare_graph_properties(data_dict, prop_keys):
 def prepare_radiomic_properties(data_dict, prop_keys):
     properties = {}
     for key, value in data_dict.items():
-        if key in prop_keys: properties[key] = value
+        selected = [(k in key) for k in prop_keys]
+        if any(selected): properties[key] = value
     return properties
 
 def prepare_graph_features(
@@ -276,8 +277,8 @@ def matched_pathomics_radiomics(save_pathomics_paths, save_radiomics_paths, save
     pathomics_ids = ["-".join(d) for d in pathomics_ids]
     radiomics_names = [pathlib.Path(p).stem for p in save_radiomics_paths]
     radiomics_all_ids = [f"{n}".split(".")[0:13] for n in radiomics_names]
-    radiomics_end_ids = [f"{d}".split("_")[0] for d in radiomics_ids]
-    radiomics_ids = [id1[0:12].append(id2) for id1, id2 in zip(radiomics_all_ids, radiomics_end_ids)]
+    radiomics_end_ids = [f"{d[-1]}".split("_")[0] for d in radiomics_all_ids]
+    radiomics_ids = [id1[0:12] + [id2] for id1, id2 in zip(radiomics_all_ids, radiomics_end_ids)]
     radiomics_ids = [".".join(d) for d in radiomics_ids]
 
     df = df[df["Subject ID"].isin(pathomics_ids) & df["Series ID"].isin(radiomics_ids)] 
@@ -285,6 +286,7 @@ def matched_pathomics_radiomics(save_pathomics_paths, save_radiomics_paths, save
     for subject_id, series_id in zip(df["Subject ID"], df["Series ID"]):
         matched_pathomics_indices.append(pathomics_ids.index(subject_id))
         matched_radiomics_indices.append(radiomics_ids.index(series_id))
+    logging.info(f"The number of matched pathomic and radiomic cases are {len(matched_pathomics_indices)}")
     return matched_pathomics_indices, matched_radiomics_indices
 
 def cox_proportional_hazard_regression(
@@ -304,15 +306,18 @@ def cox_proportional_hazard_regression(
     df_clinical, matched_i = matched_survival_graph(save_clinical_dir, save_pathomics_paths, dataset, stages)
     df_clinical = df_clinical[['event', 'duration']].to_records(index=False)
     print("Selected survival data:", df_clinical.shape)
+    num_dead = df_clinical['event'].value_counts()[True]
+    num_alive = df_clinical['event'].value_counts()[False]
+    print(f"Dead cases: {num_dead}, Alive cases: {num_alive}")
 
     # Prepare graph-based pathomics
     save_properties_paths = []
     for p in save_pathomics_paths:
         name = pathlib.Path(p).stem
-        if ".WSI.features.npy" in name:
+        if ".WSI.features" in name:
             save_properties_paths.append(f"{p}".replace(".WSI.features.npy", ".MST.subgraphs.properties.json")) 
-        elif ".MST.json" in name:
-            save_properties_paths.append(f"{p}".replace(".MST", ".MST.subgraphs.properties"))
+        elif ".MST" in name:
+            save_properties_paths.append(f"{p}".replace(".MST.json", ".MST.subgraphs.properties.json"))
         else:
             raise NotImplementedError
     matched_properties_paths = [save_properties_paths[i] for i in matched_i]
@@ -769,6 +774,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--wsi_dir', default="/home/sg2162/rds/rds-ge-sow2-imaging-MRNJucHuBik/TCGA/WSI")
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
+    parser.add_argument('--modality', default="CT", type=str)
     parser.add_argument('--save_pathomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
     parser.add_argument('--save_radiomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/radiomics", type=str)
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
@@ -777,11 +783,7 @@ if __name__ == "__main__":
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--radiomics_mode', default="pyradiomics", choices=["pyradiomics"], type=str)
-    parser.add_argument('--radiomics_dim', default=1024, choices=[1024], type=int)
-    parser.add_argument('--pathomics_resolution', default=20, type=float)
-    parser.add_argument('--pathomics_units', default="power", type=str)
-    parser.add_argument('--radiomics_resolution', default=1, type=float)
-    parser.add_argument('--radiomics_units', default="mm", type=str)
+    parser.add_argument('--radiomics_dim', default=107, choices=[107], type=int)
     args = parser.parse_args()
 
     ## get wsi path
@@ -797,9 +799,9 @@ if __name__ == "__main__":
     
     ## set save dir
     save_pathomics_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.pathomics_mode}")
-    save_radiomics_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.radiomics_mode}")
+    save_radiomics_dir = pathlib.Path(f"{args.save_radiomics_dir}/{args.dataset}_{args.modality}_radiomic_features/{args.radiomics_mode}")
     save_clinical_dir = pathlib.Path(f"{args.save_clinical_dir}")
-    save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models/{args.feature_mode}")
+    save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models/{args.pathomics_mode}")
 
     # request survial data by GDC API
     # project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
@@ -870,13 +872,13 @@ if __name__ == "__main__":
     # )
 
     # survival analysis
-    aggregation = False # false if load wsi-level features else true
+    aggregation = True # false if load wsi-level features else true
     if aggregation:
         pathomics_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
     else:
         pathomics_paths = [save_pathomics_dir / f"{p.stem}.WSI.features.npy" for p in wsi_paths]
-    class_name = ["kidney_and_mass", "mass", "tumour"][0]
-    radiomics_paths = save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json")
+    class_name = ["kidney_and_mass", "mass", "tumour"][2]
+    radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json"))
     matched_pathomics_indices, matched_radiomics_indices = matched_pathomics_radiomics(
         save_pathomics_paths=pathomics_paths,
         save_radiomics_paths=radiomics_paths,
@@ -897,12 +899,12 @@ if __name__ == "__main__":
     ]
     radiomic_propereties = [
         "original_shape",
-        "original_firstorder",
-        "original_glcm",
-        "original_gldm",
-        "original_glrlm",
-        "original_glszm",
-        "original_ngtdm"
+        # "original_firstorder",
+        # "original_glcm",
+        # "original_gldm",
+        # "original_glrlm",
+        # "original_glszm",
+        # "original_ngtdm"
     ]
     cox_proportional_hazard_regression(
         save_clinical_dir=save_clinical_dir,
