@@ -304,10 +304,10 @@ def cox_proportional_hazard_regression(
         ):
     # prepare clinical data
     df_clinical, matched_i = matched_survival_graph(save_clinical_dir, save_pathomics_paths, dataset, stages)
-    df_clinical = df_clinical[['event', 'duration']].to_records(index=False)
-    print("Selected survival data:", df_clinical.shape)
     num_dead = df_clinical['event'].value_counts()[True]
     num_alive = df_clinical['event'].value_counts()[False]
+    df_clinical = df_clinical[['event', 'duration']].to_records(index=False)
+    print("Selected survival data:", df_clinical.shape)
     print(f"Dead cases: {num_dead}, Alive cases: {num_alive}")
 
     # Prepare graph-based pathomics
@@ -902,7 +902,7 @@ if __name__ == "__main__":
         # "original_firstorder",
         # "original_glcm",
         # "original_gldm",
-        # "original_glrlm",
+        "original_glrlm",
         # "original_glszm",
         # "original_ngtdm"
     ]
