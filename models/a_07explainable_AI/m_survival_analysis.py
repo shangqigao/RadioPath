@@ -360,6 +360,12 @@ def cox_proportional_hazard_regression(
     # Concatenate final features for regression
     if used == "all":
         df_prop = pd.concat([df_pathomics, df_radiomics, df_feat], axis=1)
+    elif used == "radiopathomics":
+        df_prop = pd.concat([df_pathomics, df_radiomics], axis=1)
+    elif used == "radioDeepPathomics":
+        df_prop = pd.concat([df_radiomics, df_feat], axis=1)
+    elif used == "pathoDeepPathomics":
+        df_prop = pd.concat([df_pathomics, df_feat], axis=1)
     elif used == "pathomics":
         df_prop = df_pathomics
     elif used == "radiomics":
@@ -906,6 +912,7 @@ if __name__ == "__main__":
         # "original_glszm",
         # "original_ngtdm"
     ]
+    integrated = ["all", "pathomics", "radiomics", "deep_pathomics", "radiopathomics", "radioDeepPathomics", "pathoDeepPathomics"]
     cox_proportional_hazard_regression(
         save_clinical_dir=save_clinical_dir,
         save_pathomics_paths=matched_pathomics_paths,
@@ -914,7 +921,7 @@ if __name__ == "__main__":
         radiomics_keys=radiomic_propereties,
         l1_ratio=0.9,
         stages=None, #["Stage I", "Stage II"],
-        used=["all", "pathomics", "radiomics", "deep_pathomics"][2],
+        used=integrated[6],
         n_jobs=32,
         aggregation=aggregation,
         dataset=args.dataset
