@@ -14,8 +14,7 @@ from easydict import EasyDict as edict
 
 import torchbnn as bnn
 
-from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.linear_model import LogisticRegression as PlattScaling
+from sklearn.model_selection import ShuffleSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import average_precision_score as auprc_scorer
 from sklearn.metrics import roc_auc_score as auroc_scorer
@@ -28,12 +27,9 @@ from tiatoolbox import logger
 from common.m_utils import mkdir, create_pbar, load_json, rm_n_mkdir, recur_find_ext
 from common.m_utils import reset_logging, select_checkpoints, select_wsi
 
-from models.a_05feature_aggregation.m_graph_construction import visualize_graph
-from models.a_05feature_aggregation.m_graph_construction import feature_visualization
 from models.a_06generative_SR.m_generative_diffusion import SlideGraphSpectrumDataset
 from models.a_06generative_SR.m_generative_diffusion import SlideGraphSpectrumDiffusionArch
 from models.a_06generative_SR.m_generative_diffusion import ScalarMovingAverage
-from models.a_05feature_aggregation.m_graph_neural_network import update_loss
 from tiatoolbox.models.architecture.gsdm.utils.loader import load_model, load_model_params, load_loss_fn2
 from tiatoolbox.models.architecture.gsdm.utils.loader import load_eval_settings, load_sampling_fn2
 from tiatoolbox.models.architecture.gsdm.utils.graph_utils import adjs_to_graphs
@@ -46,7 +42,6 @@ warnings.filterwarnings('ignore')
 
 def generate_data_split(
         x: list,
-        y: list,
         train: float,
         valid: float,
         test: float,
@@ -56,7 +51,6 @@ def generate_data_split(
     """Helper to generate splits
     Args:
         x (list): a list of image paths
-        y (list): a list of annotation paths
         train (float): ratio of training samples
         valid (float): ratio of validating samples
         test (float): ratio of testing samples
@@ -67,46 +61,25 @@ def generate_data_split(
     """
     assert train + valid + test - 1.0 < 1.0e-10, "Ratios must sum to 1.0"
 
-    outer_splitter = StratifiedShuffleSplit(
+    outer_splitter = ShuffleSplit(
         n_splits=num_folds,
         train_size=train + valid,
         random_state=seed,
     )
-    inner_splitter = StratifiedShuffleSplit(
+    inner_splitter = ShuffleSplit(
         n_splits=1,
         train_size=train / (train + valid),
         random_state=seed,
     )
 
-    l = []
-    for path in y:
-        label = np.array(np.load(pathlib.Path(path)))
-        label = label[label > 0]
-        label = np.unique(label)
-        if len(label) == 0:
-            logging.warning(f"All node labels are zeros in {path}!")
-            l.append(0)
-        else:
-            index = np.random.randint(0, len(label))
-            l.append(label[index])
-    x = [a for a, b in zip(x, l) if b != 0]
-    y = [a for a, b in zip(y, l) if b != 0]
-    l = [a for a, b in zip(l, l) if b != 0]
-    l = np.array(l)
-
     splits = []
-    for train_valid_idx, test_idx in outer_splitter.split(x, l):
+    for train_valid_idx, test_idx in outer_splitter.split(x):
         test_x = [x[idx] for idx in test_idx]
-        test_y = [y[idx] for idx in test_idx]
         x_ = [x[idx] for idx in train_valid_idx]
-        y_ = [y[idx] for idx in train_valid_idx]
-        l_ = [l[idx] for idx in train_valid_idx]
 
-        train_idx, valid_idx = next(iter(inner_splitter.split(x_, l_)))
+        train_idx, valid_idx = next(iter(inner_splitter.split(x_)))
         valid_x = [x_[idx] for idx in valid_idx]
-        valid_y = [y_[idx] for idx in valid_idx]
         train_x = [x_[idx] for idx in train_idx]
-        train_y = [y_[idx] for idx in train_idx]
 
         assert len(set(train_x).intersection(set(valid_x))) == 0
         assert len(set(valid_x).intersection(set(test_x))) == 0
@@ -114,16 +87,15 @@ def generate_data_split(
 
         splits.append(
             {
-                "train": list(zip(train_x, train_y)),
-                "valid": list(zip(valid_x, valid_y)),
-                "test": list(zip(test_x, test_y)),
+                "train": train_x,
+                "valid": valid_x,
+                "test": test_x,
             }
         )
     return splits
 
 def run_once(
         dataset_dict,
-        num_epochs,
         save_dir,
         config,
         on_gpu=True,
@@ -171,7 +143,7 @@ def run_once(
             **_loader_kwargs,
         )
 
-    for epoch in range(num_epochs):
+    for epoch in range(config.train.num_epochs):
         logger.info("EPOCH: %03d", epoch)
         train_edge_index_list = []
         for loader_name, loader in loader_dict.items():
@@ -218,7 +190,7 @@ def run_once(
             if "train" not in loader_dict:
                 continue
 
-            if (epoch + 1) % 10 == 0:
+            if (epoch + 1) % 500 == 0:
                 new_stats = {}
                 if (save_dir / "stats.json").exists():
                     old_stats = load_json(f"{save_dir}/stats.json")
@@ -243,17 +215,14 @@ def run_once(
 
 
 def training(
-        num_epochs,
         split_path,
         scaler_path,
         config_path,
         model_dir,
-        seed=42,
         pretrained=None
 ):
     """train node classification neural networks
     Args:
-        num_epochs (int): the number of epochs for training
         split_path (str): the path of storing data splits
         scaler_path (str): the path of storing data normalization
         num_node_features (int): the dimension of node feature
@@ -262,7 +231,6 @@ def training(
     splits = joblib.load(split_path)
     node_scaler = joblib.load(scaler_path)
     config = edict(yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader))
-    config.seed = seed
     
     loader_kwargs = {
         "num_workers": 8, 
@@ -281,7 +249,6 @@ def training(
         reset_logging(split_save_dir)
         run_once(
             new_split,
-            num_epochs,
             save_dir=split_save_dir,
             config=config,
             preproc_func=node_scaler.transform,
@@ -686,13 +653,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
     parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
-    parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--feature_mode', default="conch", choices=["cnn", "vit", "uni", "conch"], type=str)
-    parser.add_argument('--node_features', default=35, choices=[2048, 384, 1024, 35], type=int)
-    parser.add_argument('--resolution', default=20, type=float)
-    parser.add_argument('--units', default="power", type=str)
-    parser.add_argument('--loss', default="LHCE", choices=["CE", "PN", "uPU", "nnPU", "PCE", "LHCE"], type=str)
-    parser.add_argument('--Bayes', default=True, type=bool, help="whether to build Bayesian GNN")
+    parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch"], type=str)
     args = parser.parse_args()
 
     ## get wsi path
@@ -714,17 +675,15 @@ if __name__ == "__main__":
     train_ratio = 0.8 * 0.9
     valid_ratio = 0.8 * 0.1
     wsi_graph_paths = sorted(save_feature_dir.glob("*.json"))
-    wsi_label_paths = sorted(save_label_dir.glob("*.label.npy"))
     splits = generate_data_split(
         x=wsi_graph_paths,
-        y=wsi_label_paths,
         train=train_ratio,
         valid=valid_ratio,
         test=test_ratio,
         num_folds=num_folds,
     )
     mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/splits_tumour_tiles.dat"
+    split_path = f"{save_model_dir}/diffusion_splits.dat"
     joblib.dump(splits, split_path)
     compute_label_portion(split_path)
     splits = joblib.load(split_path)
@@ -735,83 +694,41 @@ if __name__ == "__main__":
     num_test = len(splits[0]["test"])
     logging.info(f"Number of testing samples: {num_test}.")
 
-    ## split data set only for test
-    # num_folds = 5
-    # wsi_graph_paths = sorted(save_feature_dir.glob("*.json"))
-    # wsi_label_paths = sorted(save_label_dir.glob("*.label.npy"))
-    # splits = [{
-    #     "train": None, 
-    #     "valid": None, 
-    #     "test": list(zip(wsi_graph_paths, wsi_label_paths))
-    # }]*num_folds
-    # split_path = f"{save_model_dir}/splits_tumour.dat"
-    # joblib.dump(splits, split_path)
-    # compute_label_portion(split_path)
-
     ## compute mean and std on training data for normalization 
-    # splits = joblib.load(split_path)
-    # train_wsi_paths = [path for path, _ in splits[0]["train"]]
-    # loader = SlideGraphDataset(train_wsi_paths, mode="infer")
-    # loader = DataLoader(
-    #     loader,
-    #     num_workers=8,
-    #     batch_size=1,
-    #     shuffle=False,
-    #     drop_last=False,
-    # )
-    # node_features = [v.x.numpy() for v in tqdm(loader)]
-    # node_features = np.concatenate(node_features, axis=0)
-    # node_scaler = StandardScaler(copy=False)
-    # node_scaler.fit(node_features)
-    # scaler_path = f"{save_model_dir}/node_scaler.dat"
-    # joblib.dump(node_scaler, scaler_path)
+    splits = joblib.load(split_path)
+    train_wsi_paths = [path for path in splits[0]["train"]]
+    loader = SlideGraphSpectrumDataset(train_wsi_paths, mode="infer")
+    loader = DataLoader(
+        loader,
+        num_workers=8,
+        batch_size=1,
+        shuffle=False,
+        drop_last=False,
+    )
+    node_features = [v.x.numpy() for v in tqdm(loader)]
+    node_features = np.concatenate(node_features, axis=0)
+    node_scaler = StandardScaler(copy=False)
+    node_scaler.fit(node_features)
+    scaler_path = f"{save_model_dir}/diffusion_node_scaler.dat"
+    joblib.dump(node_scaler, scaler_path)
 
     ## training
     training(
-        num_epochs=args.epochs,
         split_path=split_path,
         scaler_path=scaler_path,
-        num_node_features=args.node_features,
-        model_dir=save_model_dir,
-        loss_type=args.loss,
-        logit_adjusted=False,
-        BayesGNN=args.Bayes
+        config_path=args.config,
+        model_dir=save_model_dir
     )
 
     # ## inference
-    inference(
-        split_path=split_path,
-        scaler_path=scaler_path,
-        num_node_features=args.node_features,
-        pretrained_dir=save_model_dir,
-        select_positive_samples=False,
-        select_low_high_samples=False,
-        PN_learning=False,
-        PU_learning=False,
-        BayesGNN=args.Bayes
-    )
-
-    # visualize feature
-    feature_visualization(
-        wsi_paths=wsi_paths[0:900:90],
-        save_feature_dir=save_feature_dir,
-        save_label_dir=None,
-        graph=True,
-        num_class=args.node_features
-    )
-
-    ## visualize graph on wsi
-    wsi_path = wsi_paths[2]
-    wsi_name = pathlib.Path(wsi_path).stem 
-    logging.info(f"Visualizing graph of {wsi_name}...")
-    graph_path = save_feature_dir / f"{wsi_name}.json"
-    visualize_graph(
-        wsi_path=wsi_path,
-        graph_path=graph_path,
-        label=None,
-        positive_graph=False,
-        show_map=False,
-        magnify=True,
-        resolution=args.resolution,
-        units=args.units
-    )
+    # inference(
+    #     split_path=split_path,
+    #     scaler_path=scaler_path,
+    #     num_node_features=args.node_features,
+    #     pretrained_dir=save_model_dir,
+    #     select_positive_samples=False,
+    #     select_low_high_samples=False,
+    #     PN_learning=False,
+    #     PU_learning=False,
+    #     BayesGNN=args.Bayes
+    # )
