@@ -8,6 +8,7 @@ import torch
 import joblib
 import argparse
 import yaml
+import json
 import numpy as np
 from tqdm import tqdm
 from easydict import EasyDict as edict
@@ -174,7 +175,7 @@ def run_once(
                     logging_dict[f"train-EMA-{val_name}"] = val
             elif "infer" in loader_name and any(v in loader_name for v in ["train", "valid"]):
                 output = list(zip(*step_output))
-                gt_adjs, pred_adjs = output
+                gt_xs, pred_xs, gt_adjs, pred_adjs = output
                 gt_graphs, pred_graphs = adjs_to_graphs(gt_adjs), adjs_to_graphs(pred_adjs)
                 
                 # evaluate maximum mean discrepancy (MMD)
@@ -237,7 +238,7 @@ def training(
         "batch_size": 8,
     }
     
-    model_dir = model_dir / "GSDM"
+    model_dir = model_dir / "Diffusion_Prior_GSDM"
     for split_idx, split in enumerate(splits):
         new_split = {
             "train": split["train"],
@@ -627,22 +628,17 @@ def test(
     # logging.info(f"AUROC: {auroc:0.5f}, AUPRC: {auprc:0.5f}")
     return prob  
 
-def compute_label_portion(split_path):
-    splits = joblib.load(split_path)
-    for idx, split in enumerate(splits):
-        for name, subset in split.items():
-            if subset is not None:
-                num_nodes = 0
-                num_freqs = np.zeros([4], np.uint32)
-                for _, path in subset:
-                    label = np.array(np.load(pathlib.Path(path)), np.uint32)
-                    num_nodes += len(label)
-                    uids, freqs = np.unique(label, return_counts=True)
-                    num_freqs[uids] = num_freqs[uids] + freqs
-                p = (num_freqs / num_nodes).tolist()
-                logging.info(f"Fold-{idx}: nodes={num_nodes}; {name}-portion=[{p[0]:0.5f}, {p[1]:0.5f}, {p[2]:0.5f}, {p[3]:0.5f}]")
-    return 
-
+def node_statistics(wsi_graph_paths):
+    node_features = []
+    for graph_path in wsi_graph_paths:
+        with pathlib.Path(graph_path).open() as fptr:
+            graph_dict = json.load(fptr)
+        node_features.append(np.array(graph_dict["x"]))
+    num_nodes = [len(n) for n in node_features]
+    max_num = max(num_nodes)
+    min_num = min(num_nodes)
+    logging.info(f"Max node num: {max_num}, Min node num: {min_num}")
+    return
 
 if __name__ == "__main__":
     ## argument parser
@@ -650,31 +646,34 @@ if __name__ == "__main__":
     parser.add_argument('--wsi_dir', default="/home/sg2162/rds/rds-ge-sow2-imaging-MRNJucHuBik/TCGA/WSI")
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
     parser.add_argument('--config', default="./a_06generative_SR/TCGA_graphs.yaml", type=str)
-    parser.add_argument('--save_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
-    parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
+    parser.add_argument('--save_pathomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
-    parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch"], type=str)
+    parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     args = parser.parse_args()
 
     ## get wsi path
     wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
-    excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1"]
-    wsi_paths = select_wsi(wsi_dir, excluded_wsi)
+    all_paths = sorted(pathlib.Path(wsi_dir).rglob("*.svs"))
+    excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1", "TCGA-UZ-A9PQ-01Z-00-DX1"]
+    wsi_paths = []
+    for path in all_paths:
+        wsi_name = f"{path}".split("/")[-1].split(".")[0]
+        if wsi_name not in excluded_wsi: wsi_paths.append(path)
     logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
     
     ## set save dir
-    save_tile_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_pathomic_tiles")
-    save_msk_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_{args.mode}_pathomic_masks")
-    save_feature_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.feature_mode}")
-    save_model_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_{args.mode}_models/{args.feature_mode}")
+    save_pathomics_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.pathomics_mode}")
+    save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models/{args.pathomics_mode}")
 
+    ## node statistics
+    wsi_graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    node_statistics(wsi_graph_paths)
 
     ## split data set
     num_folds = 5
     test_ratio = 0.2
     train_ratio = 0.8 * 0.9
     valid_ratio = 0.8 * 0.1
-    wsi_graph_paths = sorted(save_feature_dir.glob("*.json"))
     splits = generate_data_split(
         x=wsi_graph_paths,
         train=train_ratio,
@@ -685,7 +684,6 @@ if __name__ == "__main__":
     mkdir(save_model_dir)
     split_path = f"{save_model_dir}/diffusion_splits.dat"
     joblib.dump(splits, split_path)
-    compute_label_portion(split_path)
     splits = joblib.load(split_path)
     num_train = len(splits[0]["train"])
     logging.info(f"Number of training samples: {num_train}.")
@@ -705,7 +703,9 @@ if __name__ == "__main__":
         shuffle=False,
         drop_last=False,
     )
-    node_features = [v.x.numpy() for v in tqdm(loader)]
+    node_features = [v.x.numpy() for v in loader]
+    num_nodes = [len(f) for f in node_features]
+
     node_features = np.concatenate(node_features, axis=0)
     node_scaler = StandardScaler(copy=False)
     node_scaler.fit(node_features)

@@ -122,7 +122,7 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
         model.module.model_x.eval()
         model.module.model_adj.eval()
         with torch.inference_mode():
-            _, pred_adj, _ = sampling(model.module.model_x, model.module.model_adj, flags, train_adj)
+            pred_x, pred_adj, _ = sampling(model.module.model_x, model.module.model_adj, flags, train_adj)
         
         # mask adjacency matrix with flags
         if len(pred_adj.shape) == 4:
@@ -138,8 +138,10 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
 
         infer_adj = infer_adj.detach().cpu().numpy()
         pred_adj = pred_adj.detach().cpu().numpy()
+        infer_x = infer_graphs.x.detach().cpu().numpy()
+        pred_x = pred_x.detach().cpu().numpy()
 
-        return [infer_adj, pred_adj]
+        return [infer_x, pred_x, infer_adj, pred_adj]
 
 class ScalarMovingAverage:
     """Class to calculate running average."""

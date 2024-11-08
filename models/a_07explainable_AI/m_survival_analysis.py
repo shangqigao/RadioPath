@@ -160,7 +160,7 @@ def prepare_graph_properties(data_dict, prop_keys):
 def prepare_radiomic_properties(data_dict, prop_keys):
     properties = {}
     for key, value in data_dict.items():
-        selected = [(k in key) for k in prop_keys]
+        selected = [((k in key) and ("diagnostics" not in key)) for k in prop_keys]
         if any(selected): properties[key] = value
     return properties
 
@@ -379,14 +379,14 @@ def cox_proportional_hazard_regression(
     print(df_prop.head())
 
     # COX regreession
-    cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.01)
+    cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio="auto")
     cox_elastic_net.fit(df_prop, df_clinical)
     coefficients = pd.DataFrame(cox_elastic_net.coef_, index=df_prop.columns, columns=np.round(cox_elastic_net.alphas_, 5))
     
     plot_coefficients(coefficients, n_highlight=5)
 
     # choosing penalty strength by cross validation
-    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.01, max_iter=100)
+    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio="auto", max_iter=1000)
     coxnet_pipe = make_pipeline(StandardScaler(), cox)
     warnings.simplefilter("ignore", UserWarning)
     warnings.simplefilter("ignore", FitFailedWarning)
@@ -883,7 +883,7 @@ if __name__ == "__main__":
         pathomics_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
     else:
         pathomics_paths = [save_pathomics_dir / f"{p.stem}.WSI.features.npy" for p in wsi_paths]
-    class_name = ["kidney_and_mass", "mass", "tumour"][2]
+    class_name = ["kidney_and_mass", "mass", "tumour"][1]
     radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json"))
     matched_pathomics_indices, matched_radiomics_indices = matched_pathomics_radiomics(
         save_pathomics_paths=pathomics_paths,
@@ -904,13 +904,13 @@ if __name__ == "__main__":
         # "mean_neighbor_degree"
     ]
     radiomic_propereties = [
-        "original_shape",
-        # "original_firstorder",
-        # "original_glcm",
-        # "original_gldm",
-        "original_glrlm",
-        # "original_glszm",
-        # "original_ngtdm"
+        "shape",
+        # "firstorder",
+        "glcm",
+        "gldm",
+        # "glrlm",
+        # "glszm",
+        "ngtdm",
     ]
     integrated = ["all", "pathomics", "radiomics", "deep_pathomics", "radiopathomics", "radioDeepPathomics", "pathoDeepPathomics"]
     cox_proportional_hazard_regression(
@@ -921,7 +921,7 @@ if __name__ == "__main__":
         radiomics_keys=radiomic_propereties,
         l1_ratio=0.9,
         stages=None, #["Stage I", "Stage II"],
-        used=integrated[6],
+        used=integrated[0],
         n_jobs=32,
         aggregation=aggregation,
         dataset=args.dataset

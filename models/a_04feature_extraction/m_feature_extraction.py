@@ -614,10 +614,11 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, 
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     settings = {}
-    settings['resampledPixelSpacing'] = resolution
+    settings['resampledPixelSpacing'] = [resolution, resolution, resolution]
     settings['correctMask'] = True
 
     extractor = featureextractor.RadiomicsFeatureExtractor(**settings)
+    extractor.enableImageTypeByName('Wavelet')
     os.makedirs(save_dir, exist_ok=True)
     def _extract_radiomics(idx, img_path, lab_path):
         logging.info("extracting radiomics: {}/{}...".format(idx + 1, len(img_paths)))

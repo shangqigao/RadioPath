@@ -1,5 +1,5 @@
 data: 
-  max_node_num: 361
+  max_node_num: 11757
   max_feat_num: 1024
   init: deg
 

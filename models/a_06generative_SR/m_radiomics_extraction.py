@@ -52,5 +52,6 @@ if __name__ == "__main__":
             save_dir=save_feature_dir,
             class_name=class_name,
             label=1,
-            n_jobs=32
+            n_jobs=32,
+            resolution=args.resolution
         )
