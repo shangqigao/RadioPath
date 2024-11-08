@@ -667,7 +667,7 @@ if __name__ == "__main__":
 
     ## node statistics
     wsi_graph_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    node_statistics(wsi_graph_paths)
+    # node_statistics(wsi_graph_paths)
 
     ## split data set
     num_folds = 5
