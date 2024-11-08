@@ -149,8 +149,8 @@ def load_loss_fn2(config):
     reduce_mean = config.train.reduce_mean
     sde_x = load_sde(config.sde.x)
     sde_adj = load_sde(config.sde.adj)
-    sde_x.select_type(config.sde.x.type)
-    sde_adj.select_type(config.sde.adj.type)
+    sde_x.select_type(config.type)
+    sde_adj.select_type(config.type)
     loss_fn = get_sde_loss_fn2(sde_x, sde_adj, train=True, reduce_mean=reduce_mean, continuous=True,
                               likelihood_weighting=False, eps=config.train.eps)
     return loss_fn
@@ -188,8 +188,8 @@ def load_sampling_fn2(config_train, config_module, config_sample, device):
     sde_x = load_sde(config_train.sde.x)
     sde_adj = load_sde(config_train.sde.adj)
 
-    sde_x.select_type(config_train.sde.x.type)
-    sde_adj.select_type(config_train.sde.adj.type)
+    sde_x.select_type(config_train.type)
+    sde_adj.select_type(config_train.type)
 
     max_node_num = config_train.data.max_node_num
 

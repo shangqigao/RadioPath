@@ -220,7 +220,9 @@ def training(
         scaler_path,
         config_path,
         model_dir,
-        pretrained=None
+        pretrained=None,
+        beta_type="linear",
+        seed=42
 ):
     """train node classification neural networks
     Args:
@@ -232,10 +234,12 @@ def training(
     splits = joblib.load(split_path)
     node_scaler = joblib.load(scaler_path)
     config = edict(yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader))
+    config.type = beta_type
+    config.seed = seed
     
     loader_kwargs = {
         "num_workers": 8, 
-        "batch_size": 8,
+        "batch_size": config.data.batch_size,
     }
     
     model_dir = model_dir / "Diffusion_Prior_GSDM"
@@ -649,6 +653,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_pathomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--type', default="linear", choices=["linear", "exp", "cosine", "tanh"], type=str)
     args = parser.parse_args()
 
     ## get wsi path
@@ -717,7 +722,9 @@ if __name__ == "__main__":
         split_path=split_path,
         scaler_path=scaler_path,
         config_path=args.config,
-        model_dir=save_model_dir
+        model_dir=save_model_dir,
+        beta_type=args.type,
+        seed=42
     )
 
     # ## inference
