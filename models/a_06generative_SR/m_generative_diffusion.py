@@ -108,40 +108,18 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
         return [loss_x, loss_adj, edge_index]
     
     @staticmethod
-    def infer_batch(model, batch_data, on_gpu, sampling, train_edge_index, thr=0.5, eps=1e-5):
+    def infer_batch(model, batch_data, on_gpu, loss):
         device = "cuda" if on_gpu else "cpu"
         infer_graphs = batch_data.to(device)
         infer_graphs.x = infer_graphs.x.type(torch.float32)
-        infer_adj = to_dense_adj(infer_graphs.edge_index)
-
-        train_edge_index = train_edge_index.to(device)
-        max_num_nodes = model.config.data.max_num_nodes
-        train_adj = to_dense_adj(train_edge_index, max_num_nodes=max_num_nodes)
-        flags = torch.abs(train_adj).sum(-1).gt(eps)
 
         model.model_x.eval()
         model.model_adj.eval()
         with torch.inference_mode():
-            pred_x, pred_adj, _ = sampling(model.model_x, model.model_adj, flags, train_adj)
-        
-        # mask adjacency matrix with flags
-        if len(pred_adj.shape) == 4:
-            flags = flags.unsqueeze(1)  # B x 1 x N
-        pred_adj = pred_adj * flags.unsqueeze(-1)
-        pred_adj = pred_adj * flags.unsqueeze(-2)
+            subjects, edge_index = model(infer_graphs)
+            loss_x, loss_adj = loss(model.model_x, model.model_adj, *subjects) 
 
-        pred_adj = pred_adj.triu(1)
-        pred_adj = pred_adj + torch.transpose(pred_adj, -1, -2)
-
-        # quantize adjacency matrix
-        pred_adj = torch.where(pred_adj < thr, torch.zeros_like(pred_adj), torch.ones_like(pred_adj))
-
-        infer_adj = infer_adj.detach().cpu().numpy()
-        pred_adj = pred_adj.detach().cpu().numpy()
-        infer_x = infer_graphs.x.detach().cpu().numpy()
-        pred_x = pred_x.detach().cpu().numpy()
-
-        return [infer_x, pred_x, infer_adj, pred_adj]
+        return [loss_x.item(), loss_adj.item()]
 
 class ScalarMovingAverage:
     """Class to calculate running average."""

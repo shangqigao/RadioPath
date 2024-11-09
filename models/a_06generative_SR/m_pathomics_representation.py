@@ -126,9 +126,6 @@ def run_once(
     ## Set loss
     loss = load_loss_fn2(config)
 
-    ## Set sampling
-    sampling = load_sampling_fn2(config, config.sampler, config.sample, "cuda")
-
     loader_dict = {}
     for subset_name, subset in dataset_dict.items():
         _loader_kwargs = copy.deepcopy(loader_kwargs)
@@ -146,7 +143,6 @@ def run_once(
 
     for epoch in range(config.train.num_epochs):
         logger.info("EPOCH: %03d", epoch)
-        train_edge_index_list = []
         for loader_name, loader in loader_dict.items():
             step_output = []
             ema = ScalarMovingAverage()
@@ -155,16 +151,11 @@ def run_once(
                 if loader_name == "train":
                     output = model.train_batch(model, batch_data, on_gpu, loss, (optimizer_x, optimizer_adj))
                     edge_index = torch.split(output[2], config.data.batch_size, dim=0)
-                    train_edge_index_list += list(edge_index)
                     ema({"loss": output[0] + output[1], "loss_x": output[0], "loss_adj": output[1]})
                     pbar.postfix[1]["step"] = step
                     pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
                 else:
-                    idx = np.random.randint(0, len(train_edge_index_list), config.data.batch_size)
-                    sampled_train_ei = torch.concat(train_edge_index_list[idx])
-                    output = model.infer_batch(model, batch_data, on_gpu, sampling, sampled_train_ei)
-                    output = [np.split(v, config.data.batch_size, axis=0) for v in output]
-                    output = list(zip(*output))
+                    output = model.infer_batch(model, batch_data, on_gpu, loss)
                     step_output += output
                 pbar.update()
             pbar.close()
@@ -175,14 +166,12 @@ def run_once(
                     logging_dict[f"train-EMA-{val_name}"] = val
             elif "infer" in loader_name and any(v in loader_name for v in ["train", "valid"]):
                 output = list(zip(*step_output))
-                gt_xs, pred_xs, gt_adjs, pred_adjs = output
-                gt_graphs, pred_graphs = adjs_to_graphs(gt_adjs), adjs_to_graphs(pred_adjs)
+                loss_x, loss_adj = output
+                avg_loss_x = sum(loss_x) / len(loss_x)
+                avg_loss_adj = sum(loss_adj) / len(loss_adj)
                 
-                # evaluate maximum mean discrepancy (MMD)
-                methods, kernels = load_eval_settings(config.data.data)
-                metric_dict = eval_graph_list(gt_graphs, pred_graphs, methods=methods, kernels=kernels)
-                for metric_name, metric_value in metric_dict:
-                    logging_dict[f"{loader_name}-{metric_name}"] = metric_value
+                logging_dict[f"{loader_name}-avg_loss_x"] = avg_loss_x
+                logging_dict[f"{loader_name}-avg_loss_adj"] = avg_loss_adj
 
             for val_name, val in logging_dict.items():
                 if "raw" not in val_name:
@@ -261,6 +250,41 @@ def training(
             loader_kwargs=loader_kwargs,
         )
     return
+
+def sampling(model, batch_data, on_gpu, sampling, train_edge_index, thr=0.5, eps=1e-5):
+    device = "cuda" if on_gpu else "cpu"
+    infer_graphs = batch_data.to(device)
+    infer_graphs.x = infer_graphs.x.type(torch.float32)
+    infer_adj = to_dense_adj(infer_graphs.edge_index)
+
+    train_edge_index = train_edge_index.to(device)
+    max_num_nodes = model.module.config.data.max_num_nodes
+    train_adj = to_dense_adj(train_edge_index, max_num_nodes=max_num_nodes)
+    flags = torch.abs(train_adj).sum(-1).gt(eps)
+
+    model.module.model_x.eval()
+    model.module.model_adj.eval()
+    with torch.inference_mode():
+        pred_x, pred_adj, _ = sampling(model.module.model_x, model.module.model_adj, flags, train_adj)
+    
+    # mask adjacency matrix with flags
+    if len(pred_adj.shape) == 4:
+        flags = flags.unsqueeze(1)  # B x 1 x N
+    pred_adj = pred_adj * flags.unsqueeze(-1)
+    pred_adj = pred_adj * flags.unsqueeze(-2)
+
+    pred_adj = pred_adj.triu(1)
+    pred_adj = pred_adj + torch.transpose(pred_adj, -1, -2)
+
+    # quantize adjacency matrix
+    pred_adj = torch.where(pred_adj < thr, torch.zeros_like(pred_adj), torch.ones_like(pred_adj))
+
+    infer_adj = infer_adj.detach().cpu().numpy()
+    pred_adj = pred_adj.detach().cpu().numpy()
+    infer_x = infer_graphs.x.detach().cpu().numpy()
+    pred_x = pred_x.detach().cpu().numpy()
+
+    return [infer_x, pred_x, infer_adj, pred_adj]
 
 def inference(
         split_path,
