@@ -83,19 +83,19 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
 
         train_graphs.x = train_graphs.x.type(torch.float32)
 
-        model.module.model_x.train()
-        model.module.model_adj.train()
+        model.model_x.train()
+        model.model_adj.train()
         optimizer_x, optimizer_adj = optimizers
         optimizer_x.zero_grad()
         optimizer_adj.zero_grad()
 
         subjects, edge_index = model(train_graphs)
-        loss_x, loss_adj = loss(model.module.model_x, model.module.model_adj, *subjects) 
+        loss_x, loss_adj = loss(model.model_x, model.model_adj, *subjects) 
         loss_x.backward()
         loss_adj.backward()
 
-        nn.utils.clip_grad_norm_(model.module.model_x.parameters(), model.module.config.train.grad_norm)
-        nn.utils.clip_grad_norm_(model.module.model_adj.parameters(), model.module.config.train.grad_norm)
+        nn.utils.clip_grad_norm_(model.model_x.parameters(), model.config.train.grad_norm)
+        nn.utils.clip_grad_norm_(model.model_adj.parameters(), model.config.train.grad_norm)
         optimizer_x.step()
         optimizer_adj.step()
 
@@ -115,14 +115,14 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
         infer_adj = to_dense_adj(infer_graphs.edge_index)
 
         train_edge_index = train_edge_index.to(device)
-        max_num_nodes = model.module.config.data.max_num_nodes
+        max_num_nodes = model.config.data.max_num_nodes
         train_adj = to_dense_adj(train_edge_index, max_num_nodes=max_num_nodes)
         flags = torch.abs(train_adj).sum(-1).gt(eps)
 
-        model.module.model_x.eval()
-        model.module.model_adj.eval()
+        model.model_x.eval()
+        model.model_adj.eval()
         with torch.inference_mode():
-            pred_x, pred_adj, _ = sampling(model.module.model_x, model.module.model_adj, flags, train_adj)
+            pred_x, pred_adj, _ = sampling(model.model_x, model.model_adj, flags, train_adj)
         
         # mask adjacency matrix with flags
         if len(pred_adj.shape) == 4:
