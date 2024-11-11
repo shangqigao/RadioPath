@@ -14,7 +14,7 @@ from torch_geometric.utils import to_dense_adj
 class SlideGraphSpectrumDataset(Dataset):
     """loading graph data from disk
     """
-    def __init__(self, info_list, mode="train", preproc=None):
+    def __init__(self, info_list, mode="train", preproc=None, max_num_nodes=2048):
         super().__init__()
         self.info_list = info_list
         self.mode = mode
@@ -74,7 +74,7 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
         adj = to_dense_adj(edge_index)
         la, u = torch.linalg.eigh(adj)
         subjects = (x, adj, u, la)
-        return subjects, edge_index
+        return subjects
     
     @staticmethod
     def train_batch(model, batch_data, on_gpu, loss, optimizers):
@@ -89,7 +89,7 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
         optimizer_x.zero_grad()
         optimizer_adj.zero_grad()
 
-        subjects, edge_index = model(train_graphs)
+        subjects = model(train_graphs)
         loss_x, loss_adj = loss(model.model_x, model.model_adj, *subjects) 
         loss_x.backward()
         loss_adj.backward()
@@ -103,9 +103,8 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
         assert not np.isnan(loss_x)
         loss_adj = loss_adj.detach().cpu().numpy()
         assert not np.isnan(loss_adj)
-        edge_index.detach().cpu()
 
-        return [loss_x, loss_adj, edge_index]
+        return [loss_x, loss_adj]
     
     @staticmethod
     def infer_batch(model, batch_data, on_gpu, loss):
@@ -116,7 +115,7 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
         model.model_x.eval()
         model.model_adj.eval()
         with torch.inference_mode():
-            subjects, edge_index = model(infer_graphs)
+            subjects = model(infer_graphs)
             loss_x, loss_adj = loss(model.model_x, model.model_adj, *subjects) 
 
         return [loss_x.item(), loss_adj.item()]

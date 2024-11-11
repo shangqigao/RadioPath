@@ -150,7 +150,6 @@ def run_once(
             for step, batch_data in enumerate(loader):
                 if loader_name == "train":
                     output = model.train_batch(model, batch_data, on_gpu, loss, (optimizer_x, optimizer_adj))
-                    edge_index = torch.split(output[2], config.data.batch_size, dim=0)
                     ema({"loss": output[0] + output[1], "loss_x": output[0], "loss_adj": output[1]})
                     pbar.postfix[1]["step"] = step
                     pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
