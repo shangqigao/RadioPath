@@ -73,7 +73,6 @@ class SlideGraphSpectrumDiffusionArch(nn.Module):
         x, edge_index = data.x, data.edge_index
         adj = to_dense_adj(edge_index, max_num_nodes=x.size(0))
         la, u = torch.linalg.eigh(adj)
-        print(x.size(), adj.size(), u.size(), la.size())
         subjects = (x, adj, u, la)
         return subjects
     

@@ -45,7 +45,6 @@ class ScoreNetworkA_eigen(torch.nn.Module):
         self.activation = torch.tanh
 
     def forward(self, x, adj, flags, u, la):
-        print(x.size(), adj.size(), flags.size(), u.size(), la.size())
         # get row vectors
         row_x = x
         row_list = [row_x]

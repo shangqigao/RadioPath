@@ -1,5 +1,5 @@
 data: 
-  batch_size: 8
+  batch_size: 2
   max_node_num: 11757
   max_feat_num: 1024
   init: deg
