@@ -36,7 +36,7 @@ class ScoreNetworkA_eigen(torch.nn.Module):
                 self.col_layers.append(DenseGCNConv(self.nhid, self.nhid))
 
         self.fdim = self.nfeat + self.depth * self.nhid
-        self.row_final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=self.nhid,
+        self.col_final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=self.nhid,
                             use_bn=False, activate_func=F.elu)
 
         self.final_with_eigen = MLP(num_layers=2, input_dim=2, hidden_dim=self.nhid, output_dim=1,
@@ -49,25 +49,25 @@ class ScoreNetworkA_eigen(torch.nn.Module):
         row_x = x
         row_list = [row_x]
         for _ in range(self.depth):
-            row_x = self.layers[_](row_x, adj)
+            row_x = self.row_layers[_](row_x, adj)
             row_x = self.activation(row_x)
             row_list.append(row_x)
 
         row_x = torch.cat(row_list, dim=-1)
         out_shape = (adj.shape[0], adj.shape[1], -1)
-        row_x = self.final(row_x).view(*out_shape)
+        row_x = self.row_final(row_x).view(*out_shape)
         row_x = mask_x(row_x, flags)
         # get column vectors
         col_x = x
         col_list = [col_x]
         for _ in range(self.depth):
-            col_x = self.layers[_](col_x, adj)
+            col_x = self.col_layers[_](col_x, adj)
             col_x = self.activation(col_x)
             col_list.append(col_x)
 
         col_x = torch.cat(col_list, dim=-1)
         out_shape = (adj.shape[0], adj.shape[1], -1)
-        col_x = self.final(col_x).view(*out_shape)
+        col_x = self.col_final(col_x).view(*out_shape)
         col_x = mask_x(col_x, flags)
         # low-rank estimation of adj
         row_x = row_x.transpose(-2, -1).unsqueeze(-2)
