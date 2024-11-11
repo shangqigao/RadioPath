@@ -17,41 +17,70 @@ class ScoreNetworkA_eigen(torch.nn.Module):
         self.depth = depth
         self.nhid = nhid
 
-        self.layers = torch.nn.ModuleList()
+        self.row_layers = torch.nn.ModuleList()
         for _ in range(self.depth):
             if _ == 0:
-                self.layers.append(DenseGCNConv(self.nfeat, self.nhid))
+                self.row_layers.append(DenseGCNConv(self.nfeat, self.nhid))
             else:
-                self.layers.append(DenseGCNConv(self.nhid, self.nhid))
+                self.row_layers.append(DenseGCNConv(self.nhid, self.nhid))
 
         self.fdim = self.nfeat + self.depth * self.nhid
-        self.final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=self.nfeat,
+        self.row_final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=self.nhid,
+                            use_bn=False, activate_func=F.elu)
+        
+        self.col_layers = torch.nn.ModuleList()
+        for _ in range(self.depth):
+            if _ == 0:
+                self.col_layers.append(DenseGCNConv(self.nfeat, self.nhid))
+            else:
+                self.col_layers.append(DenseGCNConv(self.nhid, self.nhid))
+
+        self.fdim = self.nfeat + self.depth * self.nhid
+        self.row_final = MLP(num_layers=3, input_dim=self.fdim, hidden_dim=2*self.fdim, output_dim=self.nhid,
                             use_bn=False, activate_func=F.elu)
 
-        self.final_with_eigen = MLP(num_layers=2, input_dim=self.nfeat + max_node_num, hidden_dim=2 * max_node_num, output_dim=max_node_num,
+        self.final_with_eigen = MLP(num_layers=2, input_dim=2, hidden_dim=self.nhid, output_dim=1,
                          use_bn=False, activate_func=F.elu)
 
         self.activation = torch.tanh
 
     def forward(self, x, adj, flags, u, la):
-
-        x_list = [x]
+        # get row vectors
+        row_x = x
+        row_list = [row_x]
         for _ in range(self.depth):
-            x = self.layers[_](x, adj)
-            x = self.activation(x)
-            x_list.append(x)
+            row_x = self.layers[_](row_x, adj)
+            row_x = self.activation(row_x)
+            row_list.append(row_x)
 
-        xs = torch.cat(x_list, dim=-1)
+        row_x = torch.cat(row_list, dim=-1)
         out_shape = (adj.shape[0], adj.shape[1], -1)
-        x = self.final(xs).view(*out_shape)
-        x = mask_x(x, flags)
-        flag_sum = torch.sum(flags, dim=1).unsqueeze(-1)
-        flag_sum[flag_sum < 0.0000001] = 1
-        x = torch.sum(x, dim=1)/flag_sum
-        x = torch.cat((x, la), dim=-1)
+        row_x = self.final(row_x).view(*out_shape)
+        row_x = mask_x(row_x, flags)
+        # get column vectors
+        col_x = x
+        col_list = [col_x]
+        for _ in range(self.depth):
+            col_x = self.layers[_](col_x, adj)
+            col_x = self.activation(col_x)
+            col_list.append(col_x)
+
+        col_x = torch.cat(col_list, dim=-1)
+        out_shape = (adj.shape[0], adj.shape[1], -1)
+        col_x = self.final(col_x).view(*out_shape)
+        col_x = mask_x(col_x, flags)
+        # low-rank estimation of adj
+        row_x = row_x.transpose(-2, -1).unsqueeze(-2)
+        col_x = col_x.transpose(-2, -1).unsqueeze(-1)
+        x = torch.matmul(col_x, row_x).sum(dim=-3)
+        # compute eigens
+        x = torch.matmul(u.transpose(-2, -1), x)
+        x = torch.matmul(x, u)
+        x = torch.diagonal(x, dim1=-2, dim2=-1)
+        x = torch.stack((la, x), dim=-1)
         x = self.final_with_eigen(x)
 
-        return x
+        return x.squeeze(-1)
 
 
 class ScoreNetworkX_GMH(torch.nn.Module):
