@@ -45,6 +45,7 @@ class ScoreNetworkA_eigen(torch.nn.Module):
         self.activation = torch.tanh
 
     def forward(self, x, adj, flags, u, la):
+        print(x.size(), adj.size(), flags.size(), u.size(), la.size())
         # get row vectors
         row_x = x
         row_list = [row_x]
@@ -69,14 +70,13 @@ class ScoreNetworkA_eigen(torch.nn.Module):
         out_shape = (adj.shape[0], adj.shape[1], -1)
         col_x = self.col_final(col_x).view(*out_shape)
         col_x = mask_x(col_x, flags)
-        # low-rank estimation of adj
         row_x = row_x.transpose(-2, -1).unsqueeze(-2)
         col_x = col_x.transpose(-2, -1).unsqueeze(-1)
-        x = torch.matmul(col_x, row_x).sum(dim=-3)
-        # compute eigens
-        x = torch.matmul(u.transpose(-2, -1), x)
-        x = torch.matmul(x, u)
-        x = torch.diagonal(x, dim1=-2, dim2=-1)
+        # compute eigens of low-rank approximation
+        u = u.unsqueeze(1)
+        row_x = torch.matmul(row_x, u).squeeze(-2)
+        col_x = torch.matmul(u.transpose(-2, -1), col_x).squeeze(-1)
+        x = torch.sum(row_x * col_x, dim=-2)
         x = torch.stack((la, x), dim=-1)
         x = self.final_with_eigen(x)
 
