@@ -41,11 +41,11 @@ train:
   num_epochs: 5000
   save_interval: 1000
   print_interval: 1000
-  reduce_mean: False
-  lr: 0.01
+  reduce_mean: True
+  lr: 0.0003
   lr_schedule: True
   ema: 0.999
-  weight_decay: 0.0001
+  weight_decay: 0.00001
   grad_norm: 1.0
   lr_decay: 0.999
   eps: 1.0e-5

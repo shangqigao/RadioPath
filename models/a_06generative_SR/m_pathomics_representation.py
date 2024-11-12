@@ -155,7 +155,7 @@ def run_once(
                     pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
                 else:
                     output = model.infer_batch(model, batch_data, on_gpu, loss)
-                    step_output += output
+                    step_output.append(output)
                 pbar.update()
             pbar.close()
 
