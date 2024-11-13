@@ -37,15 +37,12 @@ model:
   c_final: 4
 
 train:
-  name: test
-  num_epochs: 5000
-  save_interval: 1000
-  print_interval: 1000
+  num_epochs: 400
   reduce_mean: True
-  lr: 3.0e-4
+  lr: 2.0e-5
   lr_schedule: True
   ema: 0.999
-  weight_decay: 1.0e-5
+  weight_decay: 1.0e-6
   grad_norm: 1.0
   lr_decay: 0.999
   eps: 1.0e-5

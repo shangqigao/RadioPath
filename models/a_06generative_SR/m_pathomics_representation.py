@@ -179,7 +179,7 @@ def run_once(
             if "train" not in loader_dict:
                 continue
 
-            if (epoch + 1) % 500 == 0:
+            if (epoch + 1) % 40 == 0:
                 new_stats = {}
                 if (save_dir / "stats.json").exists():
                     old_stats = load_json(f"{save_dir}/stats.json")
