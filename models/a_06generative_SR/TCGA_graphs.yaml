@@ -1,6 +1,5 @@
 data: 
   batch_size: 2
-  max_node_num: 11757
   max_feat_num: 1024
   init: deg
 
@@ -15,26 +14,12 @@ sde:
     beta_min: 0.2
     beta_max: 0.8
     num_scales: 1000
-  u:
-    type: VP
-    beta_min: 0.2
-    beta_max: 1.0
-    num_scales: 1000
 
 model:
   x: ScoreNetworkX
   adj: ScoreNetworkA_eigen
-  u: ScoreNetworkU
-  conv: GCN
-  num_heads: 4
   depth: 5
-  adim: 32
   nhid: 32
-  num_layers: 7
-  num_linears: 2
-  c_init: 2
-  c_hid: 8
-  c_final: 4
 
 train:
   num_epochs: 400

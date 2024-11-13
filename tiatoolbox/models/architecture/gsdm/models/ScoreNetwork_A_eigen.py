@@ -8,8 +8,7 @@ from models.attention import  AttentionLayer
 
 class ScoreNetworkA_eigen(torch.nn.Module):
 
-    def __init__(self, max_feat_num, nhid, max_node_num, num_layers, num_linears,
-                    c_init, c_hid, c_final, adim, depth=3, num_heads=4, conv='GCN'):
+    def __init__(self, max_feat_num, nhid, depth=3):
 
         super(ScoreNetworkA_eigen, self).__init__()
 
