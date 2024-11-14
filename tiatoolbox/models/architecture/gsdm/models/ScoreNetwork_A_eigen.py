@@ -78,6 +78,7 @@ class ScoreNetworkA_eigen(torch.nn.Module):
         x = torch.stack((la, x), dim=-1)
         x = self.final_with_eigen(x)
 
+        assert not torch.any(x.isnan())
         return x.squeeze(-1)
 
 
