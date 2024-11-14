@@ -136,6 +136,8 @@ def extract_radiomic_feature(
             units,
             n_jobs
         )
+    elif feature_mode == "SegVol":
+        _ = extract_vitradiomics()
     else:
         raise ValueError(f"Invalid feature mode: {feature_mode}")
     return
@@ -637,6 +639,35 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, 
         joblib.delayed(_extract_radiomics)(idx, img_path, lab_path)
         for idx, (img_path, lab_path) in enumerate(zip(img_paths, lab_paths))
     )
+    return
+
+def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, resolution=None, units="mm", n_jobs=32):
+    from monai import transforms
+    from monai.networks.nets import ViT
+    
+    vit = ViT(
+        in_channels=1,
+        img_size=(32,256,256),
+        patch_size=(4,16,16),
+        pos_embed="perceptron",
+        )
+    print(vit)
+    vit_checkpoint = '../checkpoints/SegVol/ViT_pretrain.ckpt'
+    with open(vit_checkpoint, "rb") as f:
+        state_dict = torch.load(f, map_location='cpu')['state_dict']
+        encoder_dict = {k.replace('model.encoder.', ''): v for k, v in state_dict.items() if 'model.encoder.' in k}
+    vit.load_state_dict(encoder_dict)
+    print(f'Loaded SegVol encoder param: {vit_checkpoint}')
+
+    spacing = (resolution / 4, resolution / 16, resolution / 16)
+    keys = ["image", "label"]
+    transform = transforms.Compose(
+            [
+                transforms.LoadImaged(keys, ensure_channel_first=True, allow_missing_keys=True),
+                transforms.Spacingd(keys, pixdim=spacing, mode=('bilinear', 'nearest')),
+            ]
+        )
+    
     return
 
 

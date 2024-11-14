@@ -42,7 +42,7 @@ class ScoreNetworkX(torch.nn.Module):
         x = self.final(xs).view(*out_shape)
 
         x = mask_x(x, flags)
-
+        assert not torch.any(x.isnan())
         return x
 
 
