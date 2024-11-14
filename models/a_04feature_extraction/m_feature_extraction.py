@@ -12,6 +12,7 @@ import timm
 import cv2
 import logging
 import json
+import PIL
 
 import numpy as np
 import albumentations as A
@@ -20,7 +21,6 @@ from albumentations.pytorch import ToTensorV2
 from common.m_utils import recur_find_ext, rmdir, select_checkpoints
 from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig, NucleusInstanceSegmentor
 from tiatoolbox.models.architecture.vanilla import CNNBackbone, CNNModel
-from tiatoolbox.models.architecture.hipt import get_vit256
 from tiatoolbox.tools.stainnorm import get_normalizer
 from tiatoolbox.data import stain_norm_target
 from tiatoolbox.wsicore.wsireader import WSIReader
@@ -82,6 +82,15 @@ def extract_pathomic_feature(
         )
     elif feature_mode == "uni":
         _ = extract_uni_pathomic_features(
+            wsi_paths,
+            wsi_msk_paths,
+            save_dir,
+            mode,
+            resolution,
+            units
+        )
+    elif feature_mode == "conch":
+        _ = extract_conch_pathomic_features(
             wsi_paths,
             wsi_msk_paths,
             save_dir,
@@ -227,6 +236,7 @@ class CNNClassifier(CNNModel):
 class ViT(torch.nn.Module):
     def __init__(self, model256_path):
         super().__init__()
+        from tiatoolbox.models.architecture.hipt import get_vit256
         self.model256 = get_vit256(pretrained_weights=model256_path)
     
     def forward(self, imgs):
@@ -345,6 +355,84 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
     TS = A.Compose([A.Resize(224, 224, cv2.INTER_CUBIC), A.Normalize(mean, std), ToTensorV2()])
     def _preproc_func(img):
         return TS(image=img)["image"]
+    def _postproc_func(img):
+        return img
+    model.preproc_func = _preproc_func
+    model.postproc_func = _postproc_func
+
+    extractor = DeepFeatureExtractor(
+        batch_size=128, 
+        model=model, 
+        num_loader_workers=32, 
+    )
+
+    # create temporary dir
+    tmp_save_dir = pathlib.Path(f"{save_dir}/tmp")
+    rmdir(tmp_save_dir)
+    output_map_list = extractor.predict(
+        wsi_paths,
+        msk_paths,
+        mode=mode,
+        ioconfig=ioconfig,
+        on_gpu=True,
+        crash_on_exception=True,
+        save_dir=tmp_save_dir,
+    )
+    
+    for input_path, output_path in output_map_list:
+        input_name = pathlib.Path(input_path).stem
+        output_parent_dir = pathlib.Path(output_path).parent.parent
+
+        src_path = pathlib.Path(f"{output_path}.position.npy")
+        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.position.npy")
+        src_path.rename(new_path)
+
+        src_path = pathlib.Path(f"{output_path}.features.0.npy")
+        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.features.npy")
+        src_path.rename(new_path)
+
+    # remove temporary dir
+    rmdir(tmp_save_dir)
+
+    return output_map_list
+
+class CONCH(torch.nn.Module):
+    def __init__(self, cfg, ckpt_path, device):
+        super().__init__()
+        from tiatoolbox.models.architecture.conch.open_clip_custom import create_model_from_pretrained
+        self.model, self.preprocess = create_model_from_pretrained(cfg, ckpt_path, device)
+
+    def forward(self, images):
+        img_embeddings = self.model.encode_image(images, proj_contrast=False, normalize=False)
+        return torch.flatten(img_embeddings, 1)
+
+    @staticmethod
+    def infer_batch(model, images, on_gpu):
+        device = "cuda" if on_gpu else "cpu"
+        images = images.to(device).type(torch.float32)
+        model.eval()
+        with torch.inference_mode():
+            output = model(images)
+        return [output.cpu().numpy()]
+    
+def extract_conch_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolution=0.5, units="mpp"):
+    ioconfig = IOSegmentorConfig(
+        input_resolutions=[{"units": units, "resolution": resolution},],
+        output_resolutions=[{"units": units, "resolution": resolution},],
+        patch_input_shape=[256, 256],
+        patch_output_shape=[256, 256],
+        stride_shape=[256, 256],
+        save_resolution={"units": "mpp", "resolution": 8.0}
+    )
+    
+    model_cfg = 'conch_ViT-B-16'
+    ckpt_path = '../checkpoints/CONCH/pytorch_model.bin'
+    model = CONCH(model_cfg, ckpt_path, 'cuda')
+    ## define preprocessing function
+    TS = model.preprocess
+    def _preproc_func(img):
+        img = PIL.Image.fromarray(img)
+        return TS(img)
     def _postproc_func(img):
         return img
     model.preproc_func = _preproc_func

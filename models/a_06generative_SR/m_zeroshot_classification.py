@@ -228,7 +228,7 @@ def pathology_conch_zeroshot_classification(wsi_paths, msk_paths, save_dir, mode
         src_path.rename(new_path)
 
         src_path = pathlib.Path(f"{output_path}.features.0.npy")
-        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.features.npy")
+        new_path = pathlib.Path(f"{output_parent_dir}/{input_name}.SimilarityScores.npy")
         src_path.rename(new_path)
 
     # remove temporary dir
