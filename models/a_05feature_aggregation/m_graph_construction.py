@@ -189,7 +189,7 @@ def generate_label_from_classification(
     cluster_points_list = graph_dict["cluster_points"]
 
     patch_cls_np = np.load(wsi_cls_path)
-    wsi_pos_path = f"{wsi_cls_path}".replace(".features.npy", ".position.npy")
+    wsi_pos_path = f"{wsi_cls_path}".replace(".SimilarityScores.npy", ".position.npy")
     patch_pos_np = np.load(wsi_pos_path)[:, :2]
 
     def _label_graph_node(idx, cluster_points):
