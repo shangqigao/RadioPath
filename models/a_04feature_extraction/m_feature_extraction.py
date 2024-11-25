@@ -798,7 +798,7 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
         print(image.shape, label.shape)
         voi, bbox = extract_VOI(image, label, patch_size)
         voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to(device)
-        feature = inferer(voi, vit)
+        feature = inferer(voi, lambda x: vit(x)[0])
         c, z, x, y = feature.squeeze().size()
         feature = feature.squeeze().reshape([c, z*x*y]).transpose(0,1).cpu().numpy()
         z, x, y = np.arange(z), np.arange(x), np.arange(z)
