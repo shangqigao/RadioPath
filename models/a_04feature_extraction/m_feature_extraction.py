@@ -13,6 +13,7 @@ import cv2
 import logging
 import json
 import PIL
+import skimage
 
 import numpy as np
 import albumentations as A
@@ -33,6 +34,8 @@ from pprint import pprint
 
 from radiomics import featureextractor
 import radiomics
+
+from monai.transforms.utils import generate_spatial_bounding_box
 
 SEED = 5
 random.seed(SEED)
@@ -146,7 +149,15 @@ def extract_radiomic_feature(
             n_jobs
         )
     elif feature_mode == "SegVol":
-        _ = extract_vitradiomics()
+        _ = extract_ViTradiomics(
+            img_paths,
+            lab_paths,
+            save_dir,
+            class_name,
+            label,
+            resolution,
+            units
+        )
     else:
         raise ValueError(f"Invalid feature mode: {feature_mode}")
     return
@@ -729,14 +740,26 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, 
     )
     return
 
-def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, resolution=None, units="mm", n_jobs=32):
+def extract_VOI(image, label, patch_size):
+    assert image.ndim == 3
+    s, e = generate_spatial_bounding_box(label)
+    image = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
+    bbox = [s, e]
+    shape = image.shape * np.array(patch_size, np.int32)
+    image = skimage.transform.resize(image, output_shape=shape)
+    return image, bbox
+
+def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, resolution=1.024, units="mm", device="cuda"):
     from monai import transforms
     from monai.networks.nets import ViT
-    
+    from monai.inferers import SlidingWindowInferer
+ 
+    roi_size = (32,256,256)
+    patch_size = (4,16,16)
     vit = ViT(
         in_channels=1,
-        img_size=(32,256,256),
-        patch_size=(4,16,16),
+        img_size=roi_size,
+        patch_size=patch_size,
         pos_embed="perceptron",
         )
     print(vit)
@@ -745,9 +768,17 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
         state_dict = torch.load(f, map_location='cpu')['state_dict']
         encoder_dict = {k.replace('model.encoder.', ''): v for k, v in state_dict.items() if 'model.encoder.' in k}
     vit.load_state_dict(encoder_dict)
+    vit.to(device)
     print(f'Loaded SegVol encoder param: {vit_checkpoint}')
 
-    spacing = (resolution / 4, resolution / 16, resolution / 16)
+    inferer = SlidingWindowInferer(
+        roi_size=roi_size,
+        sw_batch_size=2,
+        progress=True
+    )
+    print("Set sliding window for model inference.")
+
+    spacing = (resolution, resolution, resolution)
     keys = ["image", "label"]
     transform = transforms.Compose(
             [
@@ -755,7 +786,28 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
                 transforms.Spacingd(keys, pixdim=spacing, mode=('bilinear', 'nearest')),
             ]
         )
-    
+    case_dicts = [
+        {"image": img_path, "label": lab_path} for img_path, lab_path in zip(img_paths, lab_paths)
+    ]
+    data_dicts = transform(case_dicts)
+    for case, data in zip(case_dicts, data_dicts):
+        image = data["image"].squeeze().numpy()
+        label = data["label"].squeeze().numpy()
+        voi, bbox = extract_VOI(image, label, patch_size)
+        voi = torch.from_numpy(voi).to(device)
+        feature = inferer(voi, vit)
+        c, z, x, y = feature.squeeze().size()
+        feature = feature.squeeze().reshape([c, z*x*y]).transpose(0,1).cpu().numpy()
+        z, x, y = np.arange(z), np.arange(x), np.arange(z)
+        Z, X, Y = np.meshgrid(z, x, y, indexing="ij")
+        coordinates = np.array([bbox[0]]) + np.stack([Z, X, Y], axis=0)
+        coordinates = coordinates.reshape([3, -1]).transpose(0, 1)
+        logging.info(f"Saving radiomics in the resolution of {spacing}...")
+        img_name = pathlib.Path(case["image"]).name.replace(".nii.gz", "")
+        feature_path = f"{save_dir}/{img_name}_{class_name}_radiomics.npy"
+        np.save(feature_path, feature)
+        coordinates_path = f"{save_dir}/{img_name}_{class_name}_coordinates.npy"
+        np.save(coordinates_path, coordinates)
     return
 
 

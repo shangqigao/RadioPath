@@ -18,7 +18,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
     parser.add_argument('--modality', default="CT", type=str)
     parser.add_argument('--save_dir', default="/home/sg2162/rds/hpc-work/Experiments/radiomics", type=str)
-    parser.add_argument('--feature_mode', default="pyradiomics", choices=["pyradiomics", "cnn"], type=str)
+    parser.add_argument('--feature_mode', default="SegVol", choices=["pyradiomics", "SegVol"], type=str)
     parser.add_argument('--feature_dim', default=1024, choices=[2048, 384, 1024, 35], type=int)
     parser.add_argument('--resolution', default=1.024, type=float)
     parser.add_argument('--units', default="mm", type=str)
