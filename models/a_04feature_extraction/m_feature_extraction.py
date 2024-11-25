@@ -742,7 +742,7 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, 
 
 def extract_VOI(image, label, patch_size, padding=(4,8,8)):
     assert image.ndim == 3
-    s, e = generate_spatial_bounding_box(label)
+    s, e = generate_spatial_bounding_box(np.expand_dims(label, 0))
     s, e = np.array(s), np.array(e)
     image = np.pad(image, pad_width=tuple(zip(padding, padding)))
     s = s - np.array(padding)
@@ -795,10 +795,11 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     ]
     data_dicts = transform(case_dicts)
     for case, data in zip(case_dicts, data_dicts):
-        image = data["image"].squeeze().numpy()
-        label = data["label"].squeeze().numpy()
+        image = data["image"].squeeze().transpose(2, 1, 0)
+        label = data["label"].squeeze().transpose(2, 1, 0)
+        print(image.shape, label.shape)
         voi, bbox = extract_VOI(image, label, patch_size)
-        voi = torch.from_numpy(voi).to(device)
+        voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to(device)
         feature = inferer(voi, vit)
         c, z, x, y = feature.squeeze().size()
         feature = feature.squeeze().reshape([c, z*x*y]).transpose(0,1).cpu().numpy()
