@@ -35,7 +35,7 @@ if __name__ == "__main__":
     parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--feature_mode', default="chief", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--feature_mode', default="conch", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--node_features', default=768, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     # if args.mode == "wsi":
     #     bs = 32
     #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-    #     for i in range(19, nb):
+    #     for i in range(14, nb):
     #         logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
     #         start = i * bs
     #         end = min(len(wsi_paths), (i + 1) * bs)
@@ -99,17 +99,17 @@ if __name__ == "__main__":
     #         )
 
     # extract WSI-level features
-    label_dict = {
-        'Prostate': 0, 'Lung': 1, 'Endometrial': 2, 'Breast': 3, 'Head Neck': 4, 'Colorectal': 5,
-        'Thyroid': 6, 'Skin': 7, 'Esophagogastric': 8, 'Ovarian': 9, 'Glioma': 10, 'Bladder': 11,
-        'Adrenal': 12, 'Renal': 13, 'Germ Cell': 14, 'Pancreatobiliary': 15, 'Liver': 16, 'Cervix': 17
-        }
-    if args.feature_mode == "chief":
-        wsi_feature_paths = [save_feature_dir / f"{p.stem}.features.npy" for p in wsi_paths]
-        extract_chief_wsi_level_features(
-            patch_feature_paths=wsi_feature_paths,
-            anatomic=label_dict["Renal"]
-        )
+    # label_dict = {
+    #     'Prostate': 0, 'Lung': 1, 'Endometrial': 2, 'Breast': 3, 'Head Neck': 4, 'Colorectal': 5,
+    #     'Thyroid': 6, 'Skin': 7, 'Esophagogastric': 8, 'Ovarian': 9, 'Glioma': 10, 'Bladder': 11,
+    #     'Adrenal': 12, 'Renal': 13, 'Germ Cell': 14, 'Pancreatobiliary': 15, 'Liver': 16, 'Cervix': 17
+    #     }
+    # if args.feature_mode == "chief":
+    #     wsi_feature_paths = [save_feature_dir / f"{p.stem}.features.npy" for p in wsi_paths]
+    #     extract_chief_wsi_level_features(
+    #         patch_feature_paths=wsi_feature_paths,
+    #         anatomic=label_dict["Renal"]
+    #     )
 
     # zero-shot classification
     # if args.mode == "wsi":
@@ -161,7 +161,7 @@ if __name__ == "__main__":
     # )
 
     # label graph node
-    # wsi_cls_paths = [save_classification_dir / f"{p.stem}.features.npy" for p in wsi_paths]
+    # wsi_cls_paths = [save_classification_dir / f"{p.stem}.SimilarityScores.npy" for p in wsi_paths]
     # wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
     # generate_node_label(
     #     wsi_paths=wsi_paths,
@@ -173,26 +173,26 @@ if __name__ == "__main__":
     # )
 
     # measure graph properties
-    # wsi_graph_paths = [save_feature_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    # wsi_label_paths = [save_feature_dir / f"{p.stem}.label.npy" for p in wsi_paths]
-    # subgraph_dict = {
-    #     "ADI": [0, 4],
-    #     "BACK": [5, 8],
-    #     "DEB": [9, 11],
-    #     "LYM": [12, 16],
-    #     "MUC": [17, 20],
-    #     "MUS": [21, 25],
-    #     "NORM": [26, 26],
-    #     "STR": [27, 31],
-    #     "TUM": [32, 34]
-    # }
-    # measure_graph_properties(
-    #     graph_paths=wsi_graph_paths,
-    #     label_paths=wsi_label_paths,
-    #     save_dir=save_feature_dir,
-    #     subgraph_dict=subgraph_dict,
-    #     n_jobs=32
-    # )
+    wsi_graph_paths = [save_feature_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+    wsi_label_paths = [save_feature_dir / f"{p.stem}.label.npy" for p in wsi_paths]
+    subgraph_dict = {
+        "ADI": [0, 4],
+        "BACK": [5, 8],
+        "DEB": [9, 11],
+        "LYM": [12, 16],
+        "MUC": [17, 20],
+        "MUS": [21, 25],
+        "NORM": [26, 26],
+        "STR": [27, 31],
+        "TUM": [32, 34]
+    }
+    measure_graph_properties(
+        graph_paths=wsi_graph_paths,
+        label_paths=wsi_label_paths,
+        save_dir=save_feature_dir,
+        subgraph_dict=subgraph_dict,
+        n_jobs=32
+    )
 
     # visualize feature
     # graph_feature = True
