@@ -13,9 +13,9 @@ source ~/.bashrc
 conda activate radiopath
 
 ## extract pathomics
-wsi_dir="/home/shared/su123/TCGA_ORI"
-save_dir="/home/s/sg2162/projects/Experiments/pathomics"
-python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --save_dir $save_dir
+# wsi_dir="/home/shared/su123/TCGA_ORI"
+# save_dir="/home/s/sg2162/projects/Experiments/pathomics"
+# python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --save_dir $save_dir
 
 ## pathomic diffusion prior
 # wsi_dir="/home/shared/su123/TCGA_ORI"
@@ -23,10 +23,10 @@ python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --save_dir
 # python a_06generative_SR/m_pathomics_representation.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir
 
 ## extract radiomics
-# img_dir="/home/s/sg2162/projects/TCIA_NIFTI/image"
-# lab_dir="/home/s/sg2162/projects/TCIA_NIFTI/binary_label"
-# save_dir="/home/s/sg2162/projects/Experiments/radiomics"
-# python a_06generative_SR/m_radiomics_extraction.py --img_dir $img_dir --lab_dir $lab_dir --save_dir $save_dir
+img_dir="/home/s/sg2162/projects/TCIA_NIFTI/image"
+lab_dir="/home/s/sg2162/projects/TCIA_NIFTI/binary_label"
+save_dir="/home/s/sg2162/projects/Experiments/radiomics"
+python a_06generative_SR/m_radiomics_extraction.py --img_dir $img_dir --lab_dir $lab_dir --save_dir $save_dir
 
 ## survival analysis
 # wsi_dir="/home/shared/su123/TCGA_ORI"

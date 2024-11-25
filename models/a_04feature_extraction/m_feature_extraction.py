@@ -740,7 +740,7 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, 
     )
     return
 
-def extract_VOI(image, label, patch_size):
+def extract_VOI(image, label, patch_size, padding=(4,8,8)):
     assert image.ndim == 3
     s, e = generate_spatial_bounding_box(label)
     image = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]

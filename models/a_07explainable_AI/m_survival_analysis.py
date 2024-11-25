@@ -329,12 +329,13 @@ def cox_proportional_hazard_regression(
     print(df_pathomics.head())
 
     # prepare radiomics
-    matched_radiomics_paths = [save_radiomics_paths[i] for i in matched_i]
-    radiomics_list = [load_json(p) for p in matched_radiomics_paths]
-    radiomics_list = [prepare_radiomic_properties(p, radiomics_keys) for p in radiomics_list]
-    df_radiomics = pd.DataFrame(radiomics_list)
-    print("Selected radiomic properties:", df_radiomics.shape)
-    print(df_radiomics.head())
+    if save_radiomics_paths is not None:
+        matched_radiomics_paths = [save_radiomics_paths[i] for i in matched_i]
+        radiomics_list = [load_json(p) for p in matched_radiomics_paths]
+        radiomics_list = [prepare_radiomic_properties(p, radiomics_keys) for p in radiomics_list]
+        df_radiomics = pd.DataFrame(radiomics_list)
+        print("Selected radiomic properties:", df_radiomics.shape)
+        print(df_radiomics.head())
 
 
     # Prepare WSI-level features
@@ -786,7 +787,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--pathomics_mode', default="conch", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--radiomics_mode', default="pyradiomics", choices=["pyradiomics"], type=str)
     parser.add_argument('--radiomics_dim', default=107, choices=[107], type=int)
@@ -883,16 +884,25 @@ if __name__ == "__main__":
         pathomics_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
     else:
         pathomics_paths = [save_pathomics_dir / f"{p.stem}.WSI.features.npy" for p in wsi_paths]
-    class_name = ["kidney_and_mass", "mass", "tumour"][1]
-    radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json"))
-    matched_pathomics_indices, matched_radiomics_indices = matched_pathomics_radiomics(
-        save_pathomics_paths=pathomics_paths,
-        save_radiomics_paths=radiomics_paths,
-        save_clinical_dir=save_clinical_dir,
-        dataset=args.dataset
-    )
-    matched_pathomics_paths = [pathomics_paths[i] for i in matched_pathomics_indices]
-    matched_radiomics_paths = [radiomics_paths[i] for i in matched_radiomics_indices]
+
+    # only use pathomics
+    matched_pathomics_paths = pathomics_paths
+    matched_radiomics_paths = None
+    stages = ["Stage I", "Stage II"]
+
+    # use radiomics and pathomics
+    # class_name = ["kidney_and_mass", "mass", "tumour"][1]
+    # radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json"))
+    # matched_pathomics_indices, matched_radiomics_indices = matched_pathomics_radiomics(
+    #     save_pathomics_paths=pathomics_paths,
+    #     save_radiomics_paths=radiomics_paths,
+    #     save_clinical_dir=save_clinical_dir,
+    #     dataset=args.dataset
+    # )
+    # matched_pathomics_paths = [pathomics_paths[i] for i in matched_pathomics_indices]
+    # matched_radiomics_paths = [radiomics_paths[i] for i in matched_radiomics_indices]
+    # stages = None
+
     pathomic_properties = [
         "num_nodes", 
         "num_edges", 
@@ -920,8 +930,8 @@ if __name__ == "__main__":
         pathomics_keys=pathomic_properties,
         radiomics_keys=radiomic_propereties,
         l1_ratio=0.9,
-        stages=None, #["Stage I", "Stage II"],
-        used=integrated[0],
+        stages=stages,
+        used=integrated[3],
         n_jobs=32,
         aggregation=aggregation,
         dataset=args.dataset
