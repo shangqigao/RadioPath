@@ -743,10 +743,14 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, 
 def extract_VOI(image, label, patch_size, padding=(4,8,8)):
     assert image.ndim == 3
     s, e = generate_spatial_bounding_box(label)
+    s, e = np.array(s), np.array(e)
+    image = np.pad(image, pad_width=tuple(zip(padding, padding)))
+    s = s - np.array(padding)
+    e = e + np.array(padding)
     image = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
-    bbox = [s, e]
     shape = image.shape * np.array(patch_size, np.int32)
     image = skimage.transform.resize(image, output_shape=shape)
+    bbox = np.stack([s, e], axis=0)
     return image, bbox
 
 def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, resolution=1.024, units="mm", device="cuda"):
