@@ -792,13 +792,13 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
         {"image": img_path, "label": lab_path} for img_path, lab_path in zip(img_paths, lab_paths)
     ]
     data_dicts = transform(case_dicts)
+    fs = (np.array(roi_size) / np.array(patch_size)).astype(np.int32)
     for case, data in zip(case_dicts, data_dicts):
         image = data["image"].squeeze().transpose(2, 1, 0)
         label = data["label"].squeeze().transpose(2, 1, 0)
-        print(image.shape, label.shape)
         voi, bbox = extract_VOI(image, label, patch_size)
         voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to(device)
-        feature = inferer(voi, lambda x: vit(x)[0])
+        feature = inferer(voi, lambda x: vit(x)[0].transpose(1, 2).view(1, -1, fs[0], fs[1], fs[2]))
         c, z, x, y = feature.squeeze().size()
         feature = feature.squeeze().reshape([c, z*x*y]).transpose(0,1).cpu().numpy()
         z, x, y = np.arange(z), np.arange(x), np.arange(z)
