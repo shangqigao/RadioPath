@@ -779,8 +779,8 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     inferer = SlidingWindowInferer(
         roi_size=roi_size,
         sw_batch_size=swbs,
-        sw_device=device,
-        device='cpu',
+        sw_device=torch.device(device),
+        device=torch.device('cpu'),
         progress=True
     )
     print("Set sliding window for model inference.")
