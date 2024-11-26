@@ -779,6 +779,8 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     inferer = SlidingWindowInferer(
         roi_size=roi_size,
         sw_batch_size=swbs,
+        sw_device=device,
+        device='cpu',
         progress=True
     )
     print("Set sliding window for model inference.")
@@ -800,7 +802,7 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
         image = data["image"].squeeze().transpose(2, 1, 0)
         label = data["label"].squeeze().transpose(2, 1, 0)
         voi, bbox = extract_VOI(image, label, patch_size)
-        voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to(device)
+        voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to('cpu')
         feature = inferer(voi, lambda x: vit(x)[0].transpose(1, 2).reshape(swbs, -1, fs[0], fs[1], fs[2]))
         c, z, x, y = feature.squeeze().size()
         feature = feature.squeeze().reshape([c, z*x*y]).transpose(0,1).cpu().numpy()
