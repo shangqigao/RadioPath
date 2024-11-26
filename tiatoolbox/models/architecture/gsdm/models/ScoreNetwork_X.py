@@ -30,7 +30,8 @@ class ScoreNetworkX(torch.nn.Module):
         self.activation = torch.tanh
 
     def forward(self, x, adj, flags, u, la):
-
+        assert not torch.any(x.isnan())
+        assert not torch.any(adj.isnan())
         x_list = [x]
         for _ in range(self.depth):
             x = self.layers[_](x, adj)
