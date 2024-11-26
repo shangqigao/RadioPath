@@ -775,7 +775,7 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     vit.to(device)
     print(f'Loaded SegVol encoder param: {vit_checkpoint}')
 
-    swbs = 8 # slide windown batch size
+    swbs = 1 # slide windown batch size
     inferer = SlidingWindowInferer(
         roi_size=roi_size,
         sw_batch_size=swbs,
