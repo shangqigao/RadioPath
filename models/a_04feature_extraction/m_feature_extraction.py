@@ -19,7 +19,7 @@ import numpy as np
 import albumentations as A
 
 from albumentations.pytorch import ToTensorV2
-from common.m_utils import recur_find_ext, rmdir, select_checkpoints
+from common.m_utils import recur_find_ext, rmdir, select_checkpoints, mkdir
 from tiatoolbox.models import DeepFeatureExtractor, IOSegmentorConfig, NucleusInstanceSegmentor
 from tiatoolbox.models.architecture.vanilla import CNNBackbone, CNNModel
 from tiatoolbox.tools.stainnorm import get_normalizer
@@ -798,6 +798,8 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     ]
     data_dicts = transform(case_dicts)
     fs = (np.array(roi_size) / np.array(patch_size)).astype(np.int32)
+    mkdir(save_dir)
+    
     for case, data in zip(case_dicts, data_dicts):
         image = data["image"].squeeze().transpose(2, 1, 0)
         label = data["label"].squeeze().transpose(2, 1, 0)
