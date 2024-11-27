@@ -773,14 +773,15 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
         encoder_dict = {k.replace('model.encoder.', ''): v for k, v in state_dict.items() if 'model.encoder.' in k}
     vit.load_state_dict(encoder_dict)
     vit.to(device)
+    vit.eval()
     print(f'Loaded SegVol encoder param: {vit_checkpoint}')
 
-    swbs = 1 # slide windown batch size
+    swbs = 8 # slide windown batch size
     inferer = SlidingWindowInferer(
         roi_size=roi_size,
         sw_batch_size=swbs,
-        sw_device=torch.device(device),
-        device=torch.device('cpu'),
+        sw_device=device,
+        device='cpu',
         progress=True
     )
     print("Set sliding window for model inference.")
@@ -803,13 +804,13 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
         label = data["label"].squeeze().transpose(2, 1, 0)
         voi, bbox = extract_VOI(image, label, patch_size)
         voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to('cpu')
-        feature = inferer(voi, lambda x: vit(x)[0].transpose(1, 2).reshape(swbs, -1, fs[0], fs[1], fs[2]))
+        with torch.no_grad():
+            feature = inferer(voi, lambda x: vit(x)[0].transpose(1, 2).reshape(swbs, 768, fs[0], fs[1], fs[2]))
         c, z, x, y = feature.squeeze().size()
         feature = feature.squeeze().reshape([c, z*x*y]).transpose(0,1).cpu().numpy()
         z, x, y = np.arange(z), np.arange(x), np.arange(z)
         Z, X, Y = np.meshgrid(z, x, y, indexing="ij")
-        coordinates = np.array([bbox[0]]) + np.stack([Z, X, Y], axis=0)
-        coordinates = coordinates.reshape([3, -1]).transpose(0, 1)
+        coordinates = np.array([bbox[0]]) + np.stack([Z, X, Y], axis=-1).reshape([-1, 3])
         logging.info(f"Saving radiomics in the resolution of {spacing}...")
         img_name = pathlib.Path(case["image"]).name.replace(".nii.gz", "")
         feature_path = f"{save_dir}/{img_name}_{class_name}_radiomics.npy"
