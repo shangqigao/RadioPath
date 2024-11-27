@@ -776,6 +776,11 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     vit.eval()
     print(f'Loaded SegVol encoder param: {vit_checkpoint}')
 
+    input = torch.ones((1, 1, 32, 256, 256)).to(device)
+    output = vit(input)[0]
+    print("output shape of vit is:", output.shape)
+
+
     swbs = 8 # slide windown batch size
     inferer = SlidingWindowInferer(
         roi_size=roi_size,
