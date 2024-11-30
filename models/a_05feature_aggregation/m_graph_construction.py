@@ -46,7 +46,7 @@ from models.a_03patch_extraction.m_patch_extraction import prepare_annotation_re
 from models.a_04feature_extraction.m_feature_extraction import extract_cnn_pathomic_features, extract_composition_features
 torch.multiprocessing.set_sharing_strategy("file_system")
 
-def construct_graph(wsi_name, wsi_feature_dir, save_path):
+def construct_pathomic_graph(wsi_name, wsi_feature_dir, save_path):
     positions = np.load(f"{wsi_feature_dir}/{wsi_name}.position.npy")
     features = np.load(f"{wsi_feature_dir}/{wsi_name}.features.npy")
     graph_dict = SlideGraphConstructor.build(positions[:, :2], features, feature_range_thresh=None)
@@ -65,7 +65,7 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
         wsi_name = pathlib.Path(wsi_path).stem
         graph_path = pathlib.Path(f"{save_dir}/{wsi_name}.json")
         logging.info("constructing graph: {}/{}...".format(idx + 1, len(wsi_paths)))
-        construct_graph(wsi_name, save_dir, graph_path)
+        construct_pathomic_graph(wsi_name, save_dir, graph_path)
         return
     
     # construct graphs in parallel
@@ -74,6 +74,36 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
         for idx, wsi_path in enumerate(wsi_paths)
     )
     return 
+
+def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="tumour"):
+    positions = np.load(f"{img_feature_dir}/{img_name}_{class_name}_coordinates.npy")
+    features = np.load(f"{img_feature_dir}/{img_name}_{class_name}_radiomics.npy")
+    graph_dict = SlideGraphConstructor.build(positions, features, feature_range_thresh=None)
+    with save_path.open("w") as handle:
+        new_graph_dict = {k: v.tolist() for k, v in graph_dict.items() if k != "cluster_points"}
+        new_graph_dict.update({"cluster_points": graph_dict["cluster_points"]})
+        json.dump(new_graph_dict, handle)
+
+def construct_img_graph(img_paths, save_dir, class_name="tumour", n_jobs=8):
+    """construct graph for radiological images
+    Args:
+        img_paths (list): a list of image paths
+        save_dir (str): directory of reading feature and saving graph
+    """
+    def _construct_graph(idx, img_path):
+        img_name = pathlib.Path(img_path).stem
+        graph_path = pathlib.Path(f"{save_dir}/{img_name}_{class_name}.json")
+        logging.info("constructing graph: {}/{}...".format(idx + 1, len(img_paths)))
+        construct_radiomic_graph(img_name, save_dir, graph_path, class_name)
+        return
+    
+    # construct graphs in parallel
+    joblib.Parallel(n_jobs=n_jobs)(
+        joblib.delayed(_construct_graph)(idx, img_path)
+        for idx, img_path in enumerate(img_paths)
+    )
+    return 
+
 
 def extract_minimum_spanning_tree(wsi_graph_paths, save_dir, n_jobs=8):
     """extract minimum spanning tree from graph
