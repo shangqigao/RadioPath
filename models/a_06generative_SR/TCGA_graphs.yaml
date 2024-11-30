@@ -27,7 +27,7 @@ train:
   lr: 1.0e-4
   lr_schedule: True
   ema: 0.999
-  weight_decay: 0
+  weight_decay: 1.0e-5
   grad_norm: 1.0
   lr_decay: 0.999
   eps: 1.0e-5
