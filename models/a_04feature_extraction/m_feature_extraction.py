@@ -809,9 +809,10 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
             feature = inferer(voi, lambda x: vit(x)[0].transpose(1, 2).reshape(-1, 768, fs[0], fs[1], fs[2]))
         c, z, x, y = feature.squeeze().size()
         feature = feature.squeeze().reshape([c, z*x*y]).transpose(0,1).cpu().numpy()
-        z, x, y = np.arange(z), np.arange(x), np.arange(z)
+        z, x, y = np.arange(z), np.arange(x), np.arange(y)
         Z, X, Y = np.meshgrid(z, x, y, indexing="ij")
         coordinates = np.array([bbox[0]]) + np.stack([Z, X, Y], axis=-1).reshape([-1, 3])
+        assert len(feature) == len(coordinates)
         logging.info(f"Saving radiomics in the resolution of {spacing}...")
         img_name = pathlib.Path(case["image"]).name.replace(".nii.gz", "")
         feature_path = f"{save_dir}/{img_name}_{class_name}_radiomics.npy"

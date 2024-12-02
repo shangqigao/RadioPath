@@ -78,7 +78,15 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
 def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="tumour"):
     positions = np.load(f"{img_feature_dir}/{img_name}_{class_name}_coordinates.npy")
     features = np.load(f"{img_feature_dir}/{img_name}_{class_name}_radiomics.npy")
-    graph_dict = SlideGraphConstructor.build(positions, features, feature_range_thresh=None)
+    print(positions.shape, features.shape)
+    graph_dict = SlideGraphConstructor.build(
+        positions, 
+        features, 
+        lambda_h = 0.4,
+        connectivity_distance = 16,
+        neighbour_search_radius = 8,
+        feature_range_thresh=None
+    )
     with save_path.open("w") as handle:
         new_graph_dict = {k: v.tolist() for k, v in graph_dict.items() if k != "cluster_points"}
         new_graph_dict.update({"cluster_points": graph_dict["cluster_points"]})
@@ -91,7 +99,7 @@ def construct_img_graph(img_paths, save_dir, class_name="tumour", n_jobs=8):
         save_dir (str): directory of reading feature and saving graph
     """
     def _construct_graph(idx, img_path):
-        img_name = pathlib.Path(img_path).stem
+        img_name = pathlib.Path(img_path).name.replace(".nii.gz", "")
         graph_path = pathlib.Path(f"{save_dir}/{img_name}_{class_name}.json")
         logging.info("constructing graph: {}/{}...".format(idx + 1, len(img_paths)))
         construct_radiomic_graph(img_name, save_dir, graph_path, class_name)

@@ -26,7 +26,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     ## get image and label paths
-    class_name = ["kidney_and_mass", "mass", "tumour"][1]
+    class_name = ["kidney_and_mass", "mass", "tumour"][2]
     lab_dir = pathlib.Path(f"{args.lab_dir}/{args.dataset}/{args.modality}")
     lab_paths = lab_dir.rglob(f"{class_name}.nii.gz")
     lab_paths = [f"{p}" for p in lab_paths]
@@ -38,7 +38,7 @@ if __name__ == "__main__":
     save_feature_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_{args.modality}_radiomic_features/{args.feature_mode}")
     
     # extract radiomics
-    # bs = 2
+    # bs = 32
     # nb = len(img_paths) // bs if len(img_paths) % bs == 0 else len(img_paths) // bs + 1
     # for i in range(0, nb):
     #     logging.info(f"Processing images of batch [{i+1}/{nb}] ...")
