@@ -82,7 +82,7 @@ def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="t
     graph_dict = SlideGraphConstructor.build(
         positions, 
         features, 
-        lambda_h = 0.4,
+        lambda_h = 0.8,
         connectivity_distance = 16,
         neighbour_search_radius = 8,
         feature_range_thresh=None

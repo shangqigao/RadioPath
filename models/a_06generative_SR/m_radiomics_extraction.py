@@ -38,36 +38,36 @@ if __name__ == "__main__":
     save_feature_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_{args.modality}_radiomic_features/{args.feature_mode}")
     
     # extract radiomics
-    # bs = 32
-    # nb = len(img_paths) // bs if len(img_paths) % bs == 0 else len(img_paths) // bs + 1
-    # for i in range(0, nb):
-    #     logging.info(f"Processing images of batch [{i+1}/{nb}] ...")
-    #     start = i * bs
-    #     end = min(len(img_paths), (i + 1) * bs)
-    #     batch_img_paths = img_paths[start:end]
-    #     batch_lab_paths = lab_paths[start:end]
-    #     extract_radiomic_feature(
-    #         img_paths=batch_img_paths,
-    #         lab_paths=batch_lab_paths,
-    #         feature_mode=args.feature_mode,
-    #         save_dir=save_feature_dir,
-    #         class_name=class_name,
-    #         label=1,
-    #         n_jobs=32,
-    #         resolution=args.resolution
-    #     )
-
-    # construct image graph
     bs = 32
     nb = len(img_paths) // bs if len(img_paths) % bs == 0 else len(img_paths) // bs + 1
     for i in range(0, nb):
-        logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+        logging.info(f"Processing images of batch [{i+1}/{nb}] ...")
         start = i * bs
         end = min(len(img_paths), (i + 1) * bs)
         batch_img_paths = img_paths[start:end]
-        construct_img_graph(
+        batch_lab_paths = lab_paths[start:end]
+        extract_radiomic_feature(
             img_paths=batch_img_paths,
+            lab_paths=batch_lab_paths,
+            feature_mode=args.feature_mode,
             save_dir=save_feature_dir,
             class_name=class_name,
-            n_jobs=8
+            label=1,
+            n_jobs=32,
+            resolution=args.resolution
         )
+
+    # construct image graph
+    # bs = 32
+    # nb = len(img_paths) // bs if len(img_paths) % bs == 0 else len(img_paths) // bs + 1
+    # for i in range(0, nb):
+    #     logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+    #     start = i * bs
+    #     end = min(len(img_paths), (i + 1) * bs)
+    #     batch_img_paths = img_paths[start:end]
+    #     construct_img_graph(
+    #         img_paths=batch_img_paths,
+    #         save_dir=save_feature_dir,
+    #         class_name=class_name,
+    #         n_jobs=8
+    #     )
