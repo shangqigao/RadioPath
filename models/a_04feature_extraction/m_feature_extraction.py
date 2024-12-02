@@ -757,7 +757,43 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     from monai import transforms
     from monai.networks.nets import ViT
     from monai.inferers import SlidingWindowInferer
- 
+
+    class MinMaxNormalization(transforms.Transform):
+        def __init__(self, keys):
+            self.keys = keys
+
+        def __call__(self, data):
+            d = dict(data)
+            for k in self.keys:
+                d[k] = d[k] - d[k].min()
+                d[k] = d[k] / np.clip(d[k].max(), a_min=1e-8, a_max=None)
+            return d
+
+    class ForegroundNormalization(transforms.Transform):
+        def __init__(self, keys):
+            self.keys = keys
+        
+        def __call__(self, data):
+            d = dict(data)
+            
+            for key in self.keys:
+                d[key] = self.normalize(d[key])
+            return d
+        
+        def normalize(self, ct_narray):
+            ct_voxel_ndarray = ct_narray.copy()
+            ct_voxel_ndarray = ct_voxel_ndarray.flatten()
+            thred = np.mean(ct_voxel_ndarray)
+            voxel_filtered = ct_voxel_ndarray[(ct_voxel_ndarray > thred)]
+            upper_bound = np.percentile(voxel_filtered, 99.95)
+            lower_bound = np.percentile(voxel_filtered, 00.05)
+            mean = np.mean(voxel_filtered)
+            std = np.std(voxel_filtered)
+            ### transform ###
+            ct_narray = np.clip(ct_narray, lower_bound, upper_bound)
+            ct_narray = (ct_narray - mean) / max(std, 1e-8)
+            return ct_narray
+    
     roi_size = (32,256,256)
     patch_size = (4,16,16)
     vit = ViT(
@@ -790,7 +826,10 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     transform = transforms.Compose(
             [
                 transforms.LoadImaged(keys, ensure_channel_first=True, allow_missing_keys=True),
-                transforms.Spacingd(keys, pixdim=spacing, mode=('bilinear', 'nearest'))
+                transforms.Spacingd(keys, pixdim=spacing, mode=('bilinear', 'nearest')),
+                transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
+                ForegroundNormalization(keys=["image"]),
+                MinMaxNormalization(keys=["image"]),
             ]
         )
     case_dicts = [
