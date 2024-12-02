@@ -793,6 +793,16 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
             ct_narray = np.clip(ct_narray, lower_bound, upper_bound)
             ct_narray = (ct_narray - mean) / max(std, 1e-8)
             return ct_narray
+
+    class DimTranspose(transforms.Transform):
+        def __init__(self, keys):
+            self.keys = keys
+        
+        def __call__(self, data):
+            d = dict(data)
+            for key in self.keys:
+                d[key] = np.swapaxes(d[key], -1, -3)
+            return d
     
     roi_size = (32, 256, 256)
     patch_size = (4, 16, 16)
@@ -831,6 +841,7 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
                 transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
                 ForegroundNormalization(keys=["image"]),
                 MinMaxNormalization(keys=["image"]),
+                DimTranspose(keys=["image", "label"]),
                 transforms.BorderPadd(keys=["image", "label"], spatial_border=padding)
             ]
         )
@@ -842,8 +853,8 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     mkdir(save_dir)
     
     for case, data in zip(case_dicts, data_dicts):
-        image = data["image"].squeeze().transpose(2, 1, 0)
-        label = data["label"].squeeze().transpose(2, 1, 0)
+        image = data["image"].squeeze()
+        label = data["label"].squeeze()
         voi, bbox = extract_VOI(image, label, patch_size, padding)
         logging.info(f"Extracted VOI of shape {voi.shape} from given image of shape {image.shape}")
         voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to('cpu')
