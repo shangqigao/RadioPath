@@ -753,10 +753,8 @@ def extract_VOI(image, label, patch_size, padding):
     bbox = [s, e]
     return image, bbox
 
-def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, resolution=1.024, units="mm", device="cuda"):
+def image_transforms(keys, spacing, padding):
     from monai import transforms
-    from monai.networks.nets import ViT
-    from monai.inferers import SlidingWindowInferer
 
     class MinMaxNormalization(transforms.Transform):
         def __init__(self, keys):
@@ -803,10 +801,27 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
             for key in self.keys:
                 d[key] = np.swapaxes(d[key], -1, -3)
             return d
+
+    transform = transforms.Compose(
+            [
+                transforms.LoadImaged(keys, ensure_channel_first=True, allow_missing_keys=True),
+                transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
+                ForegroundNormalization(keys=["image"]),
+                MinMaxNormalization(keys=["image"]),
+                DimTranspose(keys=["image", "label"]),
+                transforms.Spacingd(keys, pixdim=spacing, mode=('bilinear', 'nearest')),
+                transforms.BorderPadd(keys=["image", "label"], spatial_border=padding)
+            ]
+        )
+    return transform
+
+
+def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, resolution=1.024, units="mm", device="cuda"):
+    from monai.networks.nets import ViT
+    from monai.inferers import SlidingWindowInferer
     
     roi_size = (32, 256, 256)
     patch_size = (4, 16, 16)
-    padding = (4, 8, 8)
     vit = ViT(
         in_channels=1,
         img_size=roi_size,
@@ -834,17 +849,8 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
 
     spacing = (resolution, resolution, resolution)
     keys = ["image", "label"]
-    transform = transforms.Compose(
-            [
-                transforms.LoadImaged(keys, ensure_channel_first=True, allow_missing_keys=True),
-                transforms.Spacingd(keys, pixdim=spacing, mode=('bilinear', 'nearest')),
-                transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
-                ForegroundNormalization(keys=["image"]),
-                MinMaxNormalization(keys=["image"]),
-                DimTranspose(keys=["image", "label"]),
-                transforms.BorderPadd(keys=["image", "label"], spatial_border=padding)
-            ]
-        )
+    padding = (4, 8, 8)
+    transform = image_transforms(keys, spacing, padding)
     case_dicts = [
         {"image": img_path, "label": lab_path} for img_path, lab_path in zip(img_paths, lab_paths)
     ]
