@@ -741,12 +741,12 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, 
     )
     return
 
-def extract_VOI(image, label, patch_size, padding=(4,8,8)):
+def extract_VOI(image, label, patch_size, padding):
     assert image.ndim == 3
-    image = np.pad(image, pad_width=tuple(zip(padding, padding)))
-    label = np.pad(label, pad_width=tuple(zip(padding, padding)))
     label = get_largest_connected_component_mask(label)
     s, e = generate_spatial_bounding_box(np.expand_dims(label, 0))
+    s = np.array(s) - np.array(padding)
+    e = np.array(e) + np.array(padding)
     image = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
     shape = image.shape * np.array(patch_size, np.int32)
     image = skimage.transform.resize(image, output_shape=shape)
@@ -794,8 +794,9 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
             ct_narray = (ct_narray - mean) / max(std, 1e-8)
             return ct_narray
     
-    roi_size = (32,256,256)
-    patch_size = (4,16,16)
+    roi_size = (32, 256, 256)
+    patch_size = (4, 16, 16)
+    padding = (4, 8, 8)
     vit = ViT(
         in_channels=1,
         img_size=roi_size,
@@ -830,6 +831,7 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
                 transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
                 ForegroundNormalization(keys=["image"]),
                 MinMaxNormalization(keys=["image"]),
+                transforms.BorderPadd(keys=["image", "label"], spatial_border=padding)
             ]
         )
     case_dicts = [
@@ -842,7 +844,8 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     for case, data in zip(case_dicts, data_dicts):
         image = data["image"].squeeze().transpose(2, 1, 0)
         label = data["label"].squeeze().transpose(2, 1, 0)
-        voi, bbox = extract_VOI(image, label, patch_size)
+        voi, bbox = extract_VOI(image, label, patch_size, padding)
+        logging.info(f"Extracted VOI of shape {voi.shape} from given image of shape {image.shape}")
         voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to('cpu')
         with torch.no_grad():
             feature = inferer(voi, lambda x: vit(x)[0].transpose(1, 2).reshape(-1, 768, fs[0], fs[1], fs[2]))
