@@ -78,7 +78,6 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
 def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="tumour"):
     positions = np.load(f"{img_feature_dir}/{img_name}_{class_name}_coordinates.npy")
     features = np.load(f"{img_feature_dir}/{img_name}_{class_name}_radiomics.npy")
-    print(positions.shape, features.shape)
     graph_dict = SlideGraphConstructor.build(
         positions, 
         features, 

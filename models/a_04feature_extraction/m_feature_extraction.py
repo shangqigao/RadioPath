@@ -805,11 +805,11 @@ def image_transforms(keys, spacing, padding):
     transform = transforms.Compose(
             [
                 transforms.LoadImaged(keys, ensure_channel_first=True, allow_missing_keys=True),
+                transforms.Spacingd(keys, pixdim=spacing, mode=('bilinear', 'nearest')),
                 transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
                 ForegroundNormalization(keys=["image"]),
                 MinMaxNormalization(keys=["image"]),
                 DimTranspose(keys=["image", "label"]),
-                transforms.Spacingd(keys, pixdim=spacing, mode=('bilinear', 'nearest')),
                 transforms.BorderPadd(keys=["image", "label"], spatial_border=padding)
             ]
         )
@@ -862,11 +862,13 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
         image = data["image"].squeeze()
         label = data["label"].squeeze()
         voi, bbox = extract_VOI(image, label, patch_size, padding)
-        logging.info(f"Extracted VOI of shape {voi.shape} from given image of shape {image.shape}")
+        img_shape, voi_shape = image.shape, voi.shape
         voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to('cpu')
         with torch.no_grad():
             feature = inferer(voi, lambda x: vit(x)[0].transpose(1, 2).reshape(-1, 768, fs[0], fs[1], fs[2]))
         c, z, x, y = feature.squeeze().size()
+        feat_shape = (c, z, x, y)
+        logging.info(f"Got image of shape {img_shape}, VOI of shape {voi_shape}, feature of shape {feat_shape}")
         feature = feature.squeeze().reshape([c, z*x*y]).transpose(0,1).cpu().numpy()
         z, x, y = np.arange(z), np.arange(x), np.arange(y)
         Z, X, Y = np.meshgrid(z, x, y, indexing="ij")
