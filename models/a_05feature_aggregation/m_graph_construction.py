@@ -78,17 +78,39 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
 def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="tumour"):
     positions = np.load(f"{img_feature_dir}/{img_name}_{class_name}_coordinates.npy")
     features = np.load(f"{img_feature_dir}/{img_name}_{class_name}_radiomics.npy")
-    graph_dict = SlideGraphConstructor.build(
-        positions, 
-        features, 
-        lambda_h = 0.8,
-        connectivity_distance = 16,
-        neighbour_search_radius = 8,
-        feature_range_thresh=None
-    )
+    z, x, y = (np.max(positions, axis=0) - np.min(positions, axis=0)).tolist()
+    positions = np.reshape(positions, newshape=(z, x, y, -1))
+    features = np.reshape(features, newshape=(z, x, y, -1))
+    list_graph_dict = []
+    for i in range(z // 8 + 1):
+        if (i + 1) * 8 < z:
+            batch_positions = positions[i*8:(i+1)*8, ...].reshape(8*x*y, -1)
+            batch_features = features[i*8:(i+1)*8, ...].reshape(8*x*y, -1)
+        else:
+            batch_positions = positions[i*8:z, ...].reshape(8*x*y, -1)
+            batch_features = features[i*8:z, ...].reshape(8*x*y, -1)
+        graph_dict = SlideGraphConstructor.build(
+            batch_positions, 
+            batch_features, 
+            lambda_h = 0.8,
+            connectivity_distance = 16,
+            neighbour_search_radius = 8,
+            feature_range_thresh=None
+        )
+        list_graph_dict.append(graph_dict)
+
+    # concatenate graph list
+    new_graph_dict = {k: [] for k in list_graph_dict[0].keys()}
+    for graph_dict in list_graph_dict:
+        for k, v in graph_dict.items():
+            if k == "cluster_points":
+                new_graph_dict[k] += v
+            elif k == "edge_index":
+                new_graph_dict[k] += (v + len(new_graph_dict[k])).tolist()
+            else:
+                new_graph_dict[k] += v.tolist()
+    assert len(new_graph_dict["x"]) == z * x * y
     with save_path.open("w") as handle:
-        new_graph_dict = {k: v.tolist() for k, v in graph_dict.items() if k != "cluster_points"}
-        new_graph_dict.update({"cluster_points": graph_dict["cluster_points"]})
         json.dump(new_graph_dict, handle)
 
 def construct_img_graph(img_paths, save_dir, class_name="tumour", n_jobs=8):
