@@ -89,9 +89,10 @@ def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="t
         if i < (num_b - 1):
             batch_positions = positions[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
             batch_features = features[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
-        elif (z-i*b) > 1:
-            batch_positions = positions[i*b:z, ...].reshape((z-i*b)*x*y, -1)
-            batch_features = features[i*b:z, ...].reshape((z-i*b)*x*y, -1)
+        else:
+            s = max(0, z - b)
+            batch_positions = positions[s:z, ...].reshape((z-s)*x*y, -1)
+            batch_features = features[s:z, ...].reshape((z-s)*x*y, -1)
         graph_dict = SlideGraphConstructor.build(
             batch_positions, 
             batch_features, 
