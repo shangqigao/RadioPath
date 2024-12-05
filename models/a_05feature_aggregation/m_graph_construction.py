@@ -75,48 +75,17 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
     )
     return 
 
-def construct_img_graph(img_paths, save_dir, class_name="tumour", n_jobs=8, max_size=3*200*200):
-    """construct graph for radiological images
-    Args:
-        img_paths (list): a list of image paths
-        save_dir (str): directory of reading feature and saving graph
-    """
-    for idx, img_path in enumerate(img_paths):
-        img_name = pathlib.Path(img_path).name.replace(".nii.gz", "")
-        graph_path = pathlib.Path(f"{save_dir}/{img_name}_{class_name}.json")
-        logging.info("constructing graph: {}/{}...".format(idx + 1, len(img_paths)))
-        positions = np.load(f"{save_dir}/{img_name}_{class_name}_coordinates.npy")
-        features = np.load(f"{save_dir}/{img_name}_{class_name}_radiomics.npy")
-        z, x, y = (np.max(positions, axis=0) - np.min(positions, axis=0) + 1).tolist()
-        positions = np.reshape(positions, newshape=(z, x, y, -1))
-        features = np.reshape(features, newshape=(z, x, y, -1))
-        b = max_size // (x * y)
-        assert b > 1, f"Maximal size {max_size} is not enought"
-        num_b = z // b if z % b == 0 else z // b + 1
-        list_graph_dict = [None]*num_b
-
-        # construct graphs in parallel
-        joblib.Parallel(n_jobs=n_jobs)(
-            joblib.delayed(_construct_graph)(i) for i in range(num_b)
-        )
-
-        # concatenate graph list
-        new_graph_dict = {k: [] for k in list_graph_dict[0].keys()}
-        for graph_dict in list_graph_dict:
-            for k, v in graph_dict.items():
-                if k == "cluster_points":
-                    new_graph_dict[k] += v
-                elif k == "edge_index":
-                    new_graph_dict[k] += (v + len(new_graph_dict[k])).tolist()
-                else:
-                    new_graph_dict[k] += v.tolist()
-        num_nodes = len(new_graph_dict["x"])
-        logging.info(f"Constructed a graph of {num_nodes} nodes from {z*x*y} features!")
-        with graph_path.open("w") as handle:
-            json.dump(new_graph_dict, handle)
-
-
-    def _construct_graph(i):
+def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="tumour", max_size=3*200*200):
+    positions = np.load(f"{img_feature_dir}/{img_name}_{class_name}_coordinates.npy")
+    features = np.load(f"{img_feature_dir}/{img_name}_{class_name}_radiomics.npy")
+    z, x, y = (np.max(positions, axis=0) - np.min(positions, axis=0) + 1).tolist()
+    positions = np.reshape(positions, newshape=(z, x, y, -1))
+    features = np.reshape(features, newshape=(z, x, y, -1))
+    b = max_size // (x * y)
+    assert b > 1, f"Maximal size {max_size} is not enought"
+    num_b = z // b if z % b == 0 else z // b + 1
+    list_graph_dict = []
+    for i in range(num_b):
         if i < (num_b - 1):
             batch_positions = positions[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
             batch_features = features[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
@@ -131,9 +100,41 @@ def construct_img_graph(img_paths, save_dir, class_name="tumour", n_jobs=8, max_
             neighbour_search_radius = 4,
             feature_range_thresh=None
         )
-        new_graph_dict[i] = graph_dict
+        list_graph_dict.append(graph_dict)
+
+    # concatenate graph list
+    new_graph_dict = {k: [] for k in list_graph_dict[0].keys()}
+    for graph_dict in list_graph_dict:
+        for k, v in graph_dict.items():
+            if k == "cluster_points":
+                new_graph_dict[k] += v
+            elif k == "edge_index":
+                new_graph_dict[k] += (v + len(new_graph_dict[k])).tolist()
+            else:
+                new_graph_dict[k] += v.tolist()
+    num_nodes = len(new_graph_dict["x"])
+    logging.info(f"Constructed a graph of {num_nodes} nodes from {z*x*y} features!")
+    with save_path.open("w") as handle:
+        json.dump(new_graph_dict, handle)
+
+def construct_img_graph(img_paths, save_dir, class_name="tumour", n_jobs=8):
+    """construct graph for radiological images
+    Args:
+        img_paths (list): a list of image paths
+        save_dir (str): directory of reading feature and saving graph
+    """
+    def _construct_graph(idx, img_path):
+        img_name = pathlib.Path(img_path).name.replace(".nii.gz", "")
+        graph_path = pathlib.Path(f"{save_dir}/{img_name}_{class_name}.json")
+        logging.info("constructing graph: {}/{}...".format(idx + 1, len(img_paths)))
+        construct_radiomic_graph(img_name, save_dir, graph_path, class_name)
         return
     
+    # construct graphs in parallel
+    joblib.Parallel(n_jobs=n_jobs)(
+        joblib.delayed(_construct_graph)(idx, img_path)
+        for idx, img_path in enumerate(img_paths)
+    )
     return 
 
 
