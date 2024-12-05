@@ -69,5 +69,5 @@ if __name__ == "__main__":
             img_paths=batch_img_paths,
             save_dir=save_feature_dir,
             class_name=class_name,
-            n_jobs=8
+            n_jobs=1
         )

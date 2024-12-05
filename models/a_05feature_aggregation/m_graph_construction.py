@@ -75,23 +75,23 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
     )
     return 
 
-def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="tumour", max_size=4*200*200):
+def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="tumour", max_size=3*200*200):
     positions = np.load(f"{img_feature_dir}/{img_name}_{class_name}_coordinates.npy")
     features = np.load(f"{img_feature_dir}/{img_name}_{class_name}_radiomics.npy")
     z, x, y = (np.max(positions, axis=0) - np.min(positions, axis=0) + 1).tolist()
     positions = np.reshape(positions, newshape=(z, x, y, -1))
     features = np.reshape(features, newshape=(z, x, y, -1))
-    max_b = max_size // (x * y)
-    num_b = z // max_b + 1
+    b = max_size // (x * y)
+    assert b > 1, f"Maximal size {max_size} is not enought"
+    num_b = z // b if z % b == 0 else z // b + 1
     list_graph_dict = []
     for i in range(num_b):
-        k = z // num_b
         if i < (num_b - 1):
-            batch_positions = positions[i*k:(i+1)*k, ...].reshape(k*x*y, -1)
-            batch_features = features[i*k:(i+1)*k, ...].reshape(k*x*y, -1)
-        else:
-            batch_positions = positions[i*k:z, ...].reshape((z-i*k)*x*y, -1)
-            batch_features = features[i*k:z, ...].reshape((z-i*k)*x*y, -1)
+            batch_positions = positions[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
+            batch_features = features[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
+        elif (z-i*b) > 1:
+            batch_positions = positions[i*b:z, ...].reshape((z-i*b)*x*y, -1)
+            batch_features = features[i*b:z, ...].reshape((z-i*b)*x*y, -1)
         graph_dict = SlideGraphConstructor.build(
             batch_positions, 
             batch_features, 
