@@ -13,7 +13,7 @@ from models.a_04feature_extraction.m_feature_extraction import extract_pathomic_
 from models.a_04feature_extraction.m_feature_extraction import extract_chief_wsi_level_features
 from models.a_05feature_aggregation.m_graph_construction import construct_wsi_graph
 from models.a_05feature_aggregation.m_graph_construction import visualize_graph
-from models.a_05feature_aggregation.m_graph_construction import feature_visualization
+from models.a_05feature_aggregation.m_graph_construction import pathomic_feature_visualization
 from models.a_05feature_aggregation.m_graph_construction import generate_node_label
 from models.a_05feature_aggregation.m_graph_construction import extract_minimum_spanning_tree
 from models.a_05feature_aggregation.m_graph_construction import measure_graph_properties
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     #     save_label_dir = save_feature_dir
     # else:
     #     save_label_dir = save_classification_dir
-    # feature_visualization(
+    # pathomic_feature_visualization(
     #     wsi_paths=wsi_paths[0:900:90],
     #     save_feature_dir=save_feature_dir,
     #     mode="umap",
