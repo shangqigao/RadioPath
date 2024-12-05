@@ -502,7 +502,7 @@ def plot_graph_properties(
     logging.info("Visualization done!") 
     return
 
-def visualize_graph(
+def visualize_pathomic_graph(
         wsi_path, 
         graph_path, 
         label=None, 
@@ -733,8 +733,60 @@ def visualize_graph(
         plt.subplot(2,2,3)
         plt.imshow(thumb_tile)
         plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
+
+def visualize_radiomic_graph(
+        img_path,
+        lab_path, 
+        graph_path,
+        keys=["image", "label"],
+        spacing=(1.024, 1.024, 1.024),
+        padding=(4, 8, 8),
+        NODE_SIZE = 24,
+        EDGE_SIZE = 4
+    ):
+    from models.a_04feature_extraction.m_feature_extraction import image_transforms
+    from monai.transforms.utils import generate_spatial_bounding_box
+    from monai.transforms.utils import get_largest_connected_component_mask
+
+    transform = image_transforms(keys, spacing, padding)
+    case_dict = [{"image": img_path, "label": lab_path}]
+    data = transform(case_dict)
+    image, label = data["image"].squeeze(), data["label"].squeeze()
+    label = get_largest_connected_component_mask(label)
+    s, e = generate_spatial_bounding_box(np.expand_dims(label, 0))
+    graph_dict = load_json(graph_path)
+    graph_dict = {k: v for k, v in graph_dict.items() if k != "cluster_points"}
+    node_coordinates = graph_dict["coordinates"]
+    node_activations = [label[*c] for c in node_coordinates]
+
+    graph_dict = {k: np.array(v) for k, v in graph_dict.items()}
+    edges = graph_dict["edge_index"]
+
+    cmap = get_cmap("viridis")
+    norm_node_activations = (node_activations - label.min()) / (label.max() - label.min() + 1e-10)
+    node_colors = (cmap(norm_node_activations)[..., :3] * 255).astype(np.uint8)
     
-def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, n_class=None, features=None, colors=None):
+    voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
+    node_coordinates = np.array(node_coordinates) - np.array([s])
+    
+        
+    plt.figure(figsize=(20,10))
+    plt.subplot(2,2,1)
+    plt.imshow(thumb)
+    plt.axis("off")
+    ax = plt.subplot(2,2,2)
+    plt.imshow(thumb_overlaid)
+    plt.axis("off")
+    fig = plt.gcf()
+    norm = Normalize(label.min(), label.max())
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+    cbar = fig.colorbar(sm, ax=ax, extend="both")
+    cbar.minorticks_on()
+    plt.subplot(2,2,3)
+    plt.imshow(thumb_tile)
+    plt.savefig("a_05feature_aggregation/img_graph.jpg")
+    
+def pathomic_feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, n_class=None, features=None, colors=None):
     if features is None or colors is None:
         features, colors = [], []
         for i, wsi_path in enumerate(wsi_paths):
@@ -758,6 +810,61 @@ def feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_d
             else:
                 label = np.argmax(softmax(feature, axis=1), axis=1)
                 # label = np.array([i]*len(feature), np.int32)
+            colors.append(label)
+        features = np.concatenate(features, axis=0)
+        colors = np.concatenate(colors, axis=0)
+    
+    n_samples, n_features = features.shape
+    scaled_features = StandardScaler().fit_transform(features)
+    if min(n_samples, n_features) > 64:
+        pca_proj = PCA(n_components=64).fit_transform(scaled_features)
+    else:
+        pca_proj = scaled_features
+
+    if mode == "tsne":
+        vis_proj = TSNE(n_jobs=-1).fit_transform(pca_proj)
+    elif mode == "umap":
+        vis_proj = umap.UMAP(n_jobs=-1).fit_transform(pca_proj)
+    else:
+        raise NotImplementedError
+
+    sns.set_style('darkgrid')
+    sns.set_palette('muted')
+    sns.set_context("notebook", font_scale=1.5, rc={"lines.linewidth": 2.5})
+    class_list = np.unique(colors).tolist()
+    if n_class is None: n_class = int(max(class_list)) + 1
+    palette = np.array(sns.color_palette("hls", n_class))
+    plt.figure(figsize=(8,8))
+    ax = plt.subplot(aspect='equal')
+    scatter_list = []
+    for i in class_list:
+        c = colors[colors == i]
+        t = vis_proj[colors == i, :]
+        sc = ax.scatter(t[:, 0], t[:, 1], lw=0, s=40, c=palette[c.astype(np.int32)])
+        scatter_list.append(sc)
+    plt.legend(scatter_list, class_list, loc="upper right", bbox_to_anchor=(1.1, 1.1), title="Classes")
+    plt.xlim(-25, 25)
+    plt.ylim(-25, 25)
+    ax.axis('off')
+    ax.axis('tight') 
+    plt.savefig(f'a_05feature_aggregation/{mode}_visualization.jpg')
+    print("Visualization done!")
+
+def radiomic_feature_visualization(img_paths, save_feature_dir, class_name="tumour", mode="tsne", graph=True, n_class=None, features=None, colors=None):
+    if features is None or colors is None:
+        features, colors = [], []
+        for i, img_path in enumerate(img_paths):
+            img_name = pathlib.Path(img_path).stem
+            logging.info(f"loading feature of {img_name}")
+            if graph:
+                feature_path = pathlib.Path(f"{save_feature_dir}/{img_name}_{class_name}.json")
+                graph_dict = load_json(feature_path)
+                feature = np.array(graph_dict["x"])
+            else:
+                feature_path = pathlib.Path(f"{save_feature_dir}/{img_name}_{class_name}_radiomics.npy")
+                feature = np.load(feature_path)
+            features.append(feature)
+            label = np.argmax(softmax(feature, axis=1), axis=1)
             colors.append(label)
         features = np.concatenate(features, axis=0)
         colors = np.concatenate(colors, axis=0)
