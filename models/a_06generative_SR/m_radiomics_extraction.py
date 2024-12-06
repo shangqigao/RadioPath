@@ -75,6 +75,7 @@ if __name__ == "__main__":
     #     )
 
     # visualize radiomics
+<<<<<<< HEAD
     # radiomic_feature_visualization(
     #     img_paths=img_paths[0:1],
     #     save_feature_dir=save_feature_dir,
@@ -89,5 +90,13 @@ if __name__ == "__main__":
         lab_path=lab_paths[0],
         save_graph_dir=save_feature_dir,
         class_name=class_name
+=======
+    radiomic_feature_visualization(
+        img_paths=img_paths[0:1],
+        save_feature_dir=save_feature_dir,
+        class_name=class_name,
+        mode="umap",
+        graph=True
+>>>>>>> 49aa2276a06999918e279e6c73d85363bdf0d793
     )
 

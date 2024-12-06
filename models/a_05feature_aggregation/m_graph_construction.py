@@ -90,9 +90,10 @@ def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="t
         if i < (num_b - 1):
             batch_positions = positions[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
             batch_features = features[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
-        elif (z-i*b) > 1:
-            batch_positions = positions[i*b:z, ...].reshape((z-i*b)*x*y, -1)
-            batch_features = features[i*b:z, ...].reshape((z-i*b)*x*y, -1)
+        else:
+            s = max(0, z - b)
+            batch_positions = positions[s:z, ...].reshape((z-s)*x*y, -1)
+            batch_features = features[s:z, ...].reshape((z-s)*x*y, -1)
         graph_dict = SlideGraphConstructor.build(
             batch_positions, 
             batch_features, 
@@ -886,7 +887,7 @@ def radiomic_feature_visualization(img_paths, save_feature_dir, class_name="tumo
     if features is None or colors is None:
         features, colors = [], []
         for i, img_path in enumerate(img_paths):
-            img_name = pathlib.Path(img_path).stem
+            img_name = pathlib.Path(img_path).name.replace(".nii.gz", "")
             logging.info(f"loading feature of {img_name}")
             if graph:
                 feature_path = pathlib.Path(f"{save_feature_dir}/{img_name}_{class_name}.json")
