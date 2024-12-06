@@ -6,7 +6,9 @@ import logging
 import argparse
 
 from models.a_04feature_extraction.m_feature_extraction import extract_radiomic_feature
-from models.a_05feature_aggregation.m_graph_construction import construct_img_graph, radiomic_feature_visualization
+from models.a_05feature_aggregation.m_graph_construction import construct_img_graph
+from models.a_05feature_aggregation.m_graph_construction import radiomic_feature_visualization
+from models.a_05feature_aggregation.m_graph_construction import visualize_radiomic_graph
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -73,10 +75,19 @@ if __name__ == "__main__":
     #     )
 
     # visualize radiomics
-    radiomic_feature_visualization(
-        img_paths=img_paths[0:1],
-        save_feature_dir=save_feature_dir,
-        class_name=class_name,
-        mode="tsne",
-        graph=False
+    # radiomic_feature_visualization(
+    #     img_paths=img_paths[0:1],
+    #     save_feature_dir=save_feature_dir,
+    #     class_name=class_name,
+    #     mode="tsne",
+    #     graph=False
+    # )
+
+    # visualize radiomic graph
+    visualize_radiomic_graph(
+        img_path=img_paths[0],
+        lab_path=lab_paths[0],
+        save_graph_dir=save_feature_dir,
+        class_name=class_name
     )
+

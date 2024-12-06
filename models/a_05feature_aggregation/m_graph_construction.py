@@ -28,6 +28,7 @@ from scipy.sparse.csgraph import minimum_spanning_tree
 
 import numpy as np
 import networkx as nx
+import plotly.graph_objects as go
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable, get_cmap
 from torch_geometric.data import Data
@@ -737,12 +738,13 @@ def visualize_pathomic_graph(
 def visualize_radiomic_graph(
         img_path,
         lab_path, 
-        graph_path,
+        save_graph_dir,
+        class_name="tumour",
         keys=["image", "label"],
         spacing=(1.024, 1.024, 1.024),
         padding=(4, 8, 8),
-        NODE_SIZE = 24,
-        EDGE_SIZE = 4
+        NODE_SIZE = 8,
+        EDGE_SIZE = 2
     ):
     from models.a_04feature_extraction.m_feature_extraction import image_transforms
     from monai.transforms.utils import generate_spatial_bounding_box
@@ -754,37 +756,67 @@ def visualize_radiomic_graph(
     image, label = data["image"].squeeze(), data["label"].squeeze()
     label = get_largest_connected_component_mask(label)
     s, e = generate_spatial_bounding_box(np.expand_dims(label, 0))
+
+    img_name = pathlib.Path(img_path).name.replace(".nii.gz", "")
+    logging.info(f"loading graph of {img_name}")
+    graph_path = pathlib.Path(f"{save_graph_dir}/{img_name}_{class_name}.json")
     graph_dict = load_json(graph_path)
     graph_dict = {k: v for k, v in graph_dict.items() if k != "cluster_points"}
     node_coordinates = graph_dict["coordinates"]
-    node_activations = [label[*c] for c in node_coordinates]
+    node_label = [label[c[0], c[1], c[2]] for c in node_coordinates]
 
     graph_dict = {k: np.array(v) for k, v in graph_dict.items()}
     edges = graph_dict["edge_index"]
-
-    cmap = get_cmap("viridis")
-    norm_node_activations = (node_activations - label.min()) / (label.max() - label.min() + 1e-10)
-    node_colors = (cmap(norm_node_activations)[..., :3] * 255).astype(np.uint8)
     
     voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
-    node_coordinates = np.array(node_coordinates) - np.array([s])
+    node_coordinates = np.array(node_coordinates)
     
+    fig = go.Figure(data=go.Volume(
+        x=node_coordinates[:, 0],
+        y=node_coordinates[:, 1],
+        z=node_coordinates[:, 2],
+        value=voi.flatten(),
+        isomin=-0.1,
+        isomax=0.8,
+        opacity=0.1, # needs to be small to see through all surfaces
+        surface_count=21, # needs to be a large number for good volume rendering
+        ))
+    fig.write_image("a_05feature_aggregation/image_voi.jpg")
         
-    plt.figure(figsize=(20,10))
-    plt.subplot(2,2,1)
-    plt.imshow(thumb)
-    plt.axis("off")
-    ax = plt.subplot(2,2,2)
-    plt.imshow(thumb_overlaid)
-    plt.axis("off")
-    fig = plt.gcf()
-    norm = Normalize(label.min(), label.max())
-    sm = ScalarMappable(cmap=cmap, norm=norm)
-    cbar = fig.colorbar(sm, ax=ax, extend="both")
-    cbar.minorticks_on()
-    plt.subplot(2,2,3)
-    plt.imshow(thumb_tile)
-    plt.savefig("a_05feature_aggregation/img_graph.jpg")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter3d(
+        x=node_coordinates[:, 0],
+        y=node_coordinates[:, 1],
+        z=node_coordinates[:, 2],
+        mode='markers',
+        marker=dict(
+            size=NODE_SIZE,
+            color=node_label,  # Use scalar values to determine color
+            colorscale='Viridis',  # Choose a colormap (e.g., 'Viridis', 'Cividis', 'Plasma', etc.)
+            colorbar=dict(title='Value')  # Add a colorbar to show the mapping
+        ),
+        name='Points'
+    ))
+    for edge in edges:
+        p1, p2 = edge
+        fig.add_trace(go.Scatter3d(
+            x=[node_coordinates[p1, 0], node_coordinates[p2, 0]],  # x-coordinates
+            y=[node_coordinates[p1, 1], node_coordinates[p2, 1]],  # y-coordinates
+            z=[node_coordinates[p1, 2], node_coordinates[p2, 2]],  # z-coordinates
+            mode='lines',
+            line=dict(color='blue', width=EDGE_SIZE),
+            name='Edge'
+        ))
+    fig.update_layout(
+        title='3D Points and Edges',
+        scene=dict(
+            xaxis_title='X Axis',
+            yaxis_title='Y Axis',
+            zaxis_title='Z Axis'
+        ),
+        margin=dict(l=0, r=0, b=0, t=40)
+    )
+    fig.write_image("a_05feature_aggregation/image_graph.jpg")
     
 def pathomic_feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, n_class=None, features=None, colors=None):
     if features is None or colors is None:
