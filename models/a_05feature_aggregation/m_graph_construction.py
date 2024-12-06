@@ -758,7 +758,7 @@ def visualize_radiomic_graph(
     graph_dict = load_json(graph_path)
     graph_dict = {k: v for k, v in graph_dict.items() if k != "cluster_points"}
     node_coordinates = graph_dict["coordinates"]
-    node_activations = [label[*c] for c in node_coordinates]
+    node_activations = [label[c[0], c[1], c[2]] for c in node_coordinates]
 
     graph_dict = {k: np.array(v) for k, v in graph_dict.items()}
     edges = graph_dict["edge_index"]
@@ -771,21 +771,21 @@ def visualize_radiomic_graph(
     node_coordinates = np.array(node_coordinates) - np.array([s])
     
         
-    plt.figure(figsize=(20,10))
-    plt.subplot(2,2,1)
-    plt.imshow(thumb)
-    plt.axis("off")
-    ax = plt.subplot(2,2,2)
-    plt.imshow(thumb_overlaid)
-    plt.axis("off")
-    fig = plt.gcf()
-    norm = Normalize(label.min(), label.max())
-    sm = ScalarMappable(cmap=cmap, norm=norm)
-    cbar = fig.colorbar(sm, ax=ax, extend="both")
-    cbar.minorticks_on()
-    plt.subplot(2,2,3)
-    plt.imshow(thumb_tile)
-    plt.savefig("a_05feature_aggregation/img_graph.jpg")
+    # plt.figure(figsize=(20,10))
+    # plt.subplot(2,2,1)
+    # plt.imshow(thumb)
+    # plt.axis("off")
+    # ax = plt.subplot(2,2,2)
+    # plt.imshow(thumb_overlaid)
+    # plt.axis("off")
+    # fig = plt.gcf()
+    # norm = Normalize(label.min(), label.max())
+    # sm = ScalarMappable(cmap=cmap, norm=norm)
+    # cbar = fig.colorbar(sm, ax=ax, extend="both")
+    # cbar.minorticks_on()
+    # plt.subplot(2,2,3)
+    # plt.imshow(thumb_tile)
+    # plt.savefig("a_05feature_aggregation/img_graph.jpg")
     
 def pathomic_feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, n_class=None, features=None, colors=None):
     if features is None or colors is None:
@@ -855,7 +855,7 @@ def radiomic_feature_visualization(img_paths, save_feature_dir, class_name="tumo
     if features is None or colors is None:
         features, colors = [], []
         for i, img_path in enumerate(img_paths):
-            img_name = pathlib.Path(img_path).stem
+            img_name = pathlib.Path(img_path).name.replace(".nii.gz", "")
             logging.info(f"loading feature of {img_name}")
             if graph:
                 feature_path = pathlib.Path(f"{save_feature_dir}/{img_name}_{class_name}.json")

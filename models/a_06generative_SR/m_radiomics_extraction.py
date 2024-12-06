@@ -77,6 +77,6 @@ if __name__ == "__main__":
         img_paths=img_paths[0:1],
         save_feature_dir=save_feature_dir,
         class_name=class_name,
-        mode="tsne",
-        graph=False
+        mode="umap",
+        graph=True
     )
