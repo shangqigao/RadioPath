@@ -770,12 +770,11 @@ def visualize_radiomic_graph(
     edges = graph_dict["edge_index"]
     
     voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
-    node_coordinates = np.array(node_coordinates)
-    
+    X, Y, Z = np.mgrid[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
     fig = go.Figure(data=go.Volume(
-        x=node_coordinates[:, 0],
-        y=node_coordinates[:, 1],
-        z=node_coordinates[:, 2],
+        x=X.flatten(),
+        y=Y.flatten(),
+        z=Z.flatten(),
         value=voi.flatten(),
         isomin=-0.1,
         isomax=0.8,
@@ -783,7 +782,8 @@ def visualize_radiomic_graph(
         surface_count=21, # needs to be a large number for good volume rendering
         ))
     fig.write_image("a_05feature_aggregation/image_voi.jpg")
-        
+
+    node_coordinates = np.array(node_coordinates) 
     fig = go.Figure()
     fig.add_trace(go.Scatter3d(
         x=node_coordinates[:, 0],
