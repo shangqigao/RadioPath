@@ -60,19 +60,13 @@ if __name__ == "__main__":
     #     )
 
     # construct image graph
-    bs = 32
-    nb = len(img_paths) // bs if len(img_paths) % bs == 0 else len(img_paths) // bs + 1
-    for i in range(0, nb):
-        logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
-        start = i * bs
-        end = min(len(img_paths), (i + 1) * bs)
-        batch_img_paths = img_paths[start:end]
-        construct_img_graph(
-            img_paths=batch_img_paths,
-            save_dir=save_feature_dir,
-            class_name=class_name,
-            n_jobs=1
-        )
+    construct_img_graph(
+        img_paths=img_paths,
+        save_dir=save_feature_dir,
+        class_name=class_name,
+        patch_size=(30, 30, 30),
+        n_jobs=32
+    )
 
     # visualize radiomics
     # radiomic_feature_visualization(
