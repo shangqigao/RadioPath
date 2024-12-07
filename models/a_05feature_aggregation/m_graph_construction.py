@@ -88,12 +88,13 @@ def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="t
     list_graph_dict = []
     for i in range(num_b):
         if i < (num_b - 1):
-            batch_positions = positions[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
-            batch_features = features[i*b:(i+1)*b, ...].reshape(b*x*y, -1)
+            s = b
+            batch_positions = positions[i*s:(i+1)*s, ...].reshape(s*x*y, -1)
+            batch_features = features[i*s:(i+1)*s, ...].reshape(s*x*y, -1)
         else:
-            s = max(0, z - b)
-            batch_positions = positions[s:z, ...].reshape((z-s)*x*y, -1)
-            batch_features = features[s:z, ...].reshape((z-s)*x*y, -1)
+            s = z - i*b
+            batch_positions = positions[i*b:z, ...].reshape(s*x*y, -1)
+            batch_features = features[i*b:z, ...].reshape(s*x*y, -1)
         graph_dict = SlideGraphConstructor.build(
             batch_positions, 
             batch_features, 
@@ -102,6 +103,7 @@ def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="t
             neighbour_search_radius = 4,
             feature_range_thresh=None
         )
+        
         list_graph_dict.append(graph_dict)
 
     # concatenate graph list
@@ -111,7 +113,7 @@ def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="t
             if k == "cluster_points":
                 new_graph_dict[k] += v
             elif k == "edge_index":
-                new_graph_dict[k] += (v + len(new_graph_dict[k])).tolist()
+                new_graph_dict[k] += (v.T + len(new_graph_dict["cluster_points"])).tolist()
             else:
                 new_graph_dict[k] += v.tolist()
     num_nodes = len(new_graph_dict["x"])
@@ -744,8 +746,9 @@ def visualize_radiomic_graph(
         keys=["image", "label"],
         spacing=(1.024, 1.024, 1.024),
         padding=(4, 8, 8),
-        NODE_SIZE = 8,
-        EDGE_SIZE = 2
+        NODE_SIZE = 1,
+        EDGE_SIZE = 0.25,
+        n_jobs=32
     ):
     from models.a_04feature_extraction.m_feature_extraction import image_transforms
     from monai.transforms.utils import generate_spatial_bounding_box
@@ -754,7 +757,7 @@ def visualize_radiomic_graph(
     transform = image_transforms(keys, spacing, padding)
     case_dict = [{"image": img_path, "label": lab_path}]
     data = transform(case_dict)
-    image, label = data["image"].squeeze(), data["label"].squeeze()
+    image, label = data[0]["image"].squeeze(), data[0]["label"].squeeze()
     label = get_largest_connected_component_mask(label)
     s, e = generate_spatial_bounding_box(np.expand_dims(label, 0))
 
@@ -764,10 +767,16 @@ def visualize_radiomic_graph(
     graph_dict = load_json(graph_path)
     graph_dict = {k: v for k, v in graph_dict.items() if k != "cluster_points"}
     node_coordinates = graph_dict["coordinates"]
-    node_label = [label[c[0], c[1], c[2]] for c in node_coordinates]
+    node_label = [label[int(c[0]), int(c[1]), int(c[2])] for c in node_coordinates]
 
-    graph_dict = {k: np.array(v) for k, v in graph_dict.items()}
     edges = graph_dict["edge_index"]
+    start_points, end_points, = [], []
+    num_nodes = 0
+    for i in range(len(edges) // 2):
+        start_points += (np.array(edges[i*2]) - i*2 + num_nodes).tolist() 
+        end_points += (np.array(edges[i*2+1]) - i*2 + num_nodes).tolist()
+        num_nodes += max(edges[i*2]) - i*2 + 1
+    edges = list(zip(start_points, end_points))
     
     voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
     X, Y, Z = np.mgrid[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
@@ -776,10 +785,10 @@ def visualize_radiomic_graph(
         y=Y.flatten(),
         z=Z.flatten(),
         value=voi.flatten(),
-        isomin=-0.1,
+        isomin=0.1,
         isomax=0.8,
         opacity=0.1, # needs to be small to see through all surfaces
-        surface_count=21, # needs to be a large number for good volume rendering
+        surface_count=17, # needs to be a large number for good volume rendering
         ))
     fig.write_image("a_05feature_aggregation/image_voi.jpg")
 
@@ -794,22 +803,33 @@ def visualize_radiomic_graph(
             size=NODE_SIZE,
             color=node_label,  # Use scalar values to determine color
             colorscale='Viridis',  # Choose a colormap (e.g., 'Viridis', 'Cividis', 'Plasma', etc.)
-            colorbar=dict(title='Value')  # Add a colorbar to show the mapping
+            colorbar=dict(title='Label')  # Add a colorbar to show the mapping
         ),
         name='Points'
     ))
+    
+    x_coords = []
+    y_coords = []
+    z_coords = []
+    edge_colors = []
     for edge in edges:
         p1, p2 = edge
-        fig.add_trace(go.Scatter3d(
-            x=[node_coordinates[p1, 0], node_coordinates[p2, 0]],  # x-coordinates
-            y=[node_coordinates[p1, 1], node_coordinates[p2, 1]],  # y-coordinates
-            z=[node_coordinates[p1, 2], node_coordinates[p2, 2]],  # z-coordinates
-            mode='lines',
-            line=dict(color='blue', width=EDGE_SIZE),
-            name='Edge'
-        ))
+        edge_colors.append(node_label[p1])
+        x_coords.extend([node_coordinates[p1, 0], node_coordinates[p2, 0], None])
+        y_coords.extend([node_coordinates[p1, 1], node_coordinates[p2, 1], None])
+        z_coords.extend([node_coordinates[p1, 2], node_coordinates[p2, 2], None])
+    
+    fig.add_trace(go.Scatter3d(
+        x=x_coords,
+        y=y_coords,
+        z=z_coords,
+        mode='lines',
+        line=dict(color=edge_colors, colorscale='Viridis', width=EDGE_SIZE),
+        name='Edges'
+    ))
+
     fig.update_layout(
-        title='3D Points and Edges',
+        title='Radiological graph of VOI',
         scene=dict(
             xaxis_title='X Axis',
             yaxis_title='Y Axis',
@@ -818,6 +838,7 @@ def visualize_radiomic_graph(
         margin=dict(l=0, r=0, b=0, t=40)
     )
     fig.write_image("a_05feature_aggregation/image_graph.jpg")
+    print("Visualization Done!")
     
 def pathomic_feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, n_class=None, features=None, colors=None):
     if features is None or colors is None:
