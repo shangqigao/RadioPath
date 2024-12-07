@@ -76,25 +76,36 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
     )
     return 
 
+def expand_slice_coordinates(xy_coordinates, slice_index):
+    xy_coordinates = np.array(xy_coordinates)
+    z_coordinate = np.ones_like(xy_coordinates)[:, 0:1] * slice_index
+    zxy_coordinates = np.concatenate([z_coordinate, xy_coordinates], axis=-1)
+    return zxy_coordinates
+
 def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="tumour", max_size=3*200*200):
+    """construct volumetric radiomic graph
+    Args:
+        max_size (int): maximally allowed size of a slice, reduce it if out of memory
+    """
     positions = np.load(f"{img_feature_dir}/{img_name}_{class_name}_coordinates.npy")
     features = np.load(f"{img_feature_dir}/{img_name}_{class_name}_radiomics.npy")
     z, x, y = (np.max(positions, axis=0) - np.min(positions, axis=0) + 1).tolist()
     positions = np.reshape(positions, newshape=(z, x, y, -1))
     features = np.reshape(features, newshape=(z, x, y, -1))
     b = max_size // (x * y)
-    assert b > 1, f"Maximal size {max_size} is not enought"
+    assert b > 0, f"Maximal size {max_size} is not enought for graph construction"
     num_b = z // b if z % b == 0 else z // b + 1
     list_graph_dict = []
     for i in range(num_b):
-        if i < (num_b - 1):
-            s = b
-            batch_positions = positions[i*s:(i+1)*s, ...].reshape(s*x*y, -1)
-            batch_features = features[i*s:(i+1)*s, ...].reshape(s*x*y, -1)
+        s, e = i*b, min(z, (i+1)*b)
+        # Build 2D graph if only one slice
+        if (e - s) == 1:
+            batch_positions = positions[s:e, :, :, 1:].reshape((e-s)*x*y, -1)
+            batch_features = features[s:e, ...].reshape((e-s)*x*y, -1)
         else:
-            s = z - i*b
-            batch_positions = positions[i*b:z, ...].reshape(s*x*y, -1)
-            batch_features = features[i*b:z, ...].reshape(s*x*y, -1)
+            batch_positions = positions[s:e, ...].reshape((e-s)*x*y, -1)
+            batch_features = features[s:e, ...].reshape((e-s)*x*y, -1)
+            
         graph_dict = SlideGraphConstructor.build(
             batch_positions, 
             batch_features, 
@@ -103,17 +114,23 @@ def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="t
             neighbour_search_radius = 4,
             feature_range_thresh=None
         )
-        
+        # Expand coorinates to 3D in the case of 2D graph 
+        if (e - s) == 1:
+            slice_index = positions[0, 0, 0, 0]
+            graph_dict["coordinates"] = expand_slice_coordinates(graph_dict["coordinates"], slice_index)
+            cluster_points = graph_dict["cluster_points"]
+            cluster_points = [expand_slice_coordinates(cps, slice_index) for cps in cluster_points]
+            graph_dict["cluster_points"] = [cps.tolist() for cps in cluster_points]
         list_graph_dict.append(graph_dict)
 
-    # concatenate graph list
+    # concatenate a list of graphs
     new_graph_dict = {k: [] for k in list_graph_dict[0].keys()}
     for graph_dict in list_graph_dict:
         for k, v in graph_dict.items():
             if k == "cluster_points":
                 new_graph_dict[k] += v
             elif k == "edge_index":
-                new_graph_dict[k] += (v.T + len(new_graph_dict["cluster_points"])).tolist()
+                new_graph_dict[k] += (v.T + len(new_graph_dict["x"])).tolist()
             else:
                 new_graph_dict[k] += v.tolist()
     num_nodes = len(new_graph_dict["x"])
@@ -768,15 +785,7 @@ def visualize_radiomic_graph(
     graph_dict = {k: v for k, v in graph_dict.items() if k != "cluster_points"}
     node_coordinates = graph_dict["coordinates"]
     node_label = [label[int(c[0]), int(c[1]), int(c[2])] for c in node_coordinates]
-
     edges = graph_dict["edge_index"]
-    start_points, end_points, = [], []
-    num_nodes = 0
-    for i in range(len(edges) // 2):
-        start_points += (np.array(edges[i*2]) - i*2 + num_nodes).tolist() 
-        end_points += (np.array(edges[i*2+1]) - i*2 + num_nodes).tolist()
-        num_nodes += max(edges[i*2]) - i*2 + 1
-    edges = list(zip(start_points, end_points))
     
     voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
     X, Y, Z = np.mgrid[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
