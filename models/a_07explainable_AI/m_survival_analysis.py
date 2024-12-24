@@ -496,7 +496,6 @@ def generate_data_split(
         test: float,
         num_folds: int,
         seed: int = 5,
-        data_types=["radiomics", "pathomics"]
 ):
     """Helper to generate splits
     Args:
@@ -542,15 +541,10 @@ def generate_data_split(
 
             assert len(set(train_x).intersection(set(valid_x))) == 0
             assert len(set(valid_x).intersection(set(test_x))) == 0
-
-            valid_x = [{k: x[i] for i, k in enumerate(data_types)} for x in valid_x]
         else:
             train_x, train_y = x_, y_
 
         assert len(set(train_x).intersection(set(test_x))) == 0
-
-        train_x = [{k: x[i] for i, k in enumerate(data_types)} for x in train_x]
-        test_x = [{k: x[i] for i, k in enumerate(data_types)} for x in test_x]
 
         if valid > 0:
             splits.append(
@@ -955,7 +949,8 @@ if __name__ == "__main__":
     y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
     matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
     matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
-    matched_graph_paths = [[r, p] for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
+    kr, kp = data_types[0], data_types[1]
+    matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
     splits = generate_data_split(
         x=matched_graph_paths,
         y=y,
