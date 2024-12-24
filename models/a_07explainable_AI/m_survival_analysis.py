@@ -543,12 +543,12 @@ def generate_data_split(
             train_x, train_y = x_, y_
 
         train_x_list = []
-        for x in train_x: train_x_list.append(list(x.values()))
+        for i in train_x: train_x_list + list(i.values())
         test_x_list = []
-        for x in test_x: test_x_list.append(list(x.values()))
+        for i in test_x: test_x_list + list(i.values())
         if valid > 0:
             valid_x_list = []
-            for x in valid_x: valid_x_list.append(list(x.values()))
+            for i in valid_x: valid_x_list + list(i.values())
             assert len(set(train_x_list).intersection(set(valid_x_list))) == 0
             assert len(set(valid_x_list).intersection(set(test_x_list))) == 0
         else:
@@ -715,8 +715,8 @@ def training(
         model_dir (str): directory of saving models
     """
     splits = joblib.load(split_path)
-    node_scalers = [joblib.load(scaler_path[t]) for t in data_types] 
-    transform_dict = {t: s.transform for t, s in zip(data_types, node_scalers)}
+    node_scalers = [joblib.load(scaler_path[k]) for k in omic_keys] 
+    transform_dict = {k: s.transform for k, s in zip(omic_keys, node_scalers)}
     
     loader_kwargs = {
         "num_workers": n_works, 
@@ -948,57 +948,57 @@ if __name__ == "__main__":
     #     dataset=args.dataset
     # )
 
-    # split data set
-    num_folds = 5
-    test_ratio = 0.2
-    train_ratio = 0.8
-    valid_ratio = 0.0
-    data_types = ["radiomics", "pathomics"]
-    # stages=["Stage I", "Stage II"]
-    df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
-    matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
-    kr, kp = data_types[0], data_types[1]
-    matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
-    splits = generate_data_split(
-        x=matched_graph_paths,
-        y=y,
-        train=train_ratio,
-        valid=valid_ratio,
-        test=test_ratio,
-        num_folds=num_folds
-    )
-    mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/survival_radiopathomics_splits.dat"
-    joblib.dump(splits, split_path)
-    splits = joblib.load(split_path)
-    num_train = len(splits[0]["train"])
-    logging.info(f"Number of training samples: {num_train}.")
-    num_valid = len(splits[0]["valid"])
-    logging.info(f"Number of validating samples: {num_valid}.")
-    num_test = len(splits[0]["test"])
-    logging.info(f"Number of testing samples: {num_test}.")
+    # # split data set
+    # num_folds = 5
+    # test_ratio = 0.2
+    # train_ratio = 0.8
+    # valid_ratio = 0.0
+    # data_types = ["radiomics", "pathomics"]
+    # # stages=["Stage I", "Stage II"]
+    # df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    # y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
+    # matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
+    # kr, kp = data_types[0], data_types[1]
+    # matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
+    # splits = generate_data_split(
+    #     x=matched_graph_paths,
+    #     y=y,
+    #     train=train_ratio,
+    #     valid=valid_ratio,
+    #     test=test_ratio,
+    #     num_folds=num_folds
+    # )
+    # mkdir(save_model_dir)
+    # split_path = f"{save_model_dir}/survival_radiopathomics_splits.dat"
+    # joblib.dump(splits, split_path)
+    # splits = joblib.load(split_path)
+    # num_train = len(splits[0]["train"])
+    # logging.info(f"Number of training samples: {num_train}.")
+    # # num_valid = len(splits[0]["valid"])
+    # # logging.info(f"Number of validating samples: {num_valid}.")
+    # num_test = len(splits[0]["test"])
+    # logging.info(f"Number of testing samples: {num_test}.")
 
-    # compute mean and std on training data for normalization 
-    splits = joblib.load(split_path)
-    train_graph_paths = [path for path, _ in splits[0]["train"]]
-    loader = SurvivalGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
-    loader = DataLoader(
-        loader,
-        num_workers=8,
-        batch_size=1,
-        shuffle=False,
-        drop_last=False,
-    )
-    omic_features = [{k: v.x_dict[k].numpy() for k in data_types} for v in loader]
-    for k in data_types:
-        node_features = [d[k] for d in omic_features]
-        node_features = np.concatenate(node_features, axis=0)
-        node_scaler = StandardScaler(copy=False)
-        node_scaler.fit(node_features)
-        scaler_path = f"{save_model_dir}/survival_{k}_scaler.dat"
-        joblib.dump(node_scaler, scaler_path)
+    # # compute mean and std on training data for normalization 
+    # splits = joblib.load(split_path)
+    # train_graph_paths = [path for path, _ in splits[0]["train"]]
+    # loader = SurvivalGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
+    # loader = DataLoader(
+    #     loader,
+    #     num_workers=8,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     drop_last=False,
+    # )
+    # omic_features = [{k: v.x_dict[k].numpy() for k in data_types} for v in loader]
+    # for k in data_types:
+    #     node_features = [d[k] for d in omic_features]
+    #     node_features = np.concatenate(node_features, axis=0)
+    #     node_scaler = StandardScaler(copy=False)
+    #     node_scaler.fit(node_features)
+    #     scaler_path = f"{save_model_dir}/survival_{k}_scaler.dat"
+    #     joblib.dump(node_scaler, scaler_path)
 
     # training
     multi_omics = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
