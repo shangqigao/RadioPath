@@ -10,11 +10,11 @@ import torch.nn.functional as F
 import torchbnn as bnn
 
 from torch.nn import BatchNorm1d, Linear, ReLU, Dropout
-from torch_geometric.data import Data, Dataset
+from torch_geometric.data import Data, Dataset, HeteroData
 from torch_geometric.utils import subgraph, softmax
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATConv
 from torch_geometric.nn import global_mean_pool
-from torch_geometric.nn.aggr import AttentionalAggregation
+from torch_geometric.nn.aggr import Aggregation, AttentionalAggregation
 
 
 
@@ -70,32 +70,50 @@ class SlideGraphDataset(Dataset):
 class SurvivalGraphDataset(Dataset):
     """loading graph data for survival analysis
     """
-    def __init__(self, info_list, mode="train", preproc=None):
+    def __init__(self, info_list, mode="train", preproc=None, data_types=["radiomics", "pathomics"]):
         super().__init__()
         self.info_list = info_list
         self.mode = mode
         self.preproc = preproc
+        self.data_types = data_types
     
     def get(self, idx):
         info = self.info_list[idx]
         if any(v in self.mode for v in ["train", "valid"]):
-            wsi_path, label = info
+            graph_path, label = info
             label = torch.tensor(label).unsqueeze(0)
         else:
-            wsi_path = info
+            graph_path = info
         
-        with pathlib.Path(wsi_path).open() as fptr:
-            graph_dict = json.load(fptr)
-        graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
+        if len(self.data_types) == 1:
+            key = self.data_types[0]
+            with pathlib.Path(graph_path[key]).open() as fptr:
+                graph_dict = json.load(fptr)
+            graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
 
-        if self.preproc is not None:
-            graph_dict["x"] = self.preproc(graph_dict["x"])
+            if self.preproc is not None:
+                graph_dict["x"] = self.preproc[key](graph_dict["x"])
 
-        graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items()}
-        if any(v in self.mode for v in ["train", "valid"]):
-            graph_dict.update({"y": label})
+            graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items()}
+            if any(v in self.mode for v in ["train", "valid"]):
+                graph_dict.update({"y": label})
 
-        graph = Data(**graph_dict)
+            graph = Data(**graph_dict)
+        else:
+            graph_dict = {}
+            for key in self.data_types:
+                with pathlib.Path(graph_path[key]).open() as fptr:
+                    subgraph_dict = json.load(fptr)
+                subgraph_dict = {k: np.array(v) for k, v in subgraph_dict.items() if k != "cluster_points"}
+                if self.preproc is not None:
+                    subgraph_dict["x"] = self.preproc[key](graph_dict["x"])
+
+                subgraph_dict = {k: torch.tensor(v) for k, v in subgraph_dict.items()}
+                if any(v in self.mode for v in ["train", "valid"]):
+                    subgraph_dict.update({"y": label})
+                graph_dict.update({key: subgraph_dict})
+            
+            graph = HeteroData(graph_dict)
         return graph
     
     def len(self):
@@ -373,9 +391,9 @@ class Bayes_Attn_Net_Gated(nn.Module):
         A = a.mul(b)
         A = self.attention_c(A)  # N x n_classes
         return A
-
-class SurvivalGraphArch(nn.Module):
-    """define Graph architecture for survival analysis
+    
+class ImportanceScoreArch(nn.Module):
+    """define import score architecture
     """
     def __init__(
             self, 
@@ -397,7 +415,7 @@ class SurvivalGraphArch(nn.Module):
         self.conv_name = conv
 
         conv_dict = {
-            "MLP": [None, 1],
+            "MLP": [Linear, 1],
             "GCNConv": [GCNConv, 1],
             "GATConv": [GATConv, 1],
             "GINConv": [GINConv, 1], 
@@ -409,45 +427,130 @@ class SurvivalGraphArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
+                BatchNorm1d(out_dims),
                 ReLU(),
-                Dropout(self.dropout)
             )
         
         input_emb_dim = dim_features
         out_emb_dim = self.embedding_dims[0]
         self.head = create_block(input_emb_dim, out_emb_dim)
-        input_emb_dim = out_emb_dim
-        out_emb_dim = self.embedding_dims[-1]
+        self.tail = {
+            "MLP": Linear(self.embedding_dims[-1], dim_target),
+            "GCNConv": GCNConv(self.embedding_dims[-1], dim_target),
+            "GATConv": GATConv(self.embedding_dims[-1], dim_target),
+            "GINConv": Linear(self.embedding_dims[-1], dim_target),
+            "EdgeConv": Linear(self.embedding_dims[-1], dim_target)
+        }[self.conv_name]
 
-        # input_emb_dim = out_emb_dim
-        # for out_emb_dim in self.embedding_dims[1:]:
-        #     conv_class, alpha = conv_dict[self.conv_name]
-        #     if self.conv_name in ["GINConv", "EdgeConv"]:
-        #         block = create_block(alpha * input_emb_dim, out_emb_dim)
-        #         subnet = conv_class(block, **kwargs)
-        #         self.convs.append(subnet)
-        #         self.linears.append(Linear(out_emb_dim, out_emb_dim))
-        #     elif self.conv_name in ["GCNConv", "GATConv"]:
-        #         subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
-        #         self.convs.append(subnet)
-        #         self.linears.append(create_block(out_emb_dim, out_emb_dim))
-        #     else:
-        #         subnet = create_block(alpha * input_emb_dim, out_emb_dim)
-        #         self.convs.append(subnet)
-        #         self.linears.append(nn.Sequential())
+        input_emb_dim = out_emb_dim
+        for out_emb_dim in self.embedding_dims[1:]:
+            conv_class, alpha = conv_dict[self.conv_name]
+            if self.conv_name in ["GINConv", "EdgeConv"]:
+                block = create_block(alpha * input_emb_dim, out_emb_dim)
+                subnet = conv_class(block, **kwargs)
+                self.convs.append(subnet)
+                self.linears.append(Linear(out_emb_dim, out_emb_dim))
+            elif self.conv_name in ["GCNConv", "GATConv"]:
+                subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
+                self.convs.append(subnet)
+                self.linears.append(create_block(out_emb_dim, out_emb_dim))
+            else:
+                subnet = create_block(alpha * input_emb_dim, out_emb_dim)
+                self.convs.append(subnet)
+                self.linears.append(nn.Sequential())
                 
-        #     input_emb_dim = out_emb_dim
-            
-        self.gate_nn = Attn_Net_Gated(
-            L=input_emb_dim,
-            D=out_emb_dim,
-            dropout=0.25,
-            n_classes=1
-        )
-        self.global_attention = AttentionalAggregation(
-            gate_nn=self.gate_nn,
-            nn=None
-        )
+            input_emb_dim = out_emb_dim
+
+    def forward(self, feature, edge_index):
+        feature = self.head(feature)
+        for layer in range(1, self.num_layers):
+            feature = F.dropout(feature, p=self.dropout, training=self.training)
+            if self.conv_name in ["MLP"]:
+                feature = self.convs[layer - 1](feature)
+            else:
+                feature = self.convs[layer - 1](feature, edge_index)
+            feature = self.linears[layer - 1](feature)
+        if self.conv_name in ["MLP", "GINConv", "EdgeConv"]:
+            output = self.tail(feature)
+        else:
+            output = self.tail(feature, edge_index)
+        return output
+
+class SurvivalGraphArch(nn.Module):
+    """define Graph architecture for survival analysis
+    Args:
+        aggregation: attention-based multiple instance learning (ABMIL) 
+        or stochastic importance score informed regression (SISIR)
+    """
+    def __init__(
+            self, 
+            dim_features, 
+            dim_target,
+            layers=None,
+            dropout=0.0,
+            conv="GINConv",
+            keys=["radiomics", "pathomics"],
+            aggregation="SISIR",
+            **kwargs,
+    ):
+        super().__init__()
+        if layers is None:
+            layers = [6, 6]
+        self.dropout = dropout
+        self.embedding_dims = layers
+        self.keys = keys
+        self.aggregation = aggregation
+        self.num_layers = len(self.embedding_dims)
+        self.enc_convs = nn.ModuleList()
+        self.enc_linears = nn.ModuleList()
+        self.dec_convs = nn.ModuleList()
+        self.dec_linears = nn.ModuleList()
+        self.conv_name = conv
+        
+        def create_block(in_dims, out_dims):
+            return nn.Sequential(
+                Linear(in_dims, out_dims),
+                ReLU(),
+                Dropout(self.dropout)
+            )
+        
+        if len(keys) > 1:
+            out_emb_dim = self.embedding_dims[0]
+            self.enc_branches = {k: create_block(dim_features[k], out_emb_dim) for k in keys}
+            self.dec_branches = {k: create_block(out_emb_dim, dim_features[k]) for k in keys}
+            input_emb_dim = out_emb_dim
+            out_emb_dim = self.embedding_dims[0]
+        else:
+            input_emb_dim = dim_features
+            out_emb_dim = self.embedding_dims[0]
+
+        self.head = create_block(input_emb_dim, out_emb_dim)
+        input_emb_dim = out_emb_dim
+
+        if aggregation == "ABMIL":
+            self.gate_nn = Attn_Net_Gated(
+                L=input_emb_dim,
+                D=256,
+                dropout=0.25,
+                n_classes=1
+            )
+        elif aggregation == "SISIR":
+            self.gate_nn = ImportanceScoreArch(
+                dim_features=input_emb_dim,
+                dim_target=2,
+                layers=self.embedding_dims[1:],
+                dropout=self.dropout,
+                conv=self.conv_name
+            )
+            self.inverse_gate_nn = ImportanceScoreArch(
+                dim_features=2,
+                dim_target=input_emb_dim,
+                layers=self.embedding_dims[::-1],
+                dropout=self.dropout,
+                conv=self.conv_name
+            )
+        else:
+            raise NotImplementedError
         self.classifier = Linear(input_emb_dim, dim_target)
 
     def save(self, path):
@@ -458,21 +561,52 @@ class SurvivalGraphArch(nn.Module):
         state_dict = torch.load(path)
         self.load_state_dict(state_dict)
 
+    def sampling(self, data):
+        assert data.size(-1) == 2
+        loc, logscale = data[..., 0:1], data[..., 1:2]
+        gauss = torch.distributions.Normal(loc, torch.exp(logscale))
+        return gauss.sample(), [loc, logscale]
+
     def forward(self, data):
-        feature, edge_index, batch = data.x, data.edge_index, data.batch
+        if len(self.keys) > 1:
+            x_dict = data.x_dict
+            edge_index_dict = data.edge_index_dict
+            batch_dict = data.batch_dict
+            enc_list = [x_dict[k] for k in self.keys]
+            feature_list = [self.enc_branches(enc) for enc in enc_list]
+            feature = torch.concat(feature_list, dim=0)
+            edge_index_list = [edge_index_dict[k] for k in self.keys]
+            for i in range(len(edge_index_list)):
+                if i > 0:
+                    edge_index_list[i] += len(feature_list[i-1])
+            edge_index = torch.concat(edge_index_dict, dim=1)
+            batch_list = [batch_dict[k] for k in self.keys]
+            batch = torch.concat(batch_list, dim=0)
+        else:
+            enc_list = [data.x]
+            feature, edge_index, batch = data.x, data.edge_index, data.batch
 
         feature = self.head(feature)
-        # for layer in range(1, self.num_layers):
-        #     feature = F.dropout(feature, p=self.dropout, training=self.training)
-        #     if self.conv_name in ["MLP"]:
-        #         feature = self.convs[layer - 1](feature)
-        #     else:
-        #         feature = self.convs[layer - 1](feature, edge_index)
-        #     feature = self.linears[layer - 1](feature)
-
-        feature = self.global_attention(feature, index=batch)
+        if self.aggregation == "ABMIL":
+            gate = self.gate_nn(feature)
+            gate = softmax(gate, index=batch, dim=-2)
+            VIparas = None
+        elif self.aggregation == "SISIR":
+            # encoder
+            encode = self.gate_nn(feature)
+            # reparameterization
+            gate, VIparas = self.sampling(encode)
+            # decoder
+            decode = self.inverse_gate_nn(encode)
+            if len(self.keys) > 1:
+                dec_list = [self.dec_branches(decode) for _ in self.keys]
+            else:
+                dec_list = [decode]
+            VIparas.append(enc_list)
+            VIparas.append(dec_list)
+        feature = Aggregation.reduce(feature * gate, index=batch, dim=-2)
         output = self.classifier(feature)
-        return output
+        return output, VIparas
     
     @staticmethod
     def train_batch(model, batch_data, on_gpu, loss, optimizer, kl=None):
@@ -483,10 +617,10 @@ class SurvivalGraphArch(nn.Module):
 
         model.train()
         optimizer.zero_grad()
-        wsi_outputs = model(wsi_graphs)
+        wsi_outputs, VIparas = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze()
         wsi_labels = wsi_graphs.y.squeeze()
-        loss = loss(wsi_outputs, wsi_labels[:, 0], wsi_labels[:, 1])
+        loss = loss(wsi_outputs, wsi_labels[:, 0], wsi_labels[:, 1], VIparas)
         loss.backward()
         optimizer.step()
 
@@ -503,7 +637,7 @@ class SurvivalGraphArch(nn.Module):
 
         model.eval()
         with torch.inference_mode():
-            wsi_outputs = model(wsi_graphs)
+            wsi_outputs, _ = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
         if wsi_graphs.y is not None:
             wsi_labels = wsi_graphs.y.cpu().numpy()
@@ -1192,7 +1326,10 @@ class LHCELoss(nn.Module):
         return self.CrossEntropy(input, target)
     
 class CoxSurvLoss(object):
-    def __call__(self, hazards, time, c, **kwargs):
+    def __call__(self, hazards, time, c, VIparas, 
+                 mu0=0, lambda0=1, alpha0=2, beta0=1e-4, tau=0.1,
+                 **kwargs
+        ):
         # This calculation credit to Travers Ching https://github.com/traversc/cox-nnet
         # Cox-nnet: An artificial neural network method for prognosis prediction of high-throughput omics data
         current_batch_len = len(time)
@@ -1206,6 +1343,13 @@ class CoxSurvLoss(object):
         theta = hazards.reshape(-1)
         exp_theta = torch.exp(theta)
         loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * c)
+        if VIparas is not None:
+            loc, logscale, enc_list, dec_list = VIparas
+            mu_upsilon = (2*alpha0 + 1) / (2*beta0 + lambda0*(loc - mu0)**2 + lambda0*torch.exp(logscale))
+            mu_upsilon = mu_upsilon.clone().detach()
+            loss_kl = 0.5*torch.mean(lambda0*mu_upsilon*((loc - mu0)**2 + torch.exp(logscale)) - logscale)
+            loss_ae = tau*sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
+            loss_cox = loss_cox + loss_ae + loss_kl
         # print(loss_cox)
         # print(R_mat)
         return loss_cox
