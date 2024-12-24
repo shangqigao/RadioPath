@@ -892,7 +892,7 @@ if __name__ == "__main__":
     # use radiomics and pathomics
     class_name = ["kidney_and_mass", "mass", "tumour"][2]
     if aggregation:
-        radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}_radiomics.json"))
+        radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.json"))
     else:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json"))
     matched_pathomics_indices, matched_radiomics_indices = matched_pathomics_radiomics(
