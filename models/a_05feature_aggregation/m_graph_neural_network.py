@@ -520,9 +520,11 @@ class SurvivalGraphArch(nn.Module):
             self.dec_branches = {k: create_block(out_emb_dim, dim_features[k]) for k in keys}
             input_emb_dim = out_emb_dim
             out_emb_dim = self.embedding_dims[0]
-        else:
-            input_emb_dim = dim_features
+        elif len(keys) == 1:
+            input_emb_dim = dim_features[keys[0]]
             out_emb_dim = self.embedding_dims[0]
+        else:
+            raise NotImplementedError
 
         self.head = create_block(input_emb_dim, out_emb_dim)
         input_emb_dim = out_emb_dim

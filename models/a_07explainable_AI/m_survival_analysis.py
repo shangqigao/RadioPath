@@ -573,8 +573,7 @@ def run_once(
         loader_kwargs=None,
         arch_kwargs=None,
         optim_kwargs=None,
-        BayesGNN=False,
-        data_types=["radiomics", "pathomics"]
+        BayesGNN=False
 ):
     """running the inference or training loop once"""
     if loader_kwargs is None:
@@ -696,7 +695,8 @@ def training(
         batch_size=32,
         dropout=0,
         BayesGNN=False,
-        data_types=["radiomics", "pathomics"]
+        omic_keys=["radiomics", "pathomics"],
+        aggregation="SISIR"
 ):
     """train node classification neural networks
     Args:
@@ -717,9 +717,11 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [512, 384], # [16, 16, 8]
+        "layers": [512, 384, 64], # [16, 16, 8]
         "dropout": dropout,  #0.5
         "conv": conv,
+        "keys": omic_keys,
+        "aggregation": aggregation
     }
     if BayesGNN:
         model_dir = model_dir / f"Bayes_Survival_Prediction_{conv}"
@@ -748,7 +750,7 @@ def training(
             optim_kwargs=optim_kwargs,
             preproc_func=transform_dict,
             BayesGNN=BayesGNN,
-            data_types=data_types
+            omic_keys=omic_keys
         )
     return
 
@@ -848,7 +850,7 @@ if __name__ == "__main__":
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--radiomics_mode', default="SegVol", choices=["pyradiomics", "SegVol"], type=str)
-    parser.add_argument('--radiomics_dim', default=107, choices=[107], type=int)
+    parser.add_argument('--radiomics_dim', default=768, choices=[107, 768], type=int)
     args = parser.parse_args()
 
     ## get wsi path
@@ -957,8 +959,7 @@ if __name__ == "__main__":
         train=train_ratio,
         valid=valid_ratio,
         test=test_ratio,
-        num_folds=num_folds,
-        data_types=data_types
+        num_folds=num_folds
     )
     mkdir(save_model_dir)
     split_path = f"{save_model_dir}/survival_radiopathomics_splits.dat"
@@ -992,19 +993,19 @@ if __name__ == "__main__":
         joblib.dump(node_scaler, scaler_path)
 
     # training
-    data_types = ["radiomics", "pathomics"]
+    multi_omics = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
     split_path = f"{save_model_dir}/survival_radiopathomics_splits.dat"
-    scaler_paths = {k: f"{save_model_dir}/survival_{k}_scaler.dat" for k in data_types}
+    scaler_paths = {k: f"{save_model_dir}/survival_{k}_scaler.dat" for k in multi_omics.keys()}
     training(
         num_epochs=args.epochs,
         split_path=split_path,
         scaler_path=scaler_path,
-        num_node_features=args.node_features,
+        num_node_features=multi_omics,
         model_dir=save_model_dir,
-        conv="MLP",
+        conv="GINConv",
         n_works=8,
-        batch_size=32,
+        batch_size=8,
         dropout=0.1,
         BayesGNN=False,
-        data_types=data_types
+        omic_keys=list(multi_omics.keys())
     )
