@@ -878,7 +878,7 @@ if __name__ == "__main__":
     # survival analysis
     aggregation = True # false if load wsi-level features else true
     if aggregation:
-        pathomics_paths = [save_pathomics_dir / f"{p.stem}.MST.json" for p in wsi_paths]
+        pathomics_paths = [save_pathomics_dir / f"{p.stem}.json" for p in wsi_paths]
     else:
         pathomics_paths = [save_pathomics_dir / f"{p.stem}.WSI.features.npy" for p in wsi_paths]
 
@@ -1005,6 +1005,6 @@ if __name__ == "__main__":
         n_works=8,
         batch_size=32,
         dropout=0.1,
-        BayesGNN=True,
+        BayesGNN=False,
         data_types=data_types
     )
