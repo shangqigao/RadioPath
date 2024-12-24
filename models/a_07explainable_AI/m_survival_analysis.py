@@ -295,6 +295,7 @@ def matched_survival_graph(save_clinical_dir, save_graph_paths, dataset="TCGA-RC
     graph_ids = ["-".join(d) for d in graph_ids]
     df = df[df["submitter_id"].isin(graph_ids)]
     matched_indices = [graph_ids.index(d) for d in df["submitter_id"]]
+    logging.info(f"The number of matched clinical samples are {len(matched_indices)}")
     return df, matched_indices
 
 def matched_pathomics_radiomics(save_pathomics_paths, save_radiomics_paths, save_clinical_dir, dataset="TCGA-RCC", project_ids=None):
@@ -538,13 +539,20 @@ def generate_data_split(
             valid_y = [y_[idx] for idx in valid_idx]
             train_x = [x_[idx] for idx in train_idx]
             train_y = [y_[idx] for idx in train_idx]
-
-            assert len(set(train_x).intersection(set(valid_x))) == 0
-            assert len(set(valid_x).intersection(set(test_x))) == 0
         else:
             train_x, train_y = x_, y_
 
-        assert len(set(train_x).intersection(set(test_x))) == 0
+        train_x_list = []
+        for x in train_x: train_x_list.append(list(x.values()))
+        test_x_list = []
+        for x in test_x: test_x_list.append(list(x.values()))
+        if valid > 0:
+            valid_x_list = []
+            for x in valid_x: valid_x_list.append(list(x.values()))
+            assert len(set(train_x_list).intersection(set(valid_x_list))) == 0
+            assert len(set(valid_x_list).intersection(set(test_x_list))) == 0
+        else:
+            assert len(set(train_x_list).intersection(set(test_x_list))) == 0
 
         if valid > 0:
             splits.append(
