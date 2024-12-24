@@ -533,27 +533,40 @@ def generate_data_split(
         y_ = [y[idx] for idx in train_valid_idx]
         l_ = [l[idx] for idx in train_valid_idx]
 
-        train_idx, valid_idx = next(iter(inner_splitter.split(x_, l_)))
-        valid_x = [x_[idx] for idx in valid_idx]
-        valid_y = [y_[idx] for idx in valid_idx]
-        train_x = [x_[idx] for idx in train_idx]
-        train_y = [y_[idx] for idx in train_idx]
+        if valid > 0:
+            train_idx, valid_idx = next(iter(inner_splitter.split(x_, l_)))
+            valid_x = [x_[idx] for idx in valid_idx]
+            valid_y = [y_[idx] for idx in valid_idx]
+            train_x = [x_[idx] for idx in train_idx]
+            train_y = [y_[idx] for idx in train_idx]
 
-        assert len(set(train_x).intersection(set(valid_x))) == 0
-        assert len(set(valid_x).intersection(set(test_x))) == 0
+            assert len(set(train_x).intersection(set(valid_x))) == 0
+            assert len(set(valid_x).intersection(set(test_x))) == 0
+
+            valid_x = [{k: x[i] for i, k in enumerate(data_types)} for x in valid_x]
+        else:
+            train_x, train_y = x_, y_
+
         assert len(set(train_x).intersection(set(test_x))) == 0
 
         train_x = [{k: x[i] for i, k in enumerate(data_types)} for x in train_x]
-        valid_x = [{k: x[i] for i, k in enumerate(data_types)} for x in valid_x]
         test_x = [{k: x[i] for i, k in enumerate(data_types)} for x in test_x]
 
-        splits.append(
-            {
-                "train": list(zip(train_x, train_y)),
-                "valid": list(zip(valid_x, valid_y)),
-                "test": list(zip(test_x, test_y)),
-            }
-        )
+        if valid > 0:
+            splits.append(
+                {
+                    "train": list(zip(train_x, train_y)),
+                    "valid": list(zip(valid_x, valid_y)),
+                    "test": list(zip(test_x, test_y)),
+                }
+            )
+        else:
+            splits.append(
+                {
+                    "train": list(zip(train_x, train_y)),
+                    "test": list(zip(test_x, test_y)),
+                }
+            )
     return splits
 
 def run_once(
@@ -934,8 +947,8 @@ if __name__ == "__main__":
     # split data set
     num_folds = 5
     test_ratio = 0.2
-    train_ratio = 0.8 * 0.9
-    valid_ratio = 0.8 * 0.1
+    train_ratio = 0.8
+    valid_ratio = 0.0
     data_types = ["radiomics", "pathomics"]
     # stages=["Stage I", "Stage II"]
     df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
