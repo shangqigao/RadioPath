@@ -76,22 +76,14 @@ def construct_wsi_graph(wsi_paths, save_dir, n_jobs=8):
     )
     return 
 
-def expand_slice_coordinates(slice_coordinates, slice_index, dim=0):
-    slice_coordinates = np.array(slice_coordinates)
-    assert slice_coordinates.shape[1] == 2, "Slice coorinates should be two dimension"
-    coordinate = np.ones_like(slice_coordinates)[:, 0:1] * slice_index
-    expand_coordinates = np.concatenate([coordinate, ], axis=-1)
-    if dim == 0:
-        index = np.array([0, 1, 2])
-    elif dim == 1:
-        index = np.array([1, 0, 2])
-    elif dim == 2:
-        index = np.array([1, 2, 0])
-    else:
-        raise NotImplementedError
-    return expand_coordinates[:, index]
-
-def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="tumour", patch_size=(30, 30, 30), n_jobs=32):
+def construct_radiomic_graph(
+    img_name, 
+    img_feature_dir, 
+    save_path, 
+    class_name="tumour", 
+    patch_size=(30, 30, 30), 
+    n_jobs=32
+    ):
     """construct volumetric radiomic graph
     Args:
         patch_size (int): patch size for sliding window, reduce it if out of memory
@@ -102,82 +94,54 @@ def construct_radiomic_graph(img_name, img_feature_dir, save_path, class_name="t
     positions = np.reshape(positions, newshape=(z, x, y, -1))
     features = np.reshape(features, newshape=(z, x, y, -1))
     pz, px, py = patch_size
-    num_z = z // pz if z % pz == 0 else z // pz + 1
-    num_x = x // px if x % px == 0 else x // px + 1
-    num_y = y // py if y % py == 0 else y // py + 1
-    logging.info(f"Splitting input volumetric feature into {num_x*num_y*num_z} patches...")
 
-    start_z = [i*pz for i in range(num_z)]
-    end_z = [min((i+1)*pz, z) for i in range(num_z)]
-    start_x = [i*px for i in range(num_x)]
-    end_x = [min((i+1)*px, x) for i in range(num_x)]
-    start_y = [i*py for i in range(num_y)]
-    end_y = [min((i+1)*py, y) for i in range(num_y)]
-    start_Z, start_X, start_Y = np.meshgrid(start_z, start_x, start_y)
-    end_Z, end_X, end_Y = np.meshgrid(end_z, end_x, end_y)
+    start_Z, start_X, start_Y = np.mgrid[0:z:pz, 0:x:px, 0:y:py]
     start_Z, start_X, start_Y = start_Z.flatten(), start_X.flatten(), start_Y.flatten()
-    end_Z, end_X, end_Y = end_Z.flatten(), end_X.flatten(), end_Y.flatten()
+    end_Z, end_X, end_Y = start_Z + pz, start_X + px, start_Y + py
+    logging.info(f"Splitting input volumetric feature into {len(start_X)} patches...")
 
     def _construct_graph(i):
         sz, sx, sy = start_Z[i], start_X[i], start_Y[i]
-        ez, ex, ey = end_Z[i], end_X[i], end_Y[i]
-        conditions = [ez - sz == 1, ex - sx == 1, ey - sy == 1]
-        if np.array(conditions).sum() > 1:
+        ez, ex, ey = min(end_Z[i], z), min(end_X[i], x), min(end_Y[i], y)
+        lz, lx, ly = ez - sz, ex - sx, ey - sy
+        patch_positions = positions[sz:ez, sx:ex, sy:ey, :].reshape(lz*lx*ly, -1)
+        patch_features = features[sz:ez, sx:ex, sy:ey, :].reshape(lz*lx*ly, -1)
+        if lz*lx*ly < 4*pz*px:
             graph_dict = None
         else:
-            if conditions[0]:
-                dim, index = 0, np.array([1,2])
-                patch_positions = positions[sz, sx:ex, sy:ey, index].reshape(px*py, -1)
-                patch_features = features[sz, sx:ex, sy:ey, :].reshape(px*py, -1)
-            elif conditions[1]:
-                dim, index = 1, np.array([0,2])
-                patch_positions = positions[sz:ez, sx, sy:ey, index].reshape(pz*py, -1)
-                patch_features = features[sz:ez, sx, sy:ey, :].reshape(pz*py, -1)
-            elif conditions[2]:
-                dim, index = 2, np.array([0,1])
-                patch_positions = positions[sz:ez, sx:ex, sy, index].reshape(pz*px, -1)
-                patch_features = features[sz:ez, sx:ex, sy, :].reshape(pz*px, -1)
-            else:
-                patch_positions = positions[sz:ez, sx:ex, sy:ey, :].reshape(pz*px*py, -1)
-                patch_features = features[sz:ez, sx:ex, sy:ey, :].reshape(pz*px*py, -1)
-            
             graph_dict = SlideGraphConstructor.build(
                 patch_positions, 
                 patch_features, 
-                lambda_h = 0.4,
-                connectivity_distance = 8,
-                neighbour_search_radius = 4,
+                lambda_d=0.2,
+                lambda_f=0.1,
+                lambda_h=0.8,
+                connectivity_distance=8,
+                neighbour_search_radius=4,
                 feature_range_thresh=None
             )
-            # Expand coorinates to 3D in the case of 2D graph 
-            if any(conditions):
-                slice_index = patch_positions[0, 0, 0, dim]
-                graph_dict["coordinates"] = expand_slice_coordinates(graph_dict["coordinates"], slice_index, dim)
-                cluster_points = graph_dict["cluster_points"]
-                cluster_points = [expand_slice_coordinates(cps, slice_index, dim) for cps in cluster_points]
-                graph_dict["cluster_points"] = [cps.tolist() for cps in cluster_points]
         return {i: graph_dict}
     
     # construct graphs in parallel
     logging.info("Constructing graphs of patches in parallel...")
     list_graph_dicts = joblib.Parallel(n_jobs=n_jobs)(
-        joblib.delayed(_construct_graph)(i) for i in range(len(num_x*num_y*num_z))
+        joblib.delayed(_construct_graph)(i) for i in range(len(start_X))
     )
 
     # rearrange according to index
     all2one = {}
     for d in list_graph_dicts: all2one.update(d)
-    list_graph_dicts = [all2one[i] for i in range(len(num_x*num_y*num_z)) if all2one[i] is not None]
+    list_graph_dicts = [all2one[i] for i in range(len(start_X)) if all2one[i] is not None]
 
     # concatenate a list of graphs
     logging.info("Concatenating all graphs constructed from the splitted patches...")
     new_graph_dict = {k: [] for k in list_graph_dicts[0].keys()}
     for graph_dict in list_graph_dicts:
+        coordinate_shift = len(new_graph_dict["x"])
         for k, v in graph_dict.items():
-            if k == "cluster_points":
+            if k == "edge_index":
+                new_graph_dict[k] += (v.T + coordinate_shift).tolist()
+            elif k == "cluster_points":
                 new_graph_dict[k] += v
-            elif k == "edge_index":
-                new_graph_dict[k] += (v.T + len(new_graph_dict["x"])).tolist()
             else:
                 new_graph_dict[k] += v.tolist()
     num_nodes = len(new_graph_dict["x"])
@@ -800,11 +764,13 @@ def visualize_radiomic_graph(
         lab_path, 
         save_graph_dir,
         class_name="tumour",
+        save_name="radiomics",
         keys=["image", "label"],
         spacing=(1.024, 1.024, 1.024),
         padding=(4, 8, 8),
         NODE_SIZE = 1,
         EDGE_SIZE = 0.25,
+        remove_front_corner=True,
         n_jobs=32
     ):
     from models.a_04feature_extraction.m_feature_extraction import image_transforms
@@ -826,6 +792,11 @@ def visualize_radiomic_graph(
     node_coordinates = graph_dict["coordinates"]
     node_label = [label[int(c[0]), int(c[1]), int(c[2])] for c in node_coordinates]
     edges = graph_dict["edge_index"]
+    c = (np.array(e) + np.array(s)) // 2
+    def _condition(n, c): return any([n[0]<c[0], n[1]<c[1], n[2]<c[2]])
+    kept_nodes = [_condition(n, c) for n in node_coordinates]
+    edge_nodes = [(node_coordinates[p1], node_coordinates[p2]) for p1, p2 in edges]
+    kept_edges = [all([_condition(s, c), _condition(e, c)]) for s, e in edge_nodes]
     
     voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
     X, Y, Z = np.mgrid[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
@@ -839,18 +810,27 @@ def visualize_radiomic_graph(
         opacity=0.1, # needs to be small to see through all surfaces
         surface_count=17, # needs to be a large number for good volume rendering
         ))
-    fig.write_image("a_05feature_aggregation/image_voi.jpg")
+    fig.write_image(f"a_05feature_aggregation/image_voi_{save_name}.jpg")
 
     node_coordinates = np.array(node_coordinates) 
+    kept_nodes = np.array(kept_nodes)
+    if remove_front_corner:
+        X = node_coordinates[kept_nodes, 0]
+        Y = node_coordinates[kept_nodes, 1]
+        Z = node_coordinates[kept_nodes, 2]
+        node_color = np.array(node_label)[kept_nodes].tolist()
+    else:
+        X = node_coordinates[:, 0]
+        Y = node_coordinates[:, 1]
+        Z = node_coordinates[:, 2]
+        node_color = node_label
     fig = go.Figure()
     fig.add_trace(go.Scatter3d(
-        x=node_coordinates[:, 0],
-        y=node_coordinates[:, 1],
-        z=node_coordinates[:, 2],
+        x=X, y=Y, z=Z,
         mode='markers',
         marker=dict(
             size=NODE_SIZE,
-            color=node_label,  # Use scalar values to determine color
+            color=node_color,  # Use scalar values to determine color
             colorscale='Viridis',  # Choose a colormap (e.g., 'Viridis', 'Cividis', 'Plasma', etc.)
             colorbar=dict(title='Label')  # Add a colorbar to show the mapping
         ),
@@ -861,6 +841,9 @@ def visualize_radiomic_graph(
     y_coords = []
     z_coords = []
     edge_colors = []
+    edges = np.array(edges)
+    kept_edges = np.array(kept_edges)
+    if remove_front_corner: edges = edges[kept_edges].tolist()
     for edge in edges:
         p1, p2 = edge
         edge_colors.append(node_label[p1])
@@ -886,7 +869,7 @@ def visualize_radiomic_graph(
         ),
         margin=dict(l=0, r=0, b=0, t=40)
     )
-    fig.write_image("a_05feature_aggregation/image_graph.jpg")
+    fig.write_image(f"a_05feature_aggregation/image_graph_{save_name}.jpg")
     print("Visualization Done!")
     
 def pathomic_feature_visualization(wsi_paths, save_feature_dir, mode="tsne", save_label_dir=None, graph=True, n_class=None, features=None, colors=None):

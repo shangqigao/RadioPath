@@ -60,13 +60,13 @@ if __name__ == "__main__":
     #     )
 
     # construct image graph
-    construct_img_graph(
-        img_paths=img_paths,
-        save_dir=save_feature_dir,
-        class_name=class_name,
-        patch_size=(30, 30, 30),
-        n_jobs=32
-    )
+    # construct_img_graph(
+    #     img_paths=img_paths,
+    #     save_dir=save_feature_dir,
+    #     class_name=class_name,
+    #     patch_size=(30, 30, 30),
+    #     n_jobs=16
+    # )
 
     # visualize radiomics
     # radiomic_feature_visualization(
@@ -78,10 +78,12 @@ if __name__ == "__main__":
     # )
 
     # visualize radiomic graph
-    # visualize_radiomic_graph(
-    #     img_path=img_paths[0],
-    #     lab_path=lab_paths[0],
-    #     save_graph_dir=save_feature_dir,
-    #     class_name=class_name
-    # )
+    for i in range(0, 200, 20):
+        visualize_radiomic_graph(
+            img_path=img_paths[i],
+            lab_path=lab_paths[i],
+            save_graph_dir=save_feature_dir,
+            class_name=class_name,
+            save_name=i
+        )
 
