@@ -581,7 +581,8 @@ def run_once(
         loader_kwargs=None,
         arch_kwargs=None,
         optim_kwargs=None,
-        BayesGNN=False
+        BayesGNN=False,
+        data_types=["radiomics", "pathomics"]
 ):
     """running the inference or training loop once"""
     if loader_kwargs is None:
@@ -743,8 +744,7 @@ def training(
         new_split = {
             "train": split["train"],
             "infer-train": split["train"],
-            "infer-valid-A": split["valid"],
-            "infer-valid-B": split["test"],
+            "infer-valid": split["test"],
         }
         split_save_dir = pathlib.Path(f"{model_dir}/{split_idx:02d}/")
         rm_n_mkdir(split_save_dir)
@@ -758,7 +758,7 @@ def training(
             optim_kwargs=optim_kwargs,
             preproc_func=transform_dict,
             BayesGNN=BayesGNN,
-            omic_keys=omic_keys
+            data_types=omic_keys
         )
     return
 
@@ -1007,7 +1007,7 @@ if __name__ == "__main__":
     training(
         num_epochs=args.epochs,
         split_path=split_path,
-        scaler_path=scaler_path,
+        scaler_path=scaler_paths,
         num_node_features=multi_omics,
         model_dir=save_model_dir,
         conv="GINConv",
@@ -1015,5 +1015,6 @@ if __name__ == "__main__":
         batch_size=8,
         dropout=0.1,
         BayesGNN=False,
-        omic_keys=list(multi_omics.keys())
+        omic_keys=list(multi_omics.keys()),
+        aggregation="SISIR"
     )

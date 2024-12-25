@@ -14,7 +14,7 @@ from torch_geometric.data import Data, Dataset, HeteroData
 from torch_geometric.utils import subgraph, softmax
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATConv
 from torch_geometric.nn import global_mean_pool
-from torch_geometric.nn.aggr import Aggregation, AttentionalAggregation
+from torch_geometric.nn.aggr import SumAggregation, AttentionalAggregation
 
 
 
@@ -90,6 +90,7 @@ class SurvivalGraphDataset(Dataset):
             with pathlib.Path(graph_path[key]).open() as fptr:
                 graph_dict = json.load(fptr)
             graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
+            if key == "radiomics": graph_dict["edge_index"] = graph_dict["edge_index"].T
 
             if self.preproc is not None:
                 graph_dict["x"] = self.preproc[key](graph_dict["x"])
@@ -105,13 +106,17 @@ class SurvivalGraphDataset(Dataset):
                 with pathlib.Path(graph_path[key]).open() as fptr:
                     subgraph_dict = json.load(fptr)
                 subgraph_dict = {k: np.array(v) for k, v in subgraph_dict.items() if k != "cluster_points"}
+                if key == "radiomics": subgraph_dict["edge_index"] = subgraph_dict["edge_index"].T
                 if self.preproc is not None:
-                    subgraph_dict["x"] = self.preproc[key](graph_dict["x"])
+                    subgraph_dict["x"] = self.preproc[key](subgraph_dict["x"])
 
                 subgraph_dict = {k: torch.tensor(v) for k, v in subgraph_dict.items()}
                 if any(v in self.mode for v in ["train", "valid"]):
                     subgraph_dict.update({"y": label})
-                graph_dict.update({key: subgraph_dict})
+
+                edge_dict = {"edge_index": subgraph_dict["edge_index"].type(torch.int64)}
+                subgraph_dict = {k: v.type(torch.float32) for k, v in subgraph_dict.items() if k != "edge_index"}
+                graph_dict.update({key: subgraph_dict, (key, "to", key): edge_dict})
             
             graph = HeteroData(graph_dict)
         return graph
@@ -516,8 +521,8 @@ class SurvivalGraphArch(nn.Module):
         
         if len(keys) > 1:
             out_emb_dim = self.embedding_dims[0]
-            self.enc_branches = {k: create_block(dim_features[k], out_emb_dim) for k in keys}
-            self.dec_branches = {k: create_block(out_emb_dim, dim_features[k]) for k in keys}
+            self.enc_branches = nn.ModuleDict({k: create_block(dim_features[k], out_emb_dim) for k in keys})
+            self.dec_branches = nn.ModuleDict({k: create_block(out_emb_dim, dim_features[k]) for k in keys})
             input_emb_dim = out_emb_dim
             out_emb_dim = self.embedding_dims[0]
         elif len(keys) == 1:
@@ -553,6 +558,7 @@ class SurvivalGraphArch(nn.Module):
             )
         else:
             raise NotImplementedError
+        self.SumAggregation = SumAggregation()
         self.classifier = Linear(input_emb_dim, dim_target)
 
     def save(self, path):
@@ -575,13 +581,13 @@ class SurvivalGraphArch(nn.Module):
             edge_index_dict = data.edge_index_dict
             batch_dict = data.batch_dict
             enc_list = [x_dict[k] for k in self.keys]
-            feature_list = [self.enc_branches(enc) for enc in enc_list]
+            feature_list = [self.enc_branches[k](enc) for k, enc in zip(self.keys, enc_list)]
             feature = torch.concat(feature_list, dim=0)
-            edge_index_list = [edge_index_dict[k] for k in self.keys]
+            edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
             for i in range(len(edge_index_list)):
                 if i > 0:
                     edge_index_list[i] += len(feature_list[i-1])
-            edge_index = torch.concat(edge_index_dict, dim=1)
+            edge_index = torch.concat(edge_index_list, dim=1)
             batch_list = [batch_dict[k] for k in self.keys]
             batch = torch.concat(batch_list, dim=0)
         else:
@@ -595,18 +601,18 @@ class SurvivalGraphArch(nn.Module):
             VIparas = None
         elif self.aggregation == "SISIR":
             # encoder
-            encode = self.gate_nn(feature)
+            encode = self.gate_nn(feature, edge_index)
             # reparameterization
             gate, VIparas = self.sampling(encode)
             # decoder
-            decode = self.inverse_gate_nn(encode)
+            decode = self.inverse_gate_nn(encode, edge_index)
             if len(self.keys) > 1:
-                dec_list = [self.dec_branches(decode) for _ in self.keys]
+                dec_list = [self.dec_branches[k](decode) for k in self.keys]
             else:
                 dec_list = [decode]
             VIparas.append(enc_list)
             VIparas.append(dec_list)
-        feature = Aggregation.reduce(feature * gate, index=batch, dim=-2)
+        feature = self.SumAggregation(feature * gate, index=batch)
         output = self.classifier(feature)
         return output, VIparas
     
@@ -615,13 +621,16 @@ class SurvivalGraphArch(nn.Module):
         device = "cuda" if on_gpu else "cpu"
         wsi_graphs = batch_data.to(device)
 
-        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
-
         model.train()
         optimizer.zero_grad()
         wsi_outputs, VIparas = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze()
-        wsi_labels = wsi_graphs.y.squeeze()
+        if hasattr(wsi_graphs, y_dict):
+            wsi_labels = wsi_graphs.y_dict[model.keys[0]].squeeze()
+        elif hasattr(wsi_graphs, y):
+            wsi_labels = wsi_graphs.y.squeeze()
+        else:
+            raise AttributeError
         loss = loss(wsi_outputs, wsi_labels[:, 0], wsi_labels[:, 1], VIparas)
         loss.backward()
         optimizer.step()
@@ -635,17 +644,17 @@ class SurvivalGraphArch(nn.Module):
     def infer_batch(model, batch_data, on_gpu):
         device = "cuda" if on_gpu else "cpu"
         wsi_graphs = batch_data.to(device)
-        wsi_graphs.x = wsi_graphs.x.type(torch.float32)
 
         model.eval()
         with torch.inference_mode():
             wsi_outputs, _ = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
-        if wsi_graphs.y is not None:
+        wsi_labels = None
+        if hasattr(wsi_graphs, y_dict):
+            wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
+        elif hasattr(wsi_graphs, y):
             wsi_labels = wsi_graphs.y.cpu().numpy()
-
-            return [wsi_outputs, wsi_labels]
-        return [wsi_outputs]
+        return [wsi_outputs, wsi_labels]
 
 class SurvivalBayesGraphArch(nn.Module):
     """define Graph architecture for survival analysis
