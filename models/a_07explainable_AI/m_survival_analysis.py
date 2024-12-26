@@ -1168,52 +1168,52 @@ if __name__ == "__main__":
     logging.info(f"Number of testing samples: {num_test}.")
 
     # cox regression from the splits
-    cox_regression(
-        split_path=split_path,
-        l1_ratio=0.9,
-        used=["radiomics", "pathomics", "radiopathomics"][0],
-        n_jobs=32,
-        radiomics_aggregation=radiomics_aggregation,
-        pathomics_aggregation=pathomics_aggregation
-    )
+    # cox_regression(
+    #     split_path=split_path,
+    #     l1_ratio=0.9,
+    #     used=["radiomics", "pathomics", "radiopathomics"][0],
+    #     n_jobs=32,
+    #     radiomics_aggregation=radiomics_aggregation,
+    #     pathomics_aggregation=pathomics_aggregation
+    # )
 
     # compute mean and std on training data for normalization 
-    # splits = joblib.load(split_path)
-    # train_graph_paths = [path for path, _ in splits[0]["train"]]
-    # loader = SurvivalGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
-    # loader = DataLoader(
-    #     loader,
-    #     num_workers=8,
-    #     batch_size=1,
-    #     shuffle=False,
-    #     drop_last=False,
-    # )
-    # omic_features = [{k: v.x_dict[k].numpy() for k in data_types} for v in loader]
-    # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
-    # for k, v in omics_modes.items():
-    #     node_features = [d[k] for d in omic_features]
-    #     node_features = np.concatenate(node_features, axis=0)
-    #     node_scaler = StandardScaler(copy=False)
-    #     node_scaler.fit(node_features)
-    #     scaler_path = f"{save_model_dir}/survival_{k}_{v}_scaler.dat"
-    #     joblib.dump(node_scaler, scaler_path)
+    splits = joblib.load(split_path)
+    train_graph_paths = [path for path, _ in splits[0]["train"]]
+    loader = SurvivalGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
+    loader = DataLoader(
+        loader,
+        num_workers=8,
+        batch_size=1,
+        shuffle=False,
+        drop_last=False,
+    )
+    omic_features = [{k: v.x_dict[k].numpy() for k in data_types} for v in loader]
+    omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
+    for k, v in omics_modes.items():
+        node_features = [d[k] for d in omic_features]
+        node_features = np.concatenate(node_features, axis=0)
+        node_scaler = StandardScaler(copy=False)
+        node_scaler.fit(node_features)
+        scaler_path = f"{save_model_dir}/survival_{k}_{v}_scaler.dat"
+        joblib.dump(node_scaler, scaler_path)
 
     # training
-    # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
-    # omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
-    # split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
-    # scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    # training(
-    #     num_epochs=args.epochs,
-    #     split_path=split_path,
-    #     scaler_path=scaler_paths,
-    #     num_node_features=omics_dims,
-    #     model_dir=save_model_dir,
-    #     conv="GINConv",
-    #     n_works=8,
-    #     batch_size=32,
-    #     dropout=0.5,
-    #     BayesGNN=False,
-    #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "SISIR"][0]
-    # )
+    omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
+    omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
+    split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
+    scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    training(
+        num_epochs=args.epochs,
+        split_path=split_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        model_dir=save_model_dir,
+        conv="GINConv",
+        n_works=8,
+        batch_size=32,
+        dropout=0.5,
+        BayesGNN=False,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "SISIR"][0]
+    )
