@@ -489,6 +489,171 @@ def cox_proportional_hazard_regression(
     print("Best performance:", coxnet_pred.score(df_prop, df_clinical))
     return
 
+def cox_regression(
+        split_path,
+        l1_ratio=1.0, 
+        stages=None,
+        used="all", 
+        n_jobs=32,
+        aggregation=False,
+        dataset="TCGA-RCC"
+        ):
+    # prepare clinical data
+    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, save_pathomics_paths, dataset, stages)
+    num_dead = df_clinical['event'].value_counts()[True]
+    num_alive = df_clinical['event'].value_counts()[False]
+    df_clinical = df_clinical[['event', 'duration']].to_records(index=False)
+    print("Selected survival data:", df_clinical.shape)
+    print(f"Dead cases: {num_dead}, Alive cases: {num_alive}")
+
+    # Prepare graph-based pathomics
+    save_properties_paths = []
+    for p in save_pathomics_paths:
+        name = pathlib.Path(p).stem
+        if ".WSI.features" in name:
+            save_properties_paths.append(f"{p}".replace(".WSI.features.npy", ".MST.subgraphs.properties.json")) 
+        elif ".MST" in name:
+            save_properties_paths.append(f"{p}".replace(".MST.json", ".MST.subgraphs.properties.json"))
+        else:
+            raise NotImplementedError
+    matched_properties_paths = [save_properties_paths[i] for i in matched_i]
+    pathomics_list = [load_json(p) for p in matched_properties_paths]
+    pathomics_list = [prepare_graph_properties(p, pathomics_keys) for p in pathomics_list]
+    df_pathomics = pd.DataFrame(pathomics_list)
+    # df_prop = OneHotEncoder().fit_transform(df_prop)
+    print("Selected pathomic properties:", df_pathomics.shape)
+    print(df_pathomics.head())
+
+    # prepare radiomics
+    if save_radiomics_paths is not None:
+        matched_radiomics_paths = [save_radiomics_paths[i] for i in matched_i]
+        if aggregation:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(prepare_graph_radiomics)(idx, graph_path)
+                for idx, graph_path in enumerate(matched_radiomics_paths)
+            )
+        else:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(load_pyradiomic_properties)(idx, graph_path, radiomics_keys)
+                for idx, graph_path in enumerate(matched_radiomics_paths)
+            )
+        radiomics_dict = {}
+        for d in dict_list: radiomics_dict.update(d)
+        radiomics_list = [radiomics_dict[f"{i}"] for i in range(len(matched_radiomics_paths))]
+        df_radiomics = pd.DataFrame(radiomics_list)
+        print("Selected radiomic properties:", df_radiomics.shape)
+        print(df_radiomics.head())
+
+
+    # Prepare WSI-level features
+    selected_graph_paths = [save_pathomics_paths[i] for i in matched_i]
+    if aggregation:
+        dict_list = joblib.Parallel(n_jobs=n_jobs)(
+            joblib.delayed(prepare_graph_pathomics)(idx, graph_path)
+            for idx, graph_path in enumerate(selected_graph_paths)
+        )
+    else:
+        dict_list = joblib.Parallel(n_jobs=n_jobs)(
+            joblib.delayed(load_wsi_level_features)(idx, graph_path)
+            for idx, graph_path in enumerate(selected_graph_paths)
+        )
+    feat_dict = {}
+    for d in dict_list: feat_dict.update(d)
+    feat_list = [feat_dict[f"{i}"] for i in range(len(selected_graph_paths))]
+
+    df_feat = pd.DataFrame(feat_list)
+    print("Selected WSI-level features:", df_feat.shape)
+    print(df_feat.head())
+
+    # Concatenate final features for regression
+    if used == "all":
+        df_prop = pd.concat([df_pathomics, df_radiomics, df_feat], axis=1)
+    elif used == "radiopathomics":
+        df_prop = pd.concat([df_pathomics, df_radiomics], axis=1)
+    elif used == "radioDeepPathomics":
+        df_prop = pd.concat([df_radiomics, df_feat], axis=1)
+    elif used == "pathoDeepPathomics":
+        df_prop = pd.concat([df_pathomics, df_feat], axis=1)
+    elif used == "pathomics":
+        df_prop = df_pathomics
+    elif used == "radiomics":
+        df_prop = df_radiomics
+    elif used == "deep_pathomics":
+        df_prop = df_feat
+    else:
+        raise NotImplementedError
+    # df_prop = df_prop.apply(zscore)
+    print("Selected features for regression:", df_prop.shape)
+    print(df_prop.head())
+
+    # COX regreession
+    cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio="auto")
+    cox_elastic_net.fit(df_prop, df_clinical)
+    coefficients = pd.DataFrame(cox_elastic_net.coef_, index=df_prop.columns, columns=np.round(cox_elastic_net.alphas_, 5))
+    
+    plot_coefficients(coefficients, n_highlight=5)
+
+    # choosing penalty strength by cross validation
+    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio="auto", max_iter=1000)
+    coxnet_pipe = make_pipeline(StandardScaler(), cox)
+    warnings.simplefilter("ignore", UserWarning)
+    warnings.simplefilter("ignore", FitFailedWarning)
+    coxnet_pipe.fit(df_prop, df_clinical)
+    estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
+    cv = KFold(n_splits=10, shuffle=True, random_state=0)
+    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
+    gcv = GridSearchCV(
+        make_pipeline(StandardScaler(), cox),
+        param_grid={"coxnetsurvivalanalysis__alphas": [[v] for v in estimated_alphas]},
+        cv=cv,
+        error_score=0.5,
+        n_jobs=1,
+    ).fit(df_prop, df_clinical)
+
+    # plot cross validation results
+    cv_results = pd.DataFrame(gcv.cv_results_)
+    alphas = cv_results.param_coxnetsurvivalanalysis__alphas.map(lambda x: x[0])
+    mean = cv_results.mean_test_score
+    std = cv_results.std_test_score
+    print("Best CV performance:", np.max(mean))
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(alphas, mean)
+    ax.fill_between(alphas, mean - std, mean + std, alpha=0.15)
+    ax.set_xscale("log")
+    ax.set_ylabel("concordance index")
+    ax.set_xlabel("alpha")
+    ax.axvline(gcv.best_params_["coxnetsurvivalanalysis__alphas"][0], c="C1")
+    ax.axhline(0.5, color="grey", linestyle="--")
+    ax.grid(True)
+    plt.savefig("a_07explainable_AI/cross_validation.jpg")
+
+    # Visualize coefficients of the best estimator
+    best_model = gcv.best_estimator_.named_steps["coxnetsurvivalanalysis"]
+    best_coefs = pd.DataFrame(best_model.coef_, index=df_prop.columns, columns=["coefficient"])
+
+    non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
+    print(f"Number of non-zero coefficients: {non_zero}")
+
+    non_zero_coefs = best_coefs.query("coefficient != 0")
+    coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+
+    _, ax = plt.subplots(figsize=(8, 6))
+    non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
+    ax.set_xlabel("coefficient")
+    ax.grid(True)
+    plt.subplots_adjust(left=0.3)
+    plt.savefig("a_07explainable_AI/best_coefficients.jpg") 
+
+    # perform prediction using the best params
+    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True)
+
+    coxnet_pred = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True))
+    coxnet_pred.set_params(**gcv.best_params_)
+    coxnet_pred.fit(df_prop, df_clinical)
+    print("Best performance:", coxnet_pred.score(df_prop, df_clinical))
+    return
+
 def generate_data_split(
         x: list,
         y: list,
