@@ -498,7 +498,8 @@ def cox_regression(
         l1_ratio=1.0, 
         used="all", 
         n_jobs=32,
-        aggregation=False
+        radiomics_aggregation=False,
+        pathomics_aggregation=False
         ):
     splits = joblib.load(split_path)
     cv_results = {}
@@ -515,7 +516,7 @@ def cox_regression(
 
         # prepare radiomics
         radiomics_tr_paths = [p[0]["radiomics"] for p in data_tr]
-        if aggregation:
+        if radiomics_aggregation:
             dict_list = joblib.Parallel(n_jobs=n_jobs)(
                 joblib.delayed(prepare_graph_radiomics)(idx, graph_path)
                 for idx, graph_path in enumerate(radiomics_tr_paths)
@@ -533,7 +534,7 @@ def cox_regression(
         print(radiomics_tr_X.head())
 
         radiomics_te_paths = [p[0]["radiomics"] for p in data_te]
-        if aggregation:
+        if radiomics_aggregation:
             dict_list = joblib.Parallel(n_jobs=n_jobs)(
                 joblib.delayed(prepare_graph_radiomics)(idx, graph_path)
                 for idx, graph_path in enumerate(radiomics_te_paths)
@@ -553,7 +554,7 @@ def cox_regression(
 
         # Prepare pathomics
         pathomics_tr_paths = [p[0]["pathomics"] for p in data_tr]
-        if aggregation:
+        if pathomics_aggregation:
             dict_list = joblib.Parallel(n_jobs=n_jobs)(
                 joblib.delayed(prepare_graph_pathomics)(idx, graph_path, pathomics_keys)
                 for idx, graph_path in enumerate(pathomics_tr_paths)
@@ -571,7 +572,7 @@ def cox_regression(
         print(pathomics_tr_X.head())
 
         pathomics_te_paths = [p[0]["pathomics"] for p in data_te]
-        if aggregation:
+        if pathomics_aggregation:
             dict_list = joblib.Parallel(n_jobs=n_jobs)(
                 joblib.delayed(prepare_graph_pathomics)(idx, graph_path, pathomics_keys)
                 for idx, graph_path in enumerate(pathomics_te_paths)
@@ -1071,8 +1072,8 @@ if __name__ == "__main__":
     # plot_survival_curve(save_clinical_dir)
 
     # survival analysis
-    aggregation = True # false if load wsi-level features else true
-    if aggregation:
+    pathomics_aggregation = True # false if load wsi-level features else true
+    if pathomics_aggregation:
         pathomics_paths = [save_pathomics_dir / f"{p.stem}.json" for p in wsi_paths]
     else:
         pathomics_paths = [save_pathomics_dir / f"{p.stem}.WSI.features.npy" for p in wsi_paths]
@@ -1084,7 +1085,8 @@ if __name__ == "__main__":
 
     # use radiomics and pathomics
     class_name = ["kidney_and_mass", "mass", "tumour"][2]
-    if aggregation:
+    radiomics_aggregation = True # false if load image-level features else true
+    if radiomics_aggregation:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.json"))
     else:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json"))
@@ -1133,39 +1135,49 @@ if __name__ == "__main__":
     #     dataset=args.dataset
     # )
 
-    # # split data set
-    # num_folds = 5
-    # test_ratio = 0.2
-    # train_ratio = 0.8
-    # valid_ratio = 0.0
-    # data_types = ["radiomics", "pathomics"]
-    # # stages=["Stage I", "Stage II"]
-    # df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    # y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
-    # matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
-    # kr, kp = data_types[0], data_types[1]
-    # matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
-    # splits = generate_data_split(
-    #     x=matched_graph_paths,
-    #     y=y,
-    #     train=train_ratio,
-    #     valid=valid_ratio,
-    #     test=test_ratio,
-    #     num_folds=num_folds
-    # )
-    # mkdir(save_model_dir)
-    # split_path = f"{save_model_dir}/survival_radiopathomics_splits.dat"
-    # joblib.dump(splits, split_path)
-    # splits = joblib.load(split_path)
-    # num_train = len(splits[0]["train"])
-    # logging.info(f"Number of training samples: {num_train}.")
-    # # num_valid = len(splits[0]["valid"])
-    # # logging.info(f"Number of validating samples: {num_valid}.")
-    # num_test = len(splits[0]["test"])
-    # logging.info(f"Number of testing samples: {num_test}.")
+    # split data set
+    num_folds = 5
+    test_ratio = 0.2
+    train_ratio = 0.8
+    valid_ratio = 0.0
+    data_types = ["radiomics", "pathomics"]
+    # stages=["Stage I", "Stage II"]
+    df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
+    matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
+    kr, kp = data_types[0], data_types[1]
+    matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
+    splits = generate_data_split(
+        x=matched_graph_paths,
+        y=y,
+        train=train_ratio,
+        valid=valid_ratio,
+        test=test_ratio,
+        num_folds=num_folds
+    )
+    mkdir(save_model_dir)
+    split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
+    joblib.dump(splits, split_path)
+    splits = joblib.load(split_path)
+    num_train = len(splits[0]["train"])
+    logging.info(f"Number of training samples: {num_train}.")
+    # num_valid = len(splits[0]["valid"])
+    # logging.info(f"Number of validating samples: {num_valid}.")
+    num_test = len(splits[0]["test"])
+    logging.info(f"Number of testing samples: {num_test}.")
 
-    # # compute mean and std on training data for normalization 
+    # cox regression from the splits
+    cox_regression(
+        split_path=split_path,
+        l1_ratio=0.9,
+        used=["radiomics", "pathomics", "radiopathomics"][0],
+        n_jobs=32,
+        radiomics_aggregation=radiomics_aggregation,
+        pathomics_aggregation=pathomics_aggregation
+    )
+
+    # compute mean and std on training data for normalization 
     # splits = joblib.load(split_path)
     # train_graph_paths = [path for path, _ in splits[0]["train"]]
     # loader = SurvivalGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
@@ -1177,29 +1189,31 @@ if __name__ == "__main__":
     #     drop_last=False,
     # )
     # omic_features = [{k: v.x_dict[k].numpy() for k in data_types} for v in loader]
-    # for k in data_types:
+    # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
+    # for k, v in omics_modes.items():
     #     node_features = [d[k] for d in omic_features]
     #     node_features = np.concatenate(node_features, axis=0)
     #     node_scaler = StandardScaler(copy=False)
     #     node_scaler.fit(node_features)
-    #     scaler_path = f"{save_model_dir}/survival_{k}_scaler.dat"
+    #     scaler_path = f"{save_model_dir}/survival_{k}_{v}_scaler.dat"
     #     joblib.dump(node_scaler, scaler_path)
 
     # training
-    multi_omics = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
-    split_path = f"{save_model_dir}/survival_radiopathomics_splits.dat"
-    scaler_paths = {k: f"{save_model_dir}/survival_{k}_scaler.dat" for k in multi_omics.keys()}
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_paths,
-        num_node_features=multi_omics,
-        model_dir=save_model_dir,
-        conv="GINConv",
-        n_works=8,
-        batch_size=32,
-        dropout=0.5,
-        BayesGNN=False,
-        omic_keys=list(multi_omics.keys()),
-        aggregation=["ABMIL", "SISIR"][0]
-    )
+    # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
+    # omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
+    # split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
+    # scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     model_dir=save_model_dir,
+    #     conv="GINConv",
+    #     n_works=8,
+    #     batch_size=32,
+    #     dropout=0.5,
+    #     BayesGNN=False,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "SISIR"][0]
+    # )
