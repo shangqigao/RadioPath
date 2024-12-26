@@ -432,8 +432,8 @@ class ImportanceScoreArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                BatchNorm1d(out_dims),
                 ReLU(),
+                Dropout(self.dropout)
             )
         
         input_emb_dim = dim_features
@@ -469,7 +469,6 @@ class ImportanceScoreArch(nn.Module):
     def forward(self, feature, edge_index):
         feature = self.head(feature)
         for layer in range(1, self.num_layers):
-            feature = F.dropout(feature, p=self.dropout, training=self.training)
             if self.conv_name in ["MLP"]:
                 feature = self.convs[layer - 1](feature)
             else:
@@ -572,6 +571,7 @@ class SurvivalGraphArch(nn.Module):
     def sampling(self, data):
         assert data.size(-1) == 2
         loc, logscale = data[..., 0:1], data[..., 1:2]
+        logscale = torch.clip(logscale, min=-20, max=20)
         gauss = torch.distributions.Normal(loc, torch.exp(logscale))
         return gauss.sample(), [loc, logscale]
 
@@ -584,9 +584,12 @@ class SurvivalGraphArch(nn.Module):
             feature_list = [self.enc_branches[k](enc) for k, enc in zip(self.keys, enc_list)]
             feature = torch.concat(feature_list, dim=0)
             edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
-            for i in range(len(edge_index_list)):
-                if i > 0:
-                    edge_index_list[i] += len(feature_list[i-1])
+            # check = [[len(f), e.max().item()] for f, e in zip(feature_list, edge_index_list)]
+            # print("Number of nodes and edge index: ", check)
+            index_shift = 0
+            for i in range(1, len(edge_index_list)): 
+                index_shift += len(feature_list[i-1])
+                edge_index_list[i] += index_shift
             edge_index = torch.concat(edge_index_list, dim=1)
             batch_list = [batch_dict[k] for k in self.keys]
             batch = torch.concat(batch_list, dim=0)
@@ -606,8 +609,13 @@ class SurvivalGraphArch(nn.Module):
             gate, VIparas = self.sampling(encode)
             # decoder
             decode = self.inverse_gate_nn(encode, edge_index)
+
             if len(self.keys) > 1:
-                dec_list = [self.dec_branches[k](decode) for k in self.keys]
+                dec_list, index_s, index_e = [], 0, 0
+                for i, k in enumerate(self.keys):
+                    index_e += len(enc_list[i])
+                    dec_list.append(self.dec_branches[k](decode[index_s:index_e, ...]))
+                    index_s = index_e
             else:
                 dec_list = [decode]
             VIparas.append(enc_list)
@@ -625,9 +633,9 @@ class SurvivalGraphArch(nn.Module):
         optimizer.zero_grad()
         wsi_outputs, VIparas = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze()
-        if hasattr(wsi_graphs, y_dict):
+        if hasattr(wsi_graphs, "y_dict"):
             wsi_labels = wsi_graphs.y_dict[model.keys[0]].squeeze()
-        elif hasattr(wsi_graphs, y):
+        elif hasattr(wsi_graphs, "y"):
             wsi_labels = wsi_graphs.y.squeeze()
         else:
             raise AttributeError
@@ -650,9 +658,9 @@ class SurvivalGraphArch(nn.Module):
             wsi_outputs, _ = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
         wsi_labels = None
-        if hasattr(wsi_graphs, y_dict):
+        if hasattr(wsi_graphs, "y_dict"):
             wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
-        elif hasattr(wsi_graphs, y):
+        elif hasattr(wsi_graphs, "y"):
             wsi_labels = wsi_graphs.y.cpu().numpy()
         return [wsi_outputs, wsi_labels]
 

@@ -607,7 +607,7 @@ def run_once(
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)
-    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=1e-6)
+    lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-6)
 
     loader_dict = {}
     for subset_name, subset in dataset_dict.items():
@@ -726,7 +726,7 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [384, 64, 16, 8], # [16, 16, 8]
+        "layers": [512, 384, 64, 16], # [16, 16, 8]
         "dropout": dropout,  #0.5
         "conv": conv,
         "keys": omic_keys,
@@ -1012,9 +1012,9 @@ if __name__ == "__main__":
         model_dir=save_model_dir,
         conv="GINConv",
         n_works=8,
-        batch_size=32,
-        dropout=0.5,
+        batch_size=8,
+        dropout=0.1,
         BayesGNN=False,
         omic_keys=list(multi_omics.keys()),
-        aggregation=["ABMIL", "SISIR"][0]
+        aggregation=["ABMIL", "SISIR"][1]
     )

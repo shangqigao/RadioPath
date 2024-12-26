@@ -6,7 +6,7 @@
 ##SBATCH --gres=gpu:ampere_a100:1
 #SBATCH --gres=gpu:lovelace_l40:1
 #SBATCH --partition=gpu
-#SBATCH --time=32:00:00
+#SBATCH --time=48:00:00
 #SBATCH --account=su123
 
 ## activate environment
