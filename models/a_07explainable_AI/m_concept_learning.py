@@ -945,9 +945,9 @@ def training(
         "aggregation": aggregation
     }
     if BayesGNN:
-        model_dir = model_dir / f"Bayes_Survival_Prediction_{conv}_{aggregation}"
+        model_dir = model_dir / f"CL_Bayes_Survival_Prediction_{conv}_{aggregation}"
     else:
-        model_dir = model_dir / f"Survival_Prediction_{conv}_{aggregation}"
+        model_dir = model_dir / f"CL_Survival_Prediction_{conv}_{aggregation}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
@@ -1147,7 +1147,7 @@ if __name__ == "__main__":
     # compute mean and std on training data for normalization 
     splits = joblib.load(split_path)
     train_graph_paths = [path for path, _ in splits[0]["train"]]
-    loader = SurvivalGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
+    loader = ConceptGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
     loader = DataLoader(
         loader,
         num_workers=8,
