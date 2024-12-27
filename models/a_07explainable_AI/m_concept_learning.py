@@ -33,11 +33,13 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegression as PlattScaling
+from sklearn.metrics import roc_auc_score as auroc_scorer
+from sklearn.metrics import accuracy_score as acc_scorer
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
-from models.a_05feature_aggregation.m_graph_neural_network import SurvivalGraphDataset, SurvivalGraphArch, SurvivalBayesGraphArch
-from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage, CoxSurvLoss
+from models.a_05feature_aggregation.m_graph_neural_network import ConceptGraphDataset, ConceptGraphArch
+from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage, CoxSurvConceptLoss
 
 
 
@@ -298,6 +300,22 @@ def matched_survival_graph(save_clinical_dir, save_graph_paths, dataset="TCGA-RC
     df = df[df["submitter_id"].isin(graph_ids)]
     matched_indices = [graph_ids.index(d) for d in df["submitter_id"]]
     logging.info(f"The number of matched clinical samples are {len(matched_indices)}")
+    return df, matched_indices
+
+def matched_concepts_graph(save_concept_dir, save_graph_paths, dataset="TCGA-RCC", stages=None):
+    df = pd.read_csv(f"{save_concept_dir}/{dataset}_pathological_concepts.csv")
+    
+    # Prepare the concept data
+    df = df.apply(lambda x: True if x == 'TRUE' else False)
+    print("Survival data strcuture:", df.shape)
+
+    # filter graph properties 
+    graph_names = [pathlib.Path(p).stem for p in save_graph_paths]
+    graph_ids = [f"{n}".split("-")[0:3] for n in graph_names]
+    graph_ids = ["-".join(d) for d in graph_ids]
+    df = df[df["index"].isin(graph_ids)]
+    matched_indices = [graph_ids.index(d) for d in df["index"]]
+    logging.info(f"The number of matched samples are {len(matched_indices)}")
     return df, matched_indices
 
 def matched_pathomics_radiomics(save_pathomics_paths, save_radiomics_paths, save_clinical_dir, dataset="TCGA-RCC", project_ids=None):
@@ -709,7 +727,7 @@ def generate_data_split(
         random_state=seed,
     )
 
-    l = np.array([status for _, status in y])
+    l = np.array([i["label"][1] for i in y])
 
     splits = []
     for train_valid_idx, test_idx in outer_splitter.split(x, l):
@@ -767,8 +785,7 @@ def run_once(
         loader_kwargs=None,
         arch_kwargs=None,
         optim_kwargs=None,
-        BayesGNN=False,
-        data_types=["radiomics", "pathomics"]
+        data_types=["pathomics"]
 ):
     """running the inference or training loop once"""
     if loader_kwargs is None:
@@ -780,16 +797,11 @@ def run_once(
     if optim_kwargs is None:
         optim_kwargs = {}
 
-    if BayesGNN:
-        model = SurvivalBayesGraphArch(**arch_kwargs)
-        kl = {"loss": bnn.BKLLoss(), "weight": 0.1}
-    else:
-        model = SurvivalGraphArch(**arch_kwargs)
-        kl = None
+    model = ConceptGraphArch(**arch_kwargs)
     if pretrained is not None:
         model.load(*pretrained)
     model = model.to("cuda")
-    loss = CoxSurvLoss()
+    loss = CoxSurvConceptLoss()
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)
@@ -798,7 +810,7 @@ def run_once(
     loader_dict = {}
     for subset_name, subset in dataset_dict.items():
         _loader_kwargs = copy.deepcopy(loader_kwargs)
-        ds = SurvivalGraphDataset(
+        ds = ConceptGraphDataset(
             subset, 
             mode=subset_name, 
             preproc=preproc_func,
@@ -819,7 +831,7 @@ def run_once(
             pbar = create_pbar(loader_name, len(loader))
             for step, batch_data in enumerate(loader):
                 if loader_name == "train":
-                    output = model.train_batch(model, batch_data, on_gpu, loss, optimizer, kl)
+                    output = model.train_batch(model, batch_data, on_gpu, loss, optimizer)
                     ema({"loss": output[0]})
                     pbar.postfix[1]["step"] = step
                     pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
@@ -839,13 +851,24 @@ def run_once(
                     logging_dict[f"train-EMA-{val_name}"] = val
             elif "infer" in loader_name and any(v in loader_name for v in ["train", "valid"]):
                 output = list(zip(*step_output))
-                logit, true = output
+                logit, true, concept_logit, concept_true = output
                 logit = np.array(logit).squeeze()
                 true = np.array(true).squeeze()
+                concept_logit = np.array(concept_logit).squeeze()
+                concept_prob = 1 / (1 + np.exp(-concept_logit))
+                concept_label = (concept_prob > 0.5).astype(np.int8)
+                concept_true = np.array(concept_true).squeeze().astype(np.int8)
                 event_status = true[:, 1] > 0
                 event_time = true[:, 0]
+
                 cindex = concordance_index_censored(event_status, event_time, logit)[0]
                 logging_dict[f"{loader_name}-Cindex"] = cindex
+
+                val = acc_scorer(concept_label, concept_true)
+                logging_dict[f"{loader_name}-acc"] = val
+
+                val = auroc_scorer(concept_true, concept_prob)
+                logging_dict[f"{loader_name}-auroc"] = val
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
                 logging_dict[f"{loader_name}-raw-true"] = true
@@ -884,14 +907,15 @@ def training(
         split_path,
         scaler_path,
         num_node_features,
+        num_concepts,
         model_dir,
         conv="GCNConv",
         n_works=32,
         batch_size=32,
         dropout=0,
         BayesGNN=False,
-        omic_keys=["radiomics", "pathomics"],
-        aggregation="SISIR"
+        omic_keys=["pathomics"],
+        aggregation="CBM"
 ):
     """train node classification neural networks
     Args:
@@ -911,6 +935,7 @@ def training(
     }
     arch_kwargs = {
         "dim_features": num_node_features,
+        "dim_concept": num_concepts,
         "dim_target": 1,
         "layers": [384, 64, 16, 8], # [16, 16, 8]
         "dropout": dropout,  #0.5
@@ -1043,8 +1068,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', default=50, type=int)
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
-    parser.add_argument('--radiomics_mode', default="SegVol", choices=["pyradiomics", "SegVol"], type=str)
-    parser.add_argument('--radiomics_dim', default=768, choices=[107, 768], type=int)
+    parser.add_argument('--num_concepts', default=39, type=int)
     args = parser.parse_args()
 
     ## get wsi path
@@ -1073,20 +1097,23 @@ if __name__ == "__main__":
 
     # survival analysis
     pathomics_paths = [save_pathomics_dir / f"{p.stem}.json" for p in wsi_paths]
+    df_concepts, matched_pathomics_paths = matched_concepts_graph(save_clinical_dir, pathomics_paths)
+    concepts = df_concepts.to_numpy(dtype=np.float32).tolist()
 
     # split data set
     num_folds = 5
     test_ratio = 0.2
     train_ratio = 0.8
     valid_ratio = 0.0
-    data_types = ["radiomics", "pathomics"]
+    data_types = ["pathomics"]
     # stages=["Stage I", "Stage II"]
-    df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, pathomics_paths)
+    labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    concepts = [concepts[i] for i in concepts]
+    y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
     matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
-    matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
-    kr, kp = data_types[0], data_types[1]
-    matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
+    kp = data_types[0]
+    matched_graph_paths = [{kp : p} for p in matched_pathomics_paths]
     splits = generate_data_split(
         x=matched_graph_paths,
         y=y,
@@ -1096,7 +1123,7 @@ if __name__ == "__main__":
         num_folds=num_folds
     )
     mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
+    split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
     joblib.dump(splits, split_path)
     splits = joblib.load(split_path)
     num_train = len(splits[0]["train"])
@@ -1127,26 +1154,27 @@ if __name__ == "__main__":
         shuffle=False,
         drop_last=False,
     )
-    omic_features = [{k: v.x_dict[k].numpy() for k in data_types} for v in loader]
-    omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
+    omic_features = [{k: v.x.numpy() for k in data_types} for v in loader]
+    omics_modes = {"pathomics": args.pathomics_mode}
     for k, v in omics_modes.items():
         node_features = [d[k] for d in omic_features]
         node_features = np.concatenate(node_features, axis=0)
         node_scaler = StandardScaler(copy=False)
         node_scaler.fit(node_features)
-        scaler_path = f"{save_model_dir}/survival_{k}_{v}_scaler.dat"
+        scaler_path = f"{save_model_dir}/concept_{k}_{v}_scaler.dat"
         joblib.dump(node_scaler, scaler_path)
 
     # training
-    omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
-    omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
-    split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
-    scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    omics_modes = {"pathomics": args.pathomics_mode}
+    omics_dims = {"pathomics": args.pathomics_dim}
+    split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
+    scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
     training(
         num_epochs=args.epochs,
         split_path=split_path,
         scaler_path=scaler_paths,
         num_node_features=omics_dims,
+        num_concepts=args.num_concepts,
         model_dir=save_model_dir,
         conv="GINConv",
         n_works=8,
@@ -1154,5 +1182,5 @@ if __name__ == "__main__":
         dropout=0.5,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "SISIR"][0]
+        aggregation=["ABMIL", "CBM"][0]
     )
