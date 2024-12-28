@@ -870,6 +870,9 @@ def run_once(
                 val = acc_scorer(concept_label, concept_true)
                 logging_dict[f"{loader_name}-acc"] = val
 
+                concept_sum = concept_true.sum(axis=0)
+                concept_true = concept_true[:, concept_sum > 0]
+                concept_prob = concept_prob[:, concept_sum > 0]
                 val = auroc_scorer(concept_true, concept_prob)
                 logging_dict[f"{loader_name}-auroc"] = val
 
