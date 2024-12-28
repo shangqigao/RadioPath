@@ -306,8 +306,8 @@ def matched_concepts_graph(save_concept_dir, save_graph_paths, dataset="TCGA-RCC
     df = pd.read_csv(f"{save_concept_dir}/{dataset}_pathological_concepts.csv")
     
     # Prepare the concept data
-    df = df.apply(lambda x: True if x == 'TRUE' else False)
-    print("Survival data strcuture:", df.shape)
+    # df = df.apply(lambda x: True if x == 'TRUE' else False)
+    # print("Survival data strcuture:", df.shape)
 
     # filter graph properties 
     graph_names = [pathlib.Path(p).stem for p in save_graph_paths]
@@ -315,7 +315,8 @@ def matched_concepts_graph(save_concept_dir, save_graph_paths, dataset="TCGA-RCC
     graph_ids = ["-".join(d) for d in graph_ids]
     df = df[df["index"].isin(graph_ids)]
     matched_indices = [graph_ids.index(d) for d in df["index"]]
-    logging.info(f"The number of matched samples are {len(matched_indices)}")
+    logging.info(f"The number of matched conceptual samples are {len(matched_indices)}")
+    df = df.drop(columns=["index"])
     return df, matched_indices
 
 def matched_pathomics_radiomics(save_pathomics_paths, save_radiomics_paths, save_clinical_dir, dataset="TCGA-RCC", project_ids=None):
@@ -785,6 +786,7 @@ def run_once(
         loader_kwargs=None,
         arch_kwargs=None,
         optim_kwargs=None,
+        BayesGNN=False,
         data_types=["pathomics"]
 ):
     """running the inference or training loop once"""
@@ -1071,11 +1073,20 @@ if __name__ == "__main__":
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--num_concepts', default=39, type=int)
     args = parser.parse_args()
+
+    ## get wsi path
+    wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
+    all_paths = sorted(pathlib.Path(wsi_dir).rglob("*.svs"))
+    excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1", "TCGA-UZ-A9PQ-01Z-00-DX1"]
+    wsi_paths = []
+    for path in all_paths:
+        wsi_name = f"{path}".split("/")[-1].split(".")[0]
+        if wsi_name not in excluded_wsi: wsi_paths.append(path)
+    logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
     
     
     ## set save dir
     save_pathomics_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_pathomic_features/{args.pathomics_mode}")
-    save_radiomics_dir = pathlib.Path(f"{args.save_radiomics_dir}/{args.dataset}_{args.modality}_radiomic_features/{args.radiomics_mode}")
     save_clinical_dir = pathlib.Path(f"{args.save_clinical_dir}")
     save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models/{args.pathomics_mode}")
 
@@ -1088,41 +1099,43 @@ if __name__ == "__main__":
 
     # survival analysis
     pathomics_paths = [save_pathomics_dir / f"{p.stem}.json" for p in wsi_paths]
-    df_concepts, matched_pathomics_paths = matched_concepts_graph(save_clinical_dir, pathomics_paths)
+    # pathomics_paths = sorted(pathlib.Path(save_pathomics_dir).rglob("*.json"))
+    df_concepts, matched_i = matched_concepts_graph(save_clinical_dir, pathomics_paths)
+    matched_pathomics_paths = [pathomics_paths[i] for i in matched_i]
     concepts = df_concepts.to_numpy(dtype=np.float32).tolist()
 
     # split data set
-    num_folds = 5
-    test_ratio = 0.2
-    train_ratio = 0.8
-    valid_ratio = 0.0
-    data_types = ["pathomics"]
-    # stages=["Stage I", "Stage II"]
-    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, pathomics_paths)
-    labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    concepts = [concepts[i] for i in concepts]
-    y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
-    matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
-    kp = data_types[0]
-    matched_graph_paths = [{kp : p} for p in matched_pathomics_paths]
-    splits = generate_data_split(
-        x=matched_graph_paths,
-        y=y,
-        train=train_ratio,
-        valid=valid_ratio,
-        test=test_ratio,
-        num_folds=num_folds
-    )
-    mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
-    joblib.dump(splits, split_path)
-    splits = joblib.load(split_path)
-    num_train = len(splits[0]["train"])
-    logging.info(f"Number of training samples: {num_train}.")
-    # num_valid = len(splits[0]["valid"])
-    # logging.info(f"Number of validating samples: {num_valid}.")
-    num_test = len(splits[0]["test"])
-    logging.info(f"Number of testing samples: {num_test}.")
+    # num_folds = 5
+    # test_ratio = 0.2
+    # train_ratio = 0.8
+    # valid_ratio = 0.0
+    # data_types = ["pathomics"]
+    # # stages=["Stage I", "Stage II"]
+    # df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    # labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    # concepts = [concepts[i] for i in matched_i]
+    # y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
+    # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
+    # kp = data_types[0]
+    # matched_graph_paths = [{kp : p} for p in matched_pathomics_paths]
+    # splits = generate_data_split(
+    #     x=matched_graph_paths,
+    #     y=y,
+    #     train=train_ratio,
+    #     valid=valid_ratio,
+    #     test=test_ratio,
+    #     num_folds=num_folds
+    # )
+    # mkdir(save_model_dir)
+    # split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
+    # joblib.dump(splits, split_path)
+    # splits = joblib.load(split_path)
+    # num_train = len(splits[0]["train"])
+    # logging.info(f"Number of training samples: {num_train}.")
+    # # num_valid = len(splits[0]["valid"])
+    # # logging.info(f"Number of validating samples: {num_valid}.")
+    # num_test = len(splits[0]["test"])
+    # logging.info(f"Number of testing samples: {num_test}.")
 
     # cox regression from the splits
     # cox_regression(
@@ -1135,25 +1148,25 @@ if __name__ == "__main__":
     # )
 
     # compute mean and std on training data for normalization 
-    splits = joblib.load(split_path)
-    train_graph_paths = [path for path, _ in splits[0]["train"]]
-    loader = ConceptGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
-    loader = DataLoader(
-        loader,
-        num_workers=8,
-        batch_size=1,
-        shuffle=False,
-        drop_last=False,
-    )
-    omic_features = [{k: v.x.numpy() for k in data_types} for v in loader]
-    omics_modes = {"pathomics": args.pathomics_mode}
-    for k, v in omics_modes.items():
-        node_features = [d[k] for d in omic_features]
-        node_features = np.concatenate(node_features, axis=0)
-        node_scaler = StandardScaler(copy=False)
-        node_scaler.fit(node_features)
-        scaler_path = f"{save_model_dir}/concept_{k}_{v}_scaler.dat"
-        joblib.dump(node_scaler, scaler_path)
+    # splits = joblib.load(split_path)
+    # train_graph_paths = [path for path, _ in splits[0]["train"]]
+    # loader = ConceptGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
+    # loader = DataLoader(
+    #     loader,
+    #     num_workers=8,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     drop_last=False,
+    # )
+    # omic_features = [{k: v.x.numpy() for k in data_types} for v in loader]
+    # omics_modes = {"pathomics": args.pathomics_mode}
+    # for k, v in omics_modes.items():
+    #     node_features = [d[k] for d in omic_features]
+    #     node_features = np.concatenate(node_features, axis=0)
+    #     node_scaler = StandardScaler(copy=False)
+    #     node_scaler.fit(node_features)
+    #     scaler_path = f"{save_model_dir}/concept_{k}_{v}_scaler.dat"
+    #     joblib.dump(node_scaler, scaler_path)
 
     # training
     omics_modes = {"pathomics": args.pathomics_mode}
@@ -1173,5 +1186,5 @@ if __name__ == "__main__":
         dropout=0.5,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "CBM"][CBM]
+        aggregation=["ABMIL", "CBM"][1]
     )

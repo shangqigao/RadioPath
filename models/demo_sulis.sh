@@ -43,6 +43,7 @@ conda activate radiopath
 # python a_07explainable_AI/m_cancer_subtyping.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir --save_clinical_dir $save_clinical_dir
 
 ## concept learning
+wsi_dir="/home/shared/su123/TCGA_ORI"
 save_pathomics_dir="/home/s/sg2162/projects/Experiments/pathomics"
 save_clinical_dir="/home/s/sg2162/projects/Experiments/clinical"
-python a_07explainable_AI/m_concept_learning.py --save_pathomics_dir $save_pathomics_dir --save_clinical_dir $save_clinical_dir
+python a_07explainable_AI/m_concept_learning.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir --save_clinical_dir $save_clinical_dir

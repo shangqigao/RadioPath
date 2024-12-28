@@ -154,10 +154,11 @@ class ConceptGraphDataset(Dataset):
                 graph_dict["x"] = self.preproc[key](graph_dict["x"])
 
             graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items()}
-            graph_dict.update({"concept": concept})
             if any(v in self.mode for v in ["train", "valid"]):
-                graph_dict.update({"y": label})
-
+                graph_dict.update({"concept": concept, "y": label})
+            
+            graph_dict = {k: v.type(torch.float32) for k, v in graph_dict.items()}
+            graph_dict.update({"edge_index": graph_dict["edge_index"].type(torch.int64)})
             graph = Data(**graph_dict)
         else:
             graph_dict = {}
@@ -171,8 +172,7 @@ class ConceptGraphDataset(Dataset):
 
                 subgraph_dict = {k: torch.tensor(v) for k, v in subgraph_dict.items()}
                 if any(v in self.mode for v in ["train", "valid"]):
-                    subgraph_dict.update({"y": label})
-                subgraph_dict.update({"concept": concept})
+                    subgraph_dict.update({"concept": concept, "y": label})
 
                 edge_dict = {"edge_index": subgraph_dict["edge_index"].type(torch.int64)}
                 subgraph_dict = {k: v.type(torch.float32) for k, v in subgraph_dict.items() if k != "edge_index"}
@@ -1109,6 +1109,7 @@ class ConceptGraphArch(nn.Module):
         with torch.inference_mode():
             wsi_outputs, concept_logits = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
+        concept_logits = concept_logits.cpu().numpy()
         wsi_labels, concept_labels = None, None
         if hasattr(wsi_graphs, "y_dict"):
             wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
