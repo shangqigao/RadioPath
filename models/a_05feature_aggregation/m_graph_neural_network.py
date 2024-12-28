@@ -1021,7 +1021,7 @@ class ConceptGraphArch(nn.Module):
             input_emb_dim = out_emb_dim
             self.gate_nn = Attn_Net_Gated(
                 L=input_emb_dim,
-                D=32,
+                D=64,
                 dropout=0.25,
                 n_classes=1
             )

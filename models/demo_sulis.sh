@@ -30,14 +30,19 @@ conda activate radiopath
 # python a_06generative_SR/m_radiomics_extraction.py --img_dir $img_dir --lab_dir $lab_dir --save_dir $save_dir
 
 ## survival analysis
-wsi_dir="/home/shared/su123/TCGA_ORI"
-save_pathomics_dir="/home/s/sg2162/projects/Experiments/pathomics"
-save_radiomics_dir="/home/s/sg2162/projects/Experiments/radiomics"
-save_clinical_dir="/home/s/sg2162/projects/Experiments/clinical"
-python a_07explainable_AI/m_survival_analysis.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir --save_radiomics_dir $save_radiomics_dir --save_clinical_dir $save_clinical_dir
+# wsi_dir="/home/shared/su123/TCGA_ORI"
+# save_pathomics_dir="/home/s/sg2162/projects/Experiments/pathomics"
+# save_radiomics_dir="/home/s/sg2162/projects/Experiments/radiomics"
+# save_clinical_dir="/home/s/sg2162/projects/Experiments/clinical"
+# python a_07explainable_AI/m_survival_analysis.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir --save_radiomics_dir $save_radiomics_dir --save_clinical_dir $save_clinical_dir
 
 ## cancer subtyping
 # wsi_dir="/home/shared/su123/TCGA_ORI"
 # save_pathomics_dir="/home/s/sg2162/projects/Experiments/pathomics"
 # save_clinical_dir="/home/s/sg2162/projects/Experiments/clinical"
 # python a_07explainable_AI/m_cancer_subtyping.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir --save_clinical_dir $save_clinical_dir
+
+## concept learning
+save_pathomics_dir="/home/s/sg2162/projects/Experiments/pathomics"
+save_clinical_dir="/home/s/sg2162/projects/Experiments/clinical"
+python a_07explainable_AI/m_concept_learning.py --save_pathomics_dir $save_pathomics_dir --save_clinical_dir $save_clinical_dir

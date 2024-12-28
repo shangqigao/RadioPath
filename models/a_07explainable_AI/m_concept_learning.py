@@ -938,7 +938,7 @@ def training(
         "dim_features": num_node_features,
         "dim_concept": num_concepts,
         "dim_target": 1,
-        "layers": [384, 64, 16, 8], # [16, 16, 8]
+        "layers": [384, 256, 128, 64], # [16, 16, 8]
         "dropout": dropout,  #0.5
         "conv": conv,
         "keys": omic_keys,
@@ -1071,16 +1071,6 @@ if __name__ == "__main__":
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--num_concepts', default=39, type=int)
     args = parser.parse_args()
-
-    ## get wsi path
-    wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
-    all_paths = sorted(pathlib.Path(wsi_dir).rglob("*.svs"))
-    excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1", "TCGA-UZ-A9PQ-01Z-00-DX1"]
-    wsi_paths = []
-    for path in all_paths:
-        wsi_name = f"{path}".split("/")[-1].split(".")[0]
-        if wsi_name not in excluded_wsi: wsi_paths.append(path)
-    logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
     
     
     ## set save dir
@@ -1177,11 +1167,11 @@ if __name__ == "__main__":
         num_node_features=omics_dims,
         num_concepts=args.num_concepts,
         model_dir=save_model_dir,
-        conv="GINConv",
+        conv="GCNConv",
         n_works=8,
         batch_size=32,
         dropout=0.5,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "CBM"][0]
+        aggregation=["ABMIL", "CBM"][CBM]
     )
