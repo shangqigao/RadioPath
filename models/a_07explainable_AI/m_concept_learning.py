@@ -874,9 +874,9 @@ def run_once(
                     acc_list = []
                     for i in range(concept_true.shape[1]):
                         acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
-                    logging_dict[f"{loader_name}-max_acc"] = max(acc_list)
-                    logging_dict[f"{loader_name}-mean_acc"] = sum(acc_list) / len(acc_list)
-                    logging_dict[f"{loader_name}-min-acc"] = min(acc_list)
+                    acc_list = sorted(acc_list)
+                    logging_dict[f"{loader_name}-top10_acc"] = sum(acc_list[-10:]) / 10
+                    logging_dict[f"{loader_name}-bottom10_acc"] = sum(acc_list[:10]) / 10
 
                     concept_sum = concept_true.sum(axis=0)
                     concept_true = concept_true[:, concept_sum > 0]
@@ -884,9 +884,9 @@ def run_once(
                     auroc_list = []
                     for i in range(concept_true.shape[1]):
                         auroc_list.append(auroc_scorer(concept_true[:, i], concept_prob[:, i]))
-                    logging_dict[f"{loader_name}-max_auroc"] = max(auroc_list)
-                    logging_dict[f"{loader_name}-mean_auroc"] = sum(auroc_list) / len(auroc_list)
-                    logging_dict[f"{loader_name}-min-auroc"] = min(auroc_list)
+                    auroc_list = sorted(auroc_list)
+                    logging_dict[f"{loader_name}-top10_auroc"] = sum(auroc_list[-10:]) / 10
+                    logging_dict[f"{loader_name}-bottom10_auroc"] = sum(auroc_list[:10]) / 10
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
                 logging_dict[f"{loader_name}-raw-true"] = true
