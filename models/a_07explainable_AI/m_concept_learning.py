@@ -787,7 +787,8 @@ def run_once(
         arch_kwargs=None,
         optim_kwargs=None,
         BayesGNN=False,
-        data_types=["pathomics"]
+        data_types=["pathomics"],
+        concept_weight=None
 ):
     """running the inference or training loop once"""
     if loader_kwargs is None:
@@ -803,7 +804,7 @@ def run_once(
     if pretrained is not None:
         model.load(*pretrained)
     model = model.to("cuda")
-    loss = CoxSurvConceptLoss()
+    loss = CoxSurvConceptLoss(tau=1.0, concept_weight=concept_weight)
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)
@@ -932,7 +933,8 @@ def training(
         dropout=0,
         BayesGNN=False,
         omic_keys=["pathomics"],
-        aggregation="CBM"
+        aggregation="CBM",
+        concept_weight=None
 ):
     """train node classification neural networks
     Args:
@@ -986,7 +988,8 @@ def training(
             optim_kwargs=optim_kwargs,
             preproc_func=transform_dict,
             BayesGNN=BayesGNN,
-            data_types=omic_keys
+            data_types=omic_keys,
+            concept_weight=concept_weight
         )
     return
 
@@ -1117,6 +1120,7 @@ if __name__ == "__main__":
     df_concepts, matched_i = matched_concepts_graph(save_clinical_dir, pathomics_paths)
     matched_pathomics_paths = [pathomics_paths[i] for i in matched_i]
     concepts = df_concepts.to_numpy(dtype=np.float32).tolist()
+    concept_weight = len(concepts) / np.array(concepts).sum(axis=0)
 
     # split data set
     # num_folds = 5
@@ -1201,5 +1205,6 @@ if __name__ == "__main__":
         dropout=0.5,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "CBM"][1]
+        aggregation=["ABMIL", "CBM"][1],
+        concept_weight=concept_weight
     )

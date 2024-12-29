@@ -1691,9 +1691,12 @@ class CoxSurvLoss(object):
         return loss_cox
     
 class CoxSurvConceptLoss(object):
+    def __init__(self, tau=1.0, concept_weight=None):
+        self.tau = tau
+        self.concept_weight = concept_weight
+        
     def __call__(self, hazards, labels, 
                  concept_logits, concept_labels,
-                 tau=1.0,
                  **kwargs
         ):
         # This calculation credit to Travers Ching https://github.com/traversc/cox-nnet
@@ -1712,8 +1715,12 @@ class CoxSurvConceptLoss(object):
         loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * c)
         if concept_logits is not None:
             concept_probs = torch.sigmoid(concept_logits)
-            loss_cbm = F.binary_cross_entropy(concept_probs, concept_labels)
-            loss_cox = loss_cox + tau * loss_cbm
+            if self.concept_weight is not None:
+                weight = torch.tensor(self.concept_weight).to(concept_labels.device)
+                loss_cbm = F.binary_cross_entropy(concept_probs, concept_labels, weight)
+            else:
+                loss_cbm = F.binary_cross_entropy(concept_probs, concept_labels)
+            loss_cox = loss_cox + self.tau * loss_cbm
         # print(loss_cox)
         # print(R_mat)
         return loss_cox
