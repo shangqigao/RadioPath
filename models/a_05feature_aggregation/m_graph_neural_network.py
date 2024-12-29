@@ -1663,7 +1663,7 @@ class LHCELoss(nn.Module):
     
 class CoxSurvLoss(object):
     def __call__(self, hazards, time, c, VIparas, 
-                 mu0=0, lambda0=1, alpha0=2, beta0=1e-4, tau=0.1,
+                 mu0=0, lambda0=1, alpha0=2, beta0=1e-4, tau=0.01,
                  **kwargs
         ):
         # This calculation credit to Travers Ching https://github.com/traversc/cox-nnet
@@ -1685,7 +1685,7 @@ class CoxSurvLoss(object):
             mu_upsilon = mu_upsilon.clone().detach()
             loss_kl = 0.5*torch.mean(lambda0*mu_upsilon*((loc - mu0)**2 + torch.exp(logvar)) - logvar)
             loss_ae = tau*sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
-            loss_cox = loss_cox + loss_ae + loss_kl
+            loss_cox = loss_cox #+ loss_ae + loss_kl
         # print(loss_cox)
         # print(R_mat)
         return loss_cox
