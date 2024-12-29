@@ -482,7 +482,7 @@ class ImportanceScoreArch(nn.Module):
         conv_dict = {
             "MLP": [Linear, 1],
             "GCNConv": [GCNConv, 1],
-            "GATConv": [GATConv, 1],
+            "GATConv": [GATv2Conv, 1],
             "GINConv": [GINConv, 1], 
             "EdgeConv": [EdgeConv, 2]
         }
@@ -502,7 +502,7 @@ class ImportanceScoreArch(nn.Module):
         self.tail = {
             "MLP": Linear(self.embedding_dims[-1], dim_target),
             "GCNConv": GCNConv(self.embedding_dims[-1], dim_target),
-            "GATConv": GATConv(self.embedding_dims[-1], dim_target),
+            "GATConv": GATv2Conv(self.embedding_dims[-1], dim_target),
             "GINConv": Linear(self.embedding_dims[-1], dim_target),
             "EdgeConv": Linear(self.embedding_dims[-1], dim_target)
         }[self.conv_name]
@@ -630,10 +630,10 @@ class SurvivalGraphArch(nn.Module):
 
     def sampling(self, data):
         assert data.size(-1) == 2
-        loc, logscale = data[..., 0:1], data[..., 1:2]
-        logscale = torch.clip(logscale, min=-20, max=20)
-        gauss = torch.distributions.Normal(loc, torch.exp(logscale))
-        return gauss.sample(), [loc, logscale]
+        loc, logvar = data[..., 0:1], data[..., 1:2]
+        logvar = torch.clamp(logvar, min=-20, max=20)
+        gauss = torch.distributions.Normal(loc, torch.exp(0.5*logvar))
+        return gauss.sample(), [loc, logvar]
 
     def forward(self, data):
         if len(self.keys) > 1:
@@ -1680,10 +1680,10 @@ class CoxSurvLoss(object):
         exp_theta = torch.exp(theta)
         loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * c)
         if VIparas is not None:
-            loc, logscale, enc_list, dec_list = VIparas
-            mu_upsilon = (2*alpha0 + 1) / (2*beta0 + lambda0*(loc - mu0)**2 + lambda0*torch.exp(logscale))
+            loc, logvar, enc_list, dec_list = VIparas
+            mu_upsilon = (2*alpha0 + 1) / (2*beta0 + lambda0*(loc - mu0)**2 + lambda0*torch.exp(logvar))
             mu_upsilon = mu_upsilon.clone().detach()
-            loss_kl = 0.5*torch.mean(lambda0*mu_upsilon*((loc - mu0)**2 + torch.exp(logscale)) - logscale)
+            loss_kl = 0.5*torch.mean(lambda0*mu_upsilon*((loc - mu0)**2 + torch.exp(logvar)) - logvar)
             loss_ae = tau*sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
             loss_cox = loss_cox + loss_ae + loss_kl
         # print(loss_cox)
