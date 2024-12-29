@@ -804,7 +804,7 @@ def run_once(
     if pretrained is not None:
         model.load(*pretrained)
     model = model.to("cuda")
-    loss = CoxSurvConceptLoss(tau=0.1, concept_weight=concept_weight)
+    loss = CoxSurvConceptLoss(tau=0.01, concept_weight=concept_weight)
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)
