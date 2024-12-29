@@ -12,7 +12,7 @@ import torchbnn as bnn
 from torch.nn import BatchNorm1d, Linear, ReLU, Dropout
 from torch_geometric.data import Data, Dataset, HeteroData
 from torch_geometric.utils import subgraph, softmax
-from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATConv
+from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATv2Conv
 from torch_geometric.nn import global_mean_pool
 from torch_geometric.nn.aggr import SumAggregation, AttentionalAggregation
 
@@ -890,7 +890,7 @@ class ConceptScoreArch(nn.Module):
         conv_dict = {
             "MLP": [Linear, 1],
             "GCNConv": [GCNConv, 1],
-            "GATConv": [GATConv, 1],
+            "GATConv": [GATv2Conv, 1],
             "GINConv": [GINConv, 1], 
             "EdgeConv": [EdgeConv, 2]
         }
@@ -910,7 +910,7 @@ class ConceptScoreArch(nn.Module):
         self.tail = {
             "MLP": Linear(self.embedding_dims[-1], dim_target),
             "GCNConv": GCNConv(self.embedding_dims[-1], dim_target),
-            "GATConv": GATConv(self.embedding_dims[-1], dim_target),
+            "GATConv": GATv2Conv(self.embedding_dims[-1], dim_target),
             "GINConv": Linear(self.embedding_dims[-1], dim_target),
             "EdgeConv": Linear(self.embedding_dims[-1], dim_target)
         }[self.conv_name]
