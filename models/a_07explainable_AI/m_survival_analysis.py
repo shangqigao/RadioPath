@@ -1210,7 +1210,7 @@ if __name__ == "__main__":
         scaler_path=scaler_paths,
         num_node_features=omics_dims,
         model_dir=save_model_dir,
-        conv="GINConv",
+        conv="GCNConv",
         n_works=8,
         batch_size=32,
         dropout=0.5,

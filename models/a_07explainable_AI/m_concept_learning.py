@@ -875,7 +875,7 @@ def run_once(
                         acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
                     logging_dict[f"{loader_name}-max_acc"] = max(acc_list)
                     logging_dict[f"{loader_name}-mean_acc"] = sum(acc_list) / len(acc_list)
-                    logging_dict[f"{loader_name}-max-acc"] = min(acc_list)
+                    logging_dict[f"{loader_name}-min-acc"] = min(acc_list)
 
                     concept_sum = concept_true.sum(axis=0)
                     concept_true = concept_true[:, concept_sum > 0]
@@ -885,7 +885,7 @@ def run_once(
                         auroc_list.append(auroc_scorer(concept_true[:, i], concept_prob[:, i]))
                     logging_dict[f"{loader_name}-max_auroc"] = max(auroc_list)
                     logging_dict[f"{loader_name}-mean_auroc"] = sum(auroc_list) / len(auroc_list)
-                    logging_dict[f"{loader_name}-max-auroc"] = min(auroc_list)
+                    logging_dict[f"{loader_name}-min-auroc"] = min(auroc_list)
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
                 logging_dict[f"{loader_name}-raw-true"] = true
@@ -1184,22 +1184,22 @@ if __name__ == "__main__":
     #     joblib.dump(node_scaler, scaler_path)
 
     # training
-    # omics_modes = {"pathomics": args.pathomics_mode}
-    # omics_dims = {"pathomics": args.pathomics_dim}
-    # split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
-    # scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    # training(
-    #     num_epochs=args.epochs,
-    #     split_path=split_path,
-    #     scaler_path=scaler_paths,
-    #     num_node_features=omics_dims,
-    #     num_concepts=args.num_concepts,
-    #     model_dir=save_model_dir,
-    #     conv="GCNConv",
-    #     n_works=8,
-    #     batch_size=32,
-    #     dropout=0.5,
-    #     BayesGNN=False,
-    #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "CBM"][0]
-    # )
+    omics_modes = {"pathomics": args.pathomics_mode}
+    omics_dims = {"pathomics": args.pathomics_dim}
+    split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
+    scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    training(
+        num_epochs=args.epochs,
+        split_path=split_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        num_concepts=args.num_concepts,
+        model_dir=save_model_dir,
+        conv="GATConv",
+        n_works=8,
+        batch_size=32,
+        dropout=0.5,
+        BayesGNN=False,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "CBM"][1]
+    )
