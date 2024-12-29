@@ -913,7 +913,7 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [384, 64, 16, 8], # [16, 16, 8]
+        "layers": [384, 256, 128, 64], # [16, 16, 8]
         "dropout": dropout,  #0.5
         "conv": conv,
         "keys": omic_keys,

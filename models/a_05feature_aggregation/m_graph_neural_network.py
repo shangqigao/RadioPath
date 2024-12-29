@@ -457,6 +457,28 @@ class Bayes_Attn_Net_Gated(nn.Module):
         A = self.attention_c(A)  # N x n_classes
         return A
     
+class Score_Net_Gated(nn.Module):
+    def __init__(self, L=1024, D=256, dropout=0., n_classes=1):
+        super(Attn_Net_Gated, self).__init__()
+        self.attention_a = [nn.Linear(L, D)]
+
+        self.attention_b = [nn.Linear(L, D)]
+        if dropout > 0:
+            self.attention_a.append(nn.Dropout(dropout))
+            self.attention_b.append(nn.Dropout(dropout))
+
+        self.attention_a = nn.Sequential(*self.attention_a)
+        self.attention_b = nn.Sequential(*self.attention_b)
+
+        self.attention_c = nn.Linear(D, n_classes)
+
+    def forward(self, x):
+        a = self.attention_a(x)
+        b = self.attention_b(x)
+        A = a.mul(b)
+        A = self.attention_c(A)  # N x n_classes
+        return A
+    
 class ImportanceScoreArch(nn.Module):
     """define importance score architecture
     """
@@ -601,14 +623,21 @@ class SurvivalGraphArch(nn.Module):
                 n_classes=1
             )
         elif aggregation == "SISIR":
-            self.gate_nn = ImportanceScoreArch(
+            out_emb_dim = self.embedding_dims[-1]
+            self.score_nn = ImportanceScoreArch(
                 dim_features=input_emb_dim,
-                dim_target=2,
+                dim_target=out_emb_dim,
                 layers=self.embedding_dims[1:],
                 dropout=self.dropout,
                 conv=self.conv_name
             )
-            self.inverse_gate_nn = ImportanceScoreArch(
+            self.gate_nn = Score_Net_Gated(
+                L=out_emb_dim,
+                D=64,
+                dropout=0.25,
+                n_classes=2
+            )
+            self.inverse_score_nn = ImportanceScoreArch(
                 dim_features=2,
                 dim_target=input_emb_dim,
                 layers=self.embedding_dims[::-1],
@@ -664,20 +693,21 @@ class SurvivalGraphArch(nn.Module):
             VIparas = None
         elif self.aggregation == "SISIR":
             # encoder
-            encode = self.gate_nn(feature, edge_index)
+            feature = self.score_nn(feature, edge_index)
+            feature = self.gate_nn(feature)
             # reparameterization
-            gate, VIparas = self.sampling(encode)
+            gate, VIparas = self.sampling(feature)
             # decoder
-            decode = self.inverse_gate_nn(encode, edge_index)
+            feature = self.inverse_score_nn(feature, edge_index)
 
             if len(self.keys) > 1:
                 dec_list, index_s, index_e = [], 0, 0
                 for i, k in enumerate(self.keys):
                     index_e += len(enc_list[i])
-                    dec_list.append(self.dec_branches[k](decode[index_s:index_e, ...]))
+                    dec_list.append(self.dec_branches[k](feature[index_s:index_e, ...]))
                     index_s = index_e
             else:
-                dec_list = [decode]
+                dec_list = [feature]
             VIparas.append(enc_list)
             VIparas.append(dec_list)
         feature = self.SumAggregation(feature * gate, index=batch)
