@@ -1070,7 +1070,7 @@ class ConceptGraphArch(nn.Module):
         if self.aggregation == "ABMIL":
             concept_logit = None
         elif self.aggregation == "CBM":
-            concept_logit = feature
+            concept_logit = torch.clamp(feature, min=-20, max=20)
         output = self.classifier(feature)
         return output, concept_logit
     
