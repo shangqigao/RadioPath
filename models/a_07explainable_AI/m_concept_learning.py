@@ -804,7 +804,7 @@ def run_once(
     if pretrained is not None:
         model.load(*pretrained)
     model = model.to("cuda")
-    loss = CoxSurvConceptLoss(tau=1.0, concept_weight=concept_weight)
+    loss = CoxSurvConceptLoss(tau=0.1, concept_weight=concept_weight)
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)
@@ -876,6 +876,7 @@ def run_once(
                         acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
                     acc_list = sorted(acc_list)
                     logging_dict[f"{loader_name}-top10_acc"] = sum(acc_list[-10:]) / 10
+                    logging_dict[f"{loader_name}-mean_acc"] = sum(acc_list) / len(acc_list)
                     logging_dict[f"{loader_name}-bottom10_acc"] = sum(acc_list[:10]) / 10
 
                     concept_sum = concept_true.sum(axis=0)
@@ -886,6 +887,7 @@ def run_once(
                         auroc_list.append(auroc_scorer(concept_true[:, i], concept_prob[:, i]))
                     auroc_list = sorted(auroc_list)
                     logging_dict[f"{loader_name}-top10_auroc"] = sum(auroc_list[-10:]) / 10
+                    logging_dict[f"{loader_name}-mean_auroc"] = sum(auroc_list) / len(auroc_list)
                     logging_dict[f"{loader_name}-bottom10_auroc"] = sum(auroc_list[:10]) / 10
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
