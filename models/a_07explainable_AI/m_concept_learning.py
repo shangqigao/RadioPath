@@ -870,14 +870,22 @@ def run_once(
                     concept_label = (concept_prob > 0.5).astype(np.int8)
                     concept_true = np.array(concept_true).squeeze().astype(np.int8)
 
-                    val = acc_scorer(concept_label, concept_true)
-                    logging_dict[f"{loader_name}-acc"] = val
+                    acc_list = []
+                    for i in range(concept_true.shape[1]):
+                        acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
+                    logging_dict[f"{loader_name}-max_acc"] = max(acc_list)
+                    logging_dict[f"{loader_name}-mean_acc"] = sum(acc_list) / len(acc_list)
+                    logging_dict[f"{loader_name}-max-acc"] = min(acc_list)
 
                     concept_sum = concept_true.sum(axis=0)
                     concept_true = concept_true[:, concept_sum > 0]
                     concept_prob = concept_prob[:, concept_sum > 0]
-                    val = auroc_scorer(concept_true, concept_prob)
-                    logging_dict[f"{loader_name}-auroc"] = val
+                    auroc_list = []
+                    for i in range(concept_true.shape[1]):
+                        auroc_list.append(auroc_scorer(concept_true[:, i], concept_prob[:, i]))
+                    logging_dict[f"{loader_name}-max_auroc"] = max(auroc_list)
+                    logging_dict[f"{loader_name}-mean_auroc"] = sum(auroc_list) / len(auroc_list)
+                    logging_dict[f"{loader_name}-max-auroc"] = min(auroc_list)
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
                 logging_dict[f"{loader_name}-raw-true"] = true
