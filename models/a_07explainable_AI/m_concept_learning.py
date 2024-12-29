@@ -853,28 +853,31 @@ def run_once(
                     logging_dict[f"train-EMA-{val_name}"] = val
             elif "infer" in loader_name and any(v in loader_name for v in ["train", "valid"]):
                 output = list(zip(*step_output))
-                logit, true, concept_logit, concept_true = output
+                logit, true = output[0], output[1]
                 logit = np.array(logit).squeeze()
                 hazard = np.exp(logit)
                 true = np.array(true).squeeze()
-                concept_logit = np.array(concept_logit).squeeze()
-                concept_prob = 1 / (1 + np.exp(-concept_logit))
-                concept_label = (concept_prob > 0.5).astype(np.int8)
-                concept_true = np.array(concept_true).squeeze().astype(np.int8)
                 event_status = true[:, 1] > 0
                 event_time = true[:, 0]
 
-                cindex = concordance_index_censored(event_status, event_time, -hazard)[0]
+                cindex = concordance_index_censored(event_status, event_time, hazard)[0]
                 logging_dict[f"{loader_name}-Cindex"] = cindex
 
-                val = acc_scorer(concept_label, concept_true)
-                logging_dict[f"{loader_name}-acc"] = val
+                if arch_kwargs["aggregation"] == "CBM":
+                    concept_logit, concept_true = output[2], output[3]
+                    concept_logit = np.array(concept_logit).squeeze()
+                    concept_prob = 1 / (1 + np.exp(-concept_logit))
+                    concept_label = (concept_prob > 0.5).astype(np.int8)
+                    concept_true = np.array(concept_true).squeeze().astype(np.int8)
 
-                concept_sum = concept_true.sum(axis=0)
-                concept_true = concept_true[:, concept_sum > 0]
-                concept_prob = concept_prob[:, concept_sum > 0]
-                val = auroc_scorer(concept_true, concept_prob)
-                logging_dict[f"{loader_name}-auroc"] = val
+                    val = acc_scorer(concept_label, concept_true)
+                    logging_dict[f"{loader_name}-acc"] = val
+
+                    concept_sum = concept_true.sum(axis=0)
+                    concept_true = concept_true[:, concept_sum > 0]
+                    concept_prob = concept_prob[:, concept_sum > 0]
+                    val = auroc_scorer(concept_true, concept_prob)
+                    logging_dict[f"{loader_name}-auroc"] = val
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
                 logging_dict[f"{loader_name}-raw-true"] = true
@@ -1117,6 +1120,7 @@ if __name__ == "__main__":
     # df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
     # labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
     # concepts = [concepts[i] for i in matched_i]
+    # print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
     # y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
     # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
     # kp = data_types[0]
@@ -1172,22 +1176,22 @@ if __name__ == "__main__":
     #     joblib.dump(node_scaler, scaler_path)
 
     # training
-    omics_modes = {"pathomics": args.pathomics_mode}
-    omics_dims = {"pathomics": args.pathomics_dim}
-    split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
-    scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_paths,
-        num_node_features=omics_dims,
-        num_concepts=args.num_concepts,
-        model_dir=save_model_dir,
-        conv="GCNConv",
-        n_works=8,
-        batch_size=32,
-        dropout=0.5,
-        BayesGNN=False,
-        omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "CBM"][1]
-    )
+    # omics_modes = {"pathomics": args.pathomics_mode}
+    # omics_dims = {"pathomics": args.pathomics_dim}
+    # split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
+    # scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     num_concepts=args.num_concepts,
+    #     model_dir=save_model_dir,
+    #     conv="GCNConv",
+    #     n_works=8,
+    #     batch_size=32,
+    #     dropout=0.5,
+    #     BayesGNN=False,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "CBM"][0]
+    # )

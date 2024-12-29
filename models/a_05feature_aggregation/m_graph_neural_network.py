@@ -1023,7 +1023,7 @@ class ConceptGraphArch(nn.Module):
                 L=input_emb_dim,
                 D=64,
                 dropout=0.25,
-                n_classes=1
+                n_classes=dim_concept
             )
         else:
             raise NotImplementedError
@@ -1109,7 +1109,6 @@ class ConceptGraphArch(nn.Module):
         with torch.inference_mode():
             wsi_outputs, concept_logits = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
-        concept_logits = concept_logits.cpu().numpy()
         wsi_labels, concept_labels = None, None
         if hasattr(wsi_graphs, "y_dict"):
             wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
@@ -1117,7 +1116,11 @@ class ConceptGraphArch(nn.Module):
         elif hasattr(wsi_graphs, "y"):
             wsi_labels = wsi_graphs.y.cpu().numpy()
             concept_labels = wsi_graphs.concept.cpu().numpy()
-        return [wsi_outputs, wsi_labels, concept_logits, concept_labels]
+        if concept_logits is not None:
+            concept_logits = concept_logits.cpu().numpy()
+            return [wsi_outputs, wsi_labels, concept_logits, concept_labels]
+        else:
+            return [wsi_outputs, wsi_labels]
 
 class SubtypingGraphArch(nn.Module):
     """define Graph architecture for cancer subtyping

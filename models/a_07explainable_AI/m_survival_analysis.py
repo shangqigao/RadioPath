@@ -845,7 +845,7 @@ def run_once(
                 true = np.array(true).squeeze()
                 event_status = true[:, 1] > 0
                 event_time = true[:, 0]
-                cindex = concordance_index_censored(event_status, event_time, -hazard)[0]
+                cindex = concordance_index_censored(event_status, event_time, hazard)[0]
                 logging_dict[f"{loader_name}-Cindex"] = cindex
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
