@@ -810,7 +810,7 @@ def run_once(
             shuffle=subset_name == "train",
             **_loader_kwargs,
         )
-
+    best_score = 0
     for epoch in range(num_epochs):
         logger.info("EPOCH: %03d", epoch)
         for loader_name, loader in loader_dict.items():
@@ -847,6 +847,10 @@ def run_once(
                 event_time = true[:, 0]
                 cindex = concordance_index_censored(event_status, event_time, hazard)[0]
                 logging_dict[f"{loader_name}-Cindex"] = cindex
+
+                if "valid-A" in loader_name and cindex > best_score: 
+                    best_score = cindex
+                    model.save(f"{save_dir}/best_model.weights.pth")
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
                 logging_dict[f"{loader_name}-raw-true"] = true
@@ -921,7 +925,7 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"Bayes_Survival_Prediction_{conv}_{aggregation}"
     else:
-        model_dir = model_dir / f"Survival_Prediction_{conv}_{aggregation}_BN"
+        model_dir = model_dir / f"Survival_Prediction_{conv}_{aggregation}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": {"ABMIL": 1.0e-5, "SISIR": 0.0}[aggregation],
@@ -930,7 +934,8 @@ def training(
         new_split = {
             "train": split["train"],
             "infer-train": split["train"],
-            "infer-valid": split["test"],
+            "infer-valid-A": split["valid"],
+            "infer-valid-B": split["test"],
         }
         split_save_dir = pathlib.Path(f"{model_dir}/{split_idx:02d}/")
         rm_n_mkdir(split_save_dir)

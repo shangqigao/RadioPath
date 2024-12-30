@@ -263,7 +263,7 @@ class SlideGraphArch(nn.Module):
         self.tail = {
             "MLP": Linear(self.embedding_dims[-1], dim_target),
             "GCNConv": GCNConv(self.embedding_dims[-1], dim_target),
-            "GATConv": GATConv(self.embedding_dims[-1], dim_target),
+            "GATConv": GATv2Conv(self.embedding_dims[-1], dim_target),
             "GINConv": Linear(self.embedding_dims[-1], dim_target),
             "EdgeConv": Linear(self.embedding_dims[-1], dim_target)
         }[self.conv_name]
@@ -489,7 +489,7 @@ class ImportanceScoreArch(nn.Module):
             layers=None,
             dropout=0.0,
             conv="GINConv",
-            
+            mode="encoder",
             **kwargs,
     ):
         super().__init__()
@@ -517,19 +517,18 @@ class ImportanceScoreArch(nn.Module):
                 Linear(in_dims, out_dims),
                 BatchNorm1d(out_dims),
                 ReLU()
-                # Dropout(self.dropout)
             )
         
         input_emb_dim = dim_features
         out_emb_dim = self.embedding_dims[0]
         self.head = create_block(input_emb_dim, out_emb_dim)
-        self.tail = {
-            "MLP": Linear(self.embedding_dims[-1], dim_target),
-            "GCNConv": GCNConv(self.embedding_dims[-1], dim_target),
-            "GATConv": GATv2Conv(self.embedding_dims[-1], dim_target),
-            "GINConv": Linear(self.embedding_dims[-1], dim_target),
-            "EdgeConv": Linear(self.embedding_dims[-1], dim_target)
-        }[self.conv_name]
+        if mode == "encoder":
+            self.tail = nn.Sequential(
+                Linear(self.embedding_dims[-1], dim_target),
+                BatchNorm1d(dim_target),
+            )
+        elif mode == "decoder":
+            self.tail = Linear(self.embedding_dims[-1], dim_target)  
 
         input_emb_dim = out_emb_dim
         for out_emb_dim in self.embedding_dims[1:]:
@@ -558,10 +557,7 @@ class ImportanceScoreArch(nn.Module):
             else:
                 feature = self.convs[layer - 1](feature, edge_index)
             feature = self.linears[layer - 1](feature)
-        if self.conv_name in ["MLP", "GINConv", "EdgeConv"]:
-            output = self.tail(feature)
-        else:
-            output = self.tail(feature, edge_index)
+        output = self.tail(feature)
         return output
 
 class SurvivalGraphArch(nn.Module):
@@ -632,7 +628,8 @@ class SurvivalGraphArch(nn.Module):
                 dim_target=out_emb_dim,
                 layers=self.embedding_dims[1:],
                 dropout=self.dropout,
-                conv=self.conv_name
+                conv=self.conv_name,
+                mode="encoder"
             )
             self.gate_nn = Attn_Net_Gated(
                 L=out_emb_dim,
@@ -645,7 +642,8 @@ class SurvivalGraphArch(nn.Module):
                 dim_target=input_emb_dim,
                 layers=self.embedding_dims[::-1],
                 dropout=self.dropout,
-                conv=self.conv_name
+                conv=self.conv_name,
+                mode="decoder"
             )
             self.Aggregation = MeanAggregation()
             input_emb_dim = out_emb_dim

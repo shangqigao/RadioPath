@@ -826,6 +826,7 @@ def run_once(
             **_loader_kwargs,
         )
 
+    best_score = 0
     for epoch in range(num_epochs):
         logger.info("EPOCH: %03d", epoch)
         for loader_name, loader in loader_dict.items():
@@ -863,6 +864,10 @@ def run_once(
 
                 cindex = concordance_index_censored(event_status, event_time, hazard)[0]
                 logging_dict[f"{loader_name}-Cindex"] = cindex
+
+                if "valid-A" in loader_name and cindex > best_score: 
+                    best_score = cindex
+                    model.save(f"{save_dir}/best_model.weights.pth")
 
                 if arch_kwargs["aggregation"] == "CBM":
                     concept_logit, concept_true = output[2], output[3]
@@ -980,7 +985,8 @@ def training(
         new_split = {
             "train": split["train"],
             "infer-train": split["train"],
-            "infer-valid": split["test"],
+            "infer-valid-A": split["valid"],
+            "infer-valid-B": split["test"],
         }
         split_save_dir = pathlib.Path(f"{model_dir}/{split_idx:02d}/")
         rm_n_mkdir(split_save_dir)
@@ -1131,8 +1137,8 @@ if __name__ == "__main__":
     # split data set
     # num_folds = 5
     # test_ratio = 0.2
-    # train_ratio = 0.8
-    # valid_ratio = 0.0
+    # train_ratio = 0.8 * 0.9
+    # valid_ratio = 0.8 * 0.1
     # data_types = ["pathomics"]
     # # stages=["Stage I", "Stage II"]
     # df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
