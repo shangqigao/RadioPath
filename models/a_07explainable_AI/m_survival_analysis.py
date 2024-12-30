@@ -889,7 +889,6 @@ def training(
         conv="GCNConv",
         n_works=32,
         batch_size=32,
-        dropout=0,
         BayesGNN=False,
         omic_keys=["radiomics", "pathomics"],
         aggregation="SISIR"
@@ -914,7 +913,7 @@ def training(
         "dim_features": num_node_features,
         "dim_target": 1,
         "layers": [384, 256, 128, 64], # [16, 16, 8]
-        "dropout": dropout,  #0.5
+        "dropout": {"ABMIL": 0.5, "SISIR": 0.0}[aggregation],
         "conv": conv,
         "keys": omic_keys,
         "aggregation": aggregation
@@ -922,10 +921,10 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"Bayes_Survival_Prediction_{conv}_{aggregation}"
     else:
-        model_dir = model_dir / f"Survival_Prediction_{conv}_{aggregation}"
+        model_dir = model_dir / f"Survival_Prediction_{conv}_{aggregation}_BN"
     optim_kwargs = {
         "lr": 3e-4,
-        "weight_decay": 1.0e-5,  # 1.0e-4
+        "weight_decay": {"ABMIL": 1.0e-5, "SISIR": 0.0}[aggregation],
     }
     for split_idx, split in enumerate(splits):
         new_split = {
@@ -1139,8 +1138,8 @@ if __name__ == "__main__":
     # split data set
     # num_folds = 5
     # test_ratio = 0.2
-    # train_ratio = 0.8
-    # valid_ratio = 0.0
+    # train_ratio = 0.8 * 0.8
+    # valid_ratio = 0.8 * 0.2
     # data_types = ["radiomics", "pathomics"]
     # # stages=["Stage I", "Stage II"]
     # df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
@@ -1213,7 +1212,6 @@ if __name__ == "__main__":
         conv="GCNConv",
         n_works=8,
         batch_size=8,
-        dropout=0.5,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
         aggregation=["ABMIL", "SISIR"][1]

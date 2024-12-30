@@ -415,7 +415,7 @@ class CONCH(torch.nn.Module):
         self.model, self.preprocess = create_model_from_pretrained(cfg, ckpt_path, device)
 
     def forward(self, images):
-        img_embeddings = self.model.encode_image(images, proj_contrast=True, normalize=True)
+        img_embeddings = self.model.encode_image(image, proj_contrast=False, normalize=False)
         return torch.flatten(img_embeddings, 1)
 
     @staticmethod

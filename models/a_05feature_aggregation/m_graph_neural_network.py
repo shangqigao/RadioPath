@@ -14,7 +14,7 @@ from torch_geometric.data import Data, Dataset, HeteroData
 from torch_geometric.utils import subgraph, softmax
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATv2Conv
 from torch_geometric.nn import global_mean_pool
-from torch_geometric.nn.aggr import SumAggregation, AttentionalAggregation
+from torch_geometric.nn.aggr import SumAggregation, MeanAggregation, AttentionalAggregation
 
 
 
@@ -459,8 +459,8 @@ class Bayes_Attn_Net_Gated(nn.Module):
     
 class Score_Net_Gated(nn.Module):
     def __init__(self, L=1024, D=256, dropout=0., n_classes=1):
-        super(Attn_Net_Gated, self).__init__()
-        self.attention_a = [nn.Linear(L, D)]
+        super(Score_Net_Gated, self).__init__()
+        self.attention_a = [nn.Linear(L, D), nn.Tanh()]
 
         self.attention_b = [nn.Linear(L, D)]
         if dropout > 0:
@@ -489,6 +489,7 @@ class ImportanceScoreArch(nn.Module):
             layers=None,
             dropout=0.0,
             conv="GINConv",
+            
             **kwargs,
     ):
         super().__init__()
@@ -514,8 +515,9 @@ class ImportanceScoreArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                ReLU(),
-                Dropout(self.dropout)
+                BatchNorm1d(out_dims),
+                ReLU()
+                # Dropout(self.dropout)
             )
         
         input_emb_dim = dim_features
@@ -622,6 +624,7 @@ class SurvivalGraphArch(nn.Module):
                 dropout=0.25,
                 n_classes=1
             )
+            self.Aggregation = SumAggregation()
         elif aggregation == "SISIR":
             out_emb_dim = self.embedding_dims[-1]
             self.score_nn = ImportanceScoreArch(
@@ -631,7 +634,7 @@ class SurvivalGraphArch(nn.Module):
                 dropout=self.dropout,
                 conv=self.conv_name
             )
-            self.gate_nn = Score_Net_Gated(
+            self.gate_nn = Attn_Net_Gated(
                 L=out_emb_dim,
                 D=64,
                 dropout=0.25,
@@ -644,9 +647,10 @@ class SurvivalGraphArch(nn.Module):
                 dropout=self.dropout,
                 conv=self.conv_name
             )
+            self.Aggregation = MeanAggregation()
+            input_emb_dim = out_emb_dim
         else:
             raise NotImplementedError
-        self.SumAggregation = SumAggregation()
         self.classifier = Linear(input_emb_dim, dim_target)
 
     def save(self, path):
@@ -694,23 +698,23 @@ class SurvivalGraphArch(nn.Module):
         elif self.aggregation == "SISIR":
             # encoder
             feature = self.score_nn(feature, edge_index)
-            feature = self.gate_nn(feature)
+            encode = self.gate_nn(feature)
             # reparameterization
-            gate, VIparas = self.sampling(feature)
+            gate, VIparas = self.sampling(encode)
             # decoder
-            feature = self.inverse_score_nn(feature, edge_index)
+            decode = self.inverse_score_nn(encode, edge_index)
 
             if len(self.keys) > 1:
                 dec_list, index_s, index_e = [], 0, 0
                 for i, k in enumerate(self.keys):
                     index_e += len(enc_list[i])
-                    dec_list.append(self.dec_branches[k](feature[index_s:index_e, ...]))
+                    dec_list.append(self.dec_branches[k](decode[index_s:index_e, ...]))
                     index_s = index_e
             else:
-                dec_list = [feature]
+                dec_list = [decode]
             VIparas.append(enc_list)
             VIparas.append(dec_list)
-        feature = self.SumAggregation(feature * gate, index=batch)
+        feature = self.Aggregation(feature * gate, index=batch)
         output = self.classifier(feature)
         return output, VIparas
     
@@ -1043,7 +1047,7 @@ class ConceptGraphArch(nn.Module):
             out_emb_dim = dim_concept
             self.concept_nn = ConceptScoreArch(
                 dim_features=input_emb_dim,
-                dim_target=dim_concept,
+                dim_target=out_emb_dim,
                 layers=self.embedding_dims[1:],
                 dropout=self.dropout,
                 conv=self.conv_name
@@ -1092,15 +1096,15 @@ class ConceptGraphArch(nn.Module):
         feature = self.head(feature)
         if self.aggregation == "ABMIL":
             gate = self.gate_nn(feature)
-            gate = softmax(gate, index=batch, dim=-2)
         elif self.aggregation == "CBM":
             feature = self.concept_nn(feature, edge_index)
             gate = self.gate_nn(feature)
+        gate = softmax(gate, index=batch, dim=-2)
         feature = self.SumAggregation(feature * gate, index=batch)
         if self.aggregation == "ABMIL":
             concept_logit = None
         elif self.aggregation == "CBM":
-            concept_logit = torch.clamp(feature, min=-20, max=20)
+            concept_logit = feature
         output = self.classifier(feature)
         return output, concept_logit
     
@@ -1693,7 +1697,7 @@ class LHCELoss(nn.Module):
     
 class CoxSurvLoss(object):
     def __call__(self, hazards, time, c, VIparas, 
-                 mu0=0, lambda0=1, alpha0=2, beta0=1e-4, tau=0.01,
+                 mu0=0, lambda0=1, alpha0=2, beta0=1e-4, tau_ae=0.001, tau_kl=0.001,
                  **kwargs
         ):
         # This calculation credit to Travers Ching https://github.com/traversc/cox-nnet
@@ -1714,8 +1718,8 @@ class CoxSurvLoss(object):
             mu_upsilon = (2*alpha0 + 1) / (2*beta0 + lambda0*(loc - mu0)**2 + lambda0*torch.exp(logvar))
             mu_upsilon = mu_upsilon.clone().detach()
             loss_kl = 0.5*torch.mean(lambda0*mu_upsilon*((loc - mu0)**2 + torch.exp(logvar)) - logvar)
-            loss_ae = tau*sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
-            loss_cox = loss_cox #+ loss_ae + loss_kl
+            loss_ae = sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
+            loss_cox = loss_cox + tau_ae*loss_ae + tau_kl*loss_kl
         # print(loss_cox)
         # print(R_mat)
         return loss_cox

@@ -964,10 +964,14 @@ def training(
         "keys": omic_keys,
         "aggregation": aggregation
     }
-    if BayesGNN:
-        model_dir = model_dir / f"CL_Bayes_Survival_Prediction_{conv}_{aggregation}"
+    if concept_weight is None: 
+        CL = "CL_unweighted"
     else:
-        model_dir = model_dir / f"CL_Survival_Prediction_{conv}_{aggregation}"
+        CL = "CL_weighted"
+    if BayesGNN:
+        model_dir = model_dir / f"{CL}_Bayes_Survival_Prediction_{conv}_{aggregation}"
+    else:
+        model_dir = model_dir / f"{CL}_Survival_Prediction_{conv}_{aggregation}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
