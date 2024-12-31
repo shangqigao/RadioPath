@@ -800,6 +800,9 @@ def run_once(
     loader_dict = {}
     for subset_name, subset in dataset_dict.items():
         _loader_kwargs = copy.deepcopy(loader_kwargs)
+        if not "train" in subset_name: 
+            _loader_kwargs["batch_size"] = 8
+            sampling_rate = 1.0
         ds = SurvivalGraphDataset(
             subset, 
             mode=subset_name, 
@@ -807,29 +810,12 @@ def run_once(
             data_types=data_types,
             sampling_rate=sampling_rate
         )
-        if "train" in subset_name:
-            if len(data_types) > 1:
-                num_neighbors = {"radiomics": [3, 2]}
-                input_nodes = ("radiomics", ds["radiomics"].train_mask)
-            else:
-                num_neighbors = [3, 2]
-                input_nodes = ds.train_mask
-            loader_dict[subset_name] = NeighborLoader(
-                ds,
-                num_neighbors=num_neighbors,
-                input_nodes=input_nodes,
-                drop_last=subset_name == "train",
-                shuffle=subset_name == "train",
-                **_loader_kwargs,
-            )
-        else:
-            _loader_kwargs["batch_size"] = 1
-            loader_dict[subset_name] = DataLoader(
-                ds,
-                drop_last=subset_name == "train",
-                shuffle=subset_name == "train",
-                **_loader_kwargs,
-            )
+        loader_dict[subset_name] = DataLoader(
+            ds,
+            drop_last=subset_name == "train",
+            shuffle=subset_name == "train",
+            **_loader_kwargs,
+        )
     best_score = 0
     for epoch in range(num_epochs):
         logger.info("EPOCH: %03d", epoch)
