@@ -823,6 +823,7 @@ def run_once(
                 **_loader_kwargs,
             )
         else:
+            _loader_kwargs["batch_size"] = 1
             loader_dict[subset_name] = DataLoader(
                 ds,
                 drop_last=subset_name == "train",
