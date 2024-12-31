@@ -1135,7 +1135,7 @@ class ConceptGraphArch(nn.Module):
         elif self.aggregation == "CBM":
             concept_logit = feature
         output = self.classifier(feature)
-        return output, concept_logit
+        return output, concept_logit, gate
     
     @staticmethod
     def train_batch(model, batch_data, on_gpu, loss, optimizer):
@@ -1144,7 +1144,7 @@ class ConceptGraphArch(nn.Module):
 
         model.train()
         optimizer.zero_grad()
-        wsi_outputs, concept_logits = model(wsi_graphs)
+        wsi_outputs, concept_logits, _ = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze()
         if hasattr(wsi_graphs, "y_dict"):
             wsi_labels = wsi_graphs.y_dict[model.keys[0]].squeeze()
@@ -1170,20 +1170,30 @@ class ConceptGraphArch(nn.Module):
 
         model.eval()
         with torch.inference_mode():
-            wsi_outputs, concept_logits = model(wsi_graphs)
+            wsi_outputs, concept_logits, attention = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
+        attention = attention.cpu().numpy()
         wsi_labels, concept_labels = None, None
         if hasattr(wsi_graphs, "y_dict"):
-            wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
-            concept_labels = wsi_graphs.concept_dict[model.keys[0]].cpu().numpy()
+            if wsi_graphs.y_dict is not None:
+                wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
+                concept_labels = wsi_graphs.concept_dict[model.keys[0]].cpu().numpy()
         elif hasattr(wsi_graphs, "y"):
-            wsi_labels = wsi_graphs.y.cpu().numpy()
-            concept_labels = wsi_graphs.concept.cpu().numpy()
+            if wsi_graphs.y is not None:
+                wsi_labels = wsi_graphs.y.cpu().numpy()
+                concept_labels = wsi_graphs.concept.cpu().numpy()
+                
         if concept_logits is not None:
             concept_logits = concept_logits.cpu().numpy()
-            return [wsi_outputs, wsi_labels, concept_logits, concept_labels]
+            if wsi_labels is not None:
+                return [wsi_outputs, wsi_labels, concept_logits, concept_labels]
+            else:
+                return [wsi_outputs, concept_logits, attention]
         else:
-            return [wsi_outputs, wsi_labels]
+            if wsi_labels is not None:
+                return [wsi_outputs, wsi_labels]
+            else:
+                return [wsi_outputs, attention]
 
 class SubtypingGraphArch(nn.Module):
     """define Graph architecture for cancer subtyping

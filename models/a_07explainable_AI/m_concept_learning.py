@@ -40,7 +40,7 @@ from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir
 
 from models.a_05feature_aggregation.m_graph_neural_network import ConceptGraphDataset, ConceptGraphArch
 from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage, CoxSurvConceptLoss
-
+from models.a_05feature_aggregation.m_graph_construction import visualize_pathomic_graph
 
 
 def request_survival_data(project_ids, save_dir):
@@ -1088,15 +1088,20 @@ def inference(
     return cum_stats
 
 def test(
-        graph_path,
-        scaler_path,
-        num_node_features,
-        pretrained_model,
-        conv="MLP"
+    graph_path,
+    scaler_path,
+    num_node_features,
+    num_concepts,
+    pretrained_model,
+    conv="MLP",
+    dropout=0,
+    omic_keys=["pathomics"],
+    aggregation="CBM"
 ):
     """node classification 
     """
-    node_scaler = joblib.load(scaler_path)
+    node_scalers = [joblib.load(scaler_path[k]) for k in omic_keys] 
+    transform_dict = {k: s.transform for k, s in zip(omic_keys, node_scalers)}
     
     loader_kwargs = {
         "num_workers": 1,
@@ -1104,131 +1109,34 @@ def test(
     }
     arch_kwargs = {
         "dim_features": num_node_features,
-        "dim_target": 2,
-        "layers": [16, 16, 8],
-        "dropout": 0.5,
-        "conv": conv
+        "dim_concept": num_concepts,
+        "dim_target": 1,
+        "layers": [384, 256, 128, 64], # [16, 16, 8]
+        "dropout": dropout,  #0.5
+        "conv": conv,
+        "keys": omic_keys,
+        "aggregation": aggregation
     }
 
     # BayesGNN = True
-    new_split = {"infer": [graph_path] * num_sampling} if BayesGNN else {"infer": [graph_path]}
-    if PN_learning or PU_learning:
-        assert pretrained_detection is not None
-        arch_kwargs_PU = arch_kwargs.copy()
-        if PN_learning:
-            arch_kwargs_PU.update({"dim_target": 2})
-        else:
-            arch_kwargs_PU.update({"dim_target": 1})
-        chkpt_results, _ = run_once(
-            new_split,
-            num_epochs=1,
-            save_dir=None,
-            BayesGNN=BayesGNN,
-            pretrained=pretrained_detection,
-            arch_kwargs=arch_kwargs_PU,
-            loader_kwargs=loader_kwargs,
-            preproc_func=node_scaler.transform,
-        )
-        chkpt_results = list(zip(*chkpt_results))
-        chkpt_results = np.array(chkpt_results).squeeze()
-        if PN_learning:
-            if BayesGNN:
-                model = SlideBayesGraphArch(**arch_kwargs)
-            else:
-                model = SlideGraphArch(**arch_kwargs)
-            model.load(*pretrained_detection)
-            scaler = model.aux_model["scaler"]
-            prob = scaler.predict_proba(chkpt_results)
-            if BayesGNN:
-                step = prob.shape[0] // num_sampling
-                PN_std = np.array([prob[i*step:(i+1)*step] for i in range(num_sampling)]).std(axis=0)
-                prob = np.array([prob[i*step:(i+1)*step] for i in range(num_sampling)]).mean(axis=0)
-            positive_negative = np.argmax(prob, axis=1)
-        else:
-            sigmoid = 1 / (1 + np.exp(-chkpt_results))
-            PN_std = np.zeros_like(sigmoid)
-            if BayesGNN:
-                step = sigmoid.shape[0] // num_sampling
-                PN_std = np.array([sigmoid[i*step:(i+1)*step] for i in range(num_sampling)]).std(axis=0)
-                sigmoid = np.array([sigmoid[i*step:(i+1)*step] for i in range(num_sampling)]).mean(axis=0)
-            positive_negative = np.zeros_like(sigmoid)
-            positive_negative[sigmoid > 0.5] = 1
-        positive_subgraph = True
-    else:
-        positive_negative = None
-        positive_subgraph = False
-        PN_std = None
-    
-    # BayesGNN = False
-    # new_split = {"infer": [graph_path] * num_sampling} if BayesGNN else {"infer": [graph_path]}
-    positive_negative = [positive_negative]*num_sampling if BayesGNN else [positive_negative]
-    PN_std = [PN_std]*num_sampling if BayesGNN else [PN_std]
-    outputs, _ = run_once(
+    new_split = {"infer": [graph_path]}
+    outputs = run_once(
         new_split,
         num_epochs=1,
         save_dir=None,
-        BayesGNN=BayesGNN,
-        pretrained=pretrained_classificaiton,
         arch_kwargs=arch_kwargs,
         loader_kwargs=loader_kwargs,
-        preproc_func=node_scaler.transform,
-        positive_subgraph=positive_subgraph,
-        positive_negative=positive_negative
+        preproc_func=transform_dict,
+        data_types=omic_keys
     )
 
-    # * re-calibrate logit to probabilities
-    outputs = list(zip(*outputs))
-    outputs = np.array(outputs).squeeze()
-    if arch_kwargs["dim_target"] == 1:
-        sigmoid = 1 / (1 + np.exp(-outputs))
-        prob = np.zeros((sigmoid.shape[0], 2))
-        prob[:, 0] = 1 - sigmoid
-        prob[:, 1] = sigmoid
-    else:
-        if BayesGNN:
-            model = SlideBayesGraphArch(**arch_kwargs)
-        else:
-            model = SlideGraphArch(**arch_kwargs)
-        model.load(*pretrained_classificaiton)
-        scaler = model.aux_model["scaler"]
-        prob = scaler.predict_proba(outputs)
-        if pretrained_detection is not None:
-            positive_negative = np.concatenate(positive_negative, axis=0)
-            PN_std = np.concatenate(PN_std, axis=0)
-            PN_prob = np.zeros([positive_negative.shape[0], 4])
-            positive = positive_negative > 0
-            if borderline:
-                certain = PN_std < 0.1
-                positive = certain & positive
-            negative = np.logical_not(positive)
-            PN_prob[negative, 0] = 1
-            if prob.shape[1] == 3:
-                PN_prob[positive, 1:] = prob[positive, :]
-            elif prob.shape[1] == 2:
-                PN_prob[positive, 1] = prob[positive, 0]
-                PN_prob[positive, 3] = prob[positive, 1]
-            prob = PN_prob
-    if BayesGNN:
-        step = prob.shape[0] // num_sampling
-        prob = np.array([prob[i*step:(i+1)*step] for i in range(num_sampling)])
-        if borderline:
-            mean, std = prob.mean(axis=0), prob.std(axis=0)
-            label = np.argmax(mean, axis=1)
-            uncertainty = np.array([std[i, label[i]] for i in range(std.shape[0])])
-            prob = np.zeros_like(mean)
-            prob[:, 2] = (uncertainty > 0.2).astype(np.float32)
-
-    # true = np.load(f"{label_path}").astype(np.uint32)
-    # true = np.array(true, np.int32).squeeze()
-    # binary = np.zeros_like(true)
-    # binary[true > 0] = 1
-    # true_prob = np.zeros((len(true), 2), np.float32)
-    # true_prob[binary] = prob[true]
-    # auroc = auroc_scorer(true, true_prob, multi_class="ovr")
-    # onehot = np.eye(2)[binary]
-    # auprc = auprc_scorer(onehot, true_prob)
-    # logging.info(f"AUROC: {auroc:0.5f}, AUPRC: {auprc:0.5f}")
-    return prob  
+    pred_logit, concept_logit, attention = list(zip(*outputs))
+    hazard = np.exp(np.array(pred_logit).squeeze())
+    concept_logit = np.array(concept_logit).squeeze()
+    concept_prob = 1 / (1 + np.exp(-concept_logit))
+    concept_label = (concept_prob > 0.5).astype(np.int8)
+    attention = np.array(attention).squeeze()
+    return hazard, concept_label, attention
 
 if __name__ == "__main__":
     ## argument parser
@@ -1363,3 +1271,33 @@ if __name__ == "__main__":
         aggregation=["ABMIL", "CBM"][1],
         concept_weight=concept_weight
     )
+
+    # visualize concept attention
+    splits = joblib.load(split_path)
+    graph_path = splits[0]["test"][0][0]
+    graph_name = pathlib.Path(graph_path["pathomics"]).stem
+    print("Visualizing on wsi:", graph_name)
+    wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
+    pretrained_model = f"{save_model_dir}/CL_weighted_Survival_Prediction_GATConv_CBM/00/epoch=049.weights.pth"
+    hazard, concept_label, attention = test(
+        graph_path=graph_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        num_concepts=args.num_concepts,
+        pretrained_model=pretrained_model,
+        conv="GATConv",
+        dropout=0.5,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "CBM"][1]
+    )
+    concepts = list(df_concepts.columns)
+    for i, concept in enumerate(concepts):
+        if concept_label[i] == 1:
+            visualize_pathomic_graph(
+                wsi_path=wsi_path,
+                graph_path=graph_path,
+                label=attention[:, i],
+                save_name=f"concept{i}",
+                save_title=concept
+            )
+    
