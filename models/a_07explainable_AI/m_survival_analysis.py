@@ -1222,11 +1222,11 @@ if __name__ == "__main__":
         scaler_path=scaler_paths,
         num_node_features=omics_dims,
         model_dir=save_model_dir,
-        conv="GINConv",
+        conv="GATConv",
         n_works=8,
         batch_size=32,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "SISIR"][0],
+        aggregation=["ABMIL", "SISIR"][1],
         sampling_rate=0.2
     )
