@@ -70,12 +70,15 @@ class SlideGraphDataset(Dataset):
 class SurvivalGraphDataset(Dataset):
     """loading graph data for survival analysis
     """
-    def __init__(self, info_list, mode="train", preproc=None, data_types=["radiomics", "pathomics"]):
+    def __init__(self, info_list, mode="train", preproc=None, 
+                 data_types=["radiomics", "pathomics"],
+                 sampling_rate=0.1):
         super().__init__()
         self.info_list = info_list
         self.mode = mode
         self.preproc = preproc
         self.data_types = data_types
+        self.sampling_rate = sampling_rate
     
     def get(self, idx):
         info = self.info_list[idx]
@@ -90,12 +93,19 @@ class SurvivalGraphDataset(Dataset):
             with pathlib.Path(graph_path[key]).open() as fptr:
                 graph_dict = json.load(fptr)
             graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
-            if key == "radiomics": graph_dict["edge_index"] = graph_dict["edge_index"].T
+            if key == "radiomics": 
+                graph_dict["edge_index"] = graph_dict["edge_index"].T
+
+            num_nodes = len(graph_dict["x"])
+            train_mask = np.random.choice(num_nodes, int(num_nodes*self.sampling_rate), replace=False)
+            graph_dict["train_mask"] = train_mask
 
             if self.preproc is not None:
                 graph_dict["x"] = self.preproc[key](graph_dict["x"])
 
             graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items()}
+            graph_dict["edge_index"] = graph_dict["edge_index"].type(torch.int64)
+            graph_dict["train_mask"] = graph_dict["train_mask"].type(torch.int64)
             if any(v in self.mode for v in ["train", "valid"]):
                 graph_dict.update({"y": label})
 
@@ -107,6 +117,11 @@ class SurvivalGraphDataset(Dataset):
                     subgraph_dict = json.load(fptr)
                 subgraph_dict = {k: np.array(v) for k, v in subgraph_dict.items() if k != "cluster_points"}
                 if key == "radiomics": subgraph_dict["edge_index"] = subgraph_dict["edge_index"].T
+
+                num_nodes = len(subgraph_dict["x"])
+                train_mask = np.random.choice(num_nodes, int(num_nodes*self.sampling_rate), replace=False)
+                subgraph_dict["train_mask"] = train_mask
+
                 if self.preproc is not None:
                     subgraph_dict["x"] = self.preproc[key](subgraph_dict["x"])
 
@@ -116,6 +131,7 @@ class SurvivalGraphDataset(Dataset):
 
                 edge_dict = {"edge_index": subgraph_dict["edge_index"].type(torch.int64)}
                 subgraph_dict = {k: v.type(torch.float32) for k, v in subgraph_dict.items() if k != "edge_index"}
+                subgraph_dict["train_mask"] = subgraph_dict["train_mask"].type(torch.int64)
                 graph_dict.update({key: subgraph_dict, (key, "to", key): edge_dict})
             
             graph = HeteroData(graph_dict)

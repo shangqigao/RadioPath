@@ -16,7 +16,7 @@ import torch
 import torchbnn as bnn
 
 from scipy.stats import zscore
-from torch_geometric.loader import DataLoader
+from torch_geometric.loader import DataLoader, NeighborLoader
 from tiatoolbox import logger
 from tiatoolbox.utils.misc import save_as_json
 
@@ -769,7 +769,8 @@ def run_once(
         arch_kwargs=None,
         optim_kwargs=None,
         BayesGNN=False,
-        data_types=["radiomics", "pathomics"]
+        data_types=["radiomics", "pathomics"],
+        sampling_rate=0.1
 ):
     """running the inference or training loop once"""
     if loader_kwargs is None:
@@ -803,14 +804,31 @@ def run_once(
             subset, 
             mode=subset_name, 
             preproc=preproc_func,
-            data_types=data_types
+            data_types=data_types,
+            sampling_rate=sampling_rate
         )
-        loader_dict[subset_name] = DataLoader(
-            ds,
-            drop_last=subset_name == "train",
-            shuffle=subset_name == "train",
-            **_loader_kwargs,
-        )
+        if "train" in subset_name:
+            if len(data_types) > 1:
+                num_neighbors = {"radiomics": [3, 2]}
+                input_nodes = ("radiomics", ds["radiomics"].train_mask)
+            else:
+                num_neighbors = [3, 2]
+                input_nodes = ds.train_mask
+            loader_dict[subset_name] = NeighborLoader(
+                ds,
+                num_neighbors=num_neighbors,
+                input_nodes=input_nodes,
+                drop_last=subset_name == "train",
+                shuffle=subset_name == "train",
+                **_loader_kwargs,
+            )
+        else:
+            loader_dict[subset_name] = DataLoader(
+                ds,
+                drop_last=subset_name == "train",
+                shuffle=subset_name == "train",
+                **_loader_kwargs,
+            )
     best_score = 0
     for epoch in range(num_epochs):
         logger.info("EPOCH: %03d", epoch)
@@ -896,7 +914,8 @@ def training(
         batch_size=32,
         BayesGNN=False,
         omic_keys=["radiomics", "pathomics"],
-        aggregation="SISIR"
+        aggregation="SISIR",
+        sampling_rate=0.1,
 ):
     """train node classification neural networks
     Args:
@@ -950,7 +969,8 @@ def training(
             optim_kwargs=optim_kwargs,
             preproc_func=transform_dict,
             BayesGNN=BayesGNN,
-            data_types=omic_keys
+            data_types=omic_keys,
+            sampling_rate=sampling_rate
         )
     return
 
@@ -1220,5 +1240,6 @@ if __name__ == "__main__":
         batch_size=12,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "SISIR"][0]
+        aggregation=["ABMIL", "SISIR"][0],
+        sampling_rate=0.2
     )
