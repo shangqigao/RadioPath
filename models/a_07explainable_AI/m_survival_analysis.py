@@ -505,7 +505,8 @@ def cox_regression(
     cv_results = {}
     for split_idx, split in enumerate(splits):
         print(f"Performing cross-validation on fold {split_idx}...")
-        data_tr, data_te = split["train"], split["test"]
+        data_tr, data_va, data_te = split["train"], split["valid"], split["test"]
+        data_tr = data_tr + data_va
 
         tr_y = np.array([p[1]["pathomics"] for p in data_tr])
         tr_y = pd.DataFrame({'event': tr_y[:, 1], 'duration': tr_y[:, 0]})
@@ -620,7 +621,7 @@ def cox_regression(
         warnings.simplefilter("ignore", FitFailedWarning)
         coxnet_pipe.fit(tr_X, tr_y)
         estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
-        cv = KFold(n_splits=10, shuffle=True, random_state=0)
+        cv = KFold(n_splits=5, shuffle=True, random_state=0)
         cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
         gcv = GridSearchCV(
             make_pipeline(StandardScaler(), cox),
@@ -1167,8 +1168,8 @@ if __name__ == "__main__":
     # splits = joblib.load(split_path)
     # num_train = len(splits[0]["train"])
     # logging.info(f"Number of training samples: {num_train}.")
-    # # num_valid = len(splits[0]["valid"])
-    # # logging.info(f"Number of validating samples: {num_valid}.")
+    # num_valid = len(splits[0]["valid"])
+    # logging.info(f"Number of validating samples: {num_valid}.")
     # num_test = len(splits[0]["test"])
     # logging.info(f"Number of testing samples: {num_test}.")
 
@@ -1216,8 +1217,8 @@ if __name__ == "__main__":
         model_dir=save_model_dir,
         conv="GCNConv",
         n_works=8,
-        batch_size=8,
+        batch_size=12,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "SISIR"][1]
+        aggregation=["ABMIL", "SISIR"][0]
     )

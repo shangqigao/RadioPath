@@ -460,7 +460,7 @@ class Bayes_Attn_Net_Gated(nn.Module):
 class Score_Net_Gated(nn.Module):
     def __init__(self, L=1024, D=256, dropout=0., n_classes=1):
         super(Score_Net_Gated, self).__init__()
-        self.attention_a = [nn.Linear(L, D), nn.Tanh()]
+        self.attention_a = [nn.Linear(L, D)]
 
         self.attention_b = [nn.Linear(L, D)]
         if dropout > 0:
@@ -515,8 +515,9 @@ class ImportanceScoreArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                BatchNorm1d(out_dims),
-                ReLU()
+                # BatchNorm1d(out_dims),
+                ReLU(),
+                Dropout(self.dropout)
             )
         
         input_emb_dim = dim_features
@@ -594,6 +595,7 @@ class SurvivalGraphArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
+                BatchNorm1d(out_dims),
                 ReLU(),
                 Dropout(self.dropout)
             )
@@ -622,21 +624,21 @@ class SurvivalGraphArch(nn.Module):
             )
             self.Aggregation = SumAggregation()
         elif aggregation == "SISIR":
-            out_emb_dim = self.embedding_dims[-1]
+            # out_emb_dim = self.embedding_dims[-1]
             self.score_nn = ImportanceScoreArch(
                 dim_features=input_emb_dim,
-                dim_target=out_emb_dim,
+                dim_target=2,
                 layers=self.embedding_dims[1:],
                 dropout=self.dropout,
                 conv=self.conv_name,
-                mode="encoder"
+                mode="decoder"
             )
-            self.gate_nn = Attn_Net_Gated(
-                L=out_emb_dim,
-                D=64,
-                dropout=0.25,
-                n_classes=2
-            )
+            # self.gate_nn = Attn_Net_Gated(
+            #     L=out_emb_dim,
+            #     D=64,
+            #     dropout=0.0,
+            #     n_classes=2
+            # )
             self.inverse_score_nn = ImportanceScoreArch(
                 dim_features=2,
                 dim_target=input_emb_dim,
@@ -646,7 +648,7 @@ class SurvivalGraphArch(nn.Module):
                 mode="decoder"
             )
             self.Aggregation = MeanAggregation()
-            input_emb_dim = out_emb_dim
+            # input_emb_dim = out_emb_dim
         else:
             raise NotImplementedError
         self.classifier = Linear(input_emb_dim, dim_target)
@@ -695,8 +697,8 @@ class SurvivalGraphArch(nn.Module):
             VIparas = None
         elif self.aggregation == "SISIR":
             # encoder
-            feature = self.score_nn(feature, edge_index)
-            encode = self.gate_nn(feature)
+            encode = self.score_nn(feature, edge_index)
+            # encode = self.gate_nn(feature)
             # reparameterization
             gate, VIparas = self.sampling(encode)
             # decoder
@@ -1695,7 +1697,7 @@ class LHCELoss(nn.Module):
     
 class CoxSurvLoss(object):
     def __call__(self, hazards, time, c, VIparas, 
-                 mu0=0, lambda0=1, alpha0=2, beta0=1e-4, tau_ae=0.001, tau_kl=0.001,
+                 mu0=0, lambda0=1, alpha0=2, beta0=1e-8, tau_ae=1e-4, tau_kl=1e-4,
                  **kwargs
         ):
         # This calculation credit to Travers Ching https://github.com/traversc/cox-nnet
@@ -1717,6 +1719,7 @@ class CoxSurvLoss(object):
             mu_upsilon = mu_upsilon.clone().detach()
             loss_kl = 0.5*torch.mean(lambda0*mu_upsilon*((loc - mu0)**2 + torch.exp(logvar)) - logvar)
             loss_ae = sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
+            print(loss_cox.item(), loss_ae.item(), loss_kl.item())
             loss_cox = loss_cox + tau_ae*loss_ae + tau_kl*loss_kl
         # print(loss_cox)
         # print(R_mat)
