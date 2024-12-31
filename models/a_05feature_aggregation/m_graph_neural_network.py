@@ -11,6 +11,7 @@ import torchbnn as bnn
 
 from torch.nn import BatchNorm1d, Linear, ReLU, Dropout
 from torch_geometric.data import Data, Dataset, HeteroData
+from torch_geometric.loader import NeighborLoader
 from torch_geometric.utils import subgraph, softmax
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATv2Conv
 from torch_geometric.nn import global_mean_pool
@@ -109,7 +110,13 @@ class SurvivalGraphDataset(Dataset):
                 num_nodes = len(graph_dict["x"])
                 num_sampled = int(num_nodes*self.sampling_rate)
                 subset = np.random.choice(num_nodes, num_sampled, replace=False)
-                graph = graph.subgraph(subset)
+                loader = NeighborLoader(
+                    data=graph,
+                    num_neighbors=[3, 2],
+                    input_nodes=subset,
+                    batch_size=1
+                )
+                graph = next(iter(loader))
         else:
             graph_dict = {}
             for key in self.data_types:
@@ -133,10 +140,14 @@ class SurvivalGraphDataset(Dataset):
             if self.sampling_rate < 1 and "radiomics" in self.data_types:
                 num_nodes = len(graph_dict["radiomics"]["x"])
                 num_sampled = int(num_nodes*self.sampling_rate)
-                subset_dict = {
-                    "radiomics" : np.random.choice(num_nodes, num_sampled, replace=False)
-                } 
-                graph = graph.subgraph(subset_dict)   
+                subset_tuple = ("radiomics", np.random.choice(num_nodes, num_sampled, replace=False))
+                loader = NeighborLoader(
+                    data=graph,
+                    num_neighbors={"radiomics": [3, 2]},
+                    input_nodes=subset_tuple,
+                    batch_size=1
+                )  
+                graph = next(iter(loader))
         return graph
     
     def len(self):

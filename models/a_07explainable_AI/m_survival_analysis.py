@@ -16,7 +16,7 @@ import torch
 import torchbnn as bnn
 
 from scipy.stats import zscore
-from torch_geometric.loader import DataLoader, NeighborLoader
+from torch_geometric.loader import DataLoader
 from tiatoolbox import logger
 from tiatoolbox.utils.misc import save_as_json
 
