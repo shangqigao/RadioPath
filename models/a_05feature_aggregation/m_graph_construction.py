@@ -537,7 +537,9 @@ def visualize_pathomic_graph(
         show_map=False, 
         magnify=False, 
         resolution=0.5, 
-        units="mpp"
+        units="mpp",
+        save_name="pathomics",
+        save_title="pathomics graph",
     ):
     if pathlib.Path(wsi_path).suffix == ".jpg":
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
@@ -567,8 +569,10 @@ def visualize_pathomic_graph(
             std = np.std(label, axis=0)
             node_activations = np.argmax(mean, axis=1)
             uncertainty_map = np.array([std[i, node_activations[i]] for i in range(std.shape[0])])
-        else:
+        elif label.ndim == 2:
             node_activations = np.argmax(label, axis=1)
+        elif label.ndim == 1:
+            node_activations = label
     else:
         node_activations = np.argmax(softmax(graph_dict["x"].numpy(), axis=1), axis=1)
     if label_min is None: label_min = node_activations.min()
@@ -749,6 +753,7 @@ def visualize_pathomic_graph(
         plt.axis("off")
         ax = plt.subplot(2,2,2)
         plt.imshow(thumb_overlaid)
+        plt.title(f"{save_title}")
         plt.axis("off")
         fig = plt.gcf()
         norm = Normalize(label_min, label_max)
@@ -757,7 +762,7 @@ def visualize_pathomic_graph(
         cbar.minorticks_on()
         plt.subplot(2,2,3)
         plt.imshow(thumb_tile)
-        plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
+        plt.savefig(f"a_05feature_aggregation/wsi_graph_{save_name}.jpg")
 
 def visualize_radiomic_graph(
         img_path,
