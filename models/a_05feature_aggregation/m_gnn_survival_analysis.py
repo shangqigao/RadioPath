@@ -22,13 +22,16 @@ class SurvivalGraphDataset(Dataset):
     """
     def __init__(self, info_list, mode="train", preproc=None, 
                  data_types=["radiomics", "pathomics"],
-                 sampling_rate=1.0):
+                 sampling_rate=1.0,
+                 max_num_nodes=1e5
+        ):
         super().__init__()
         self.info_list = info_list
         self.mode = mode
         self.preproc = preproc
         self.data_types = data_types
         self.sampling_rate = sampling_rate
+        self.max_num_nodes = max_num_nodes
     
     def get(self, idx):
         info = self.info_list[idx]
@@ -57,15 +60,17 @@ class SurvivalGraphDataset(Dataset):
             graph = Data(**graph_dict)
             if self.sampling_rate < 1 and key == "radiomics":
                 num_nodes = len(graph_dict["x"])
-                num_sampled = int(num_nodes*self.sampling_rate)
-                subset = np.random.choice(num_nodes, num_sampled, replace=False)
-                loader = NeighborLoader(
-                    data=graph,
-                    num_neighbors=[3, 2],
-                    input_nodes=subset,
-                    batch_size=1
-                )
-                graph = next(iter(loader))
+                if num_nodes > self.max_num_nodes:
+                    num_sampled = int(num_nodes*self.sampling_rate)
+                    subset = np.random.choice(num_nodes, num_sampled, replace=False)
+                    graph = graph.subgraph(subset)
+                # loader = NeighborLoader(
+                #     data=graph,
+                #     num_neighbors=[3, 2],
+                #     input_nodes=subset,
+                #     batch_size=1
+                # )
+                # graph = next(iter(loader))
         else:
             graph_dict = {}
             for key in self.data_types:
@@ -88,15 +93,18 @@ class SurvivalGraphDataset(Dataset):
             graph = HeteroData(graph_dict)
             if self.sampling_rate < 1 and "radiomics" in self.data_types:
                 num_nodes = len(graph_dict["radiomics"]["x"])
-                num_sampled = int(num_nodes*self.sampling_rate)
-                subset_tuple = ("radiomics", np.random.choice(num_nodes, num_sampled, replace=False))
-                loader = NeighborLoader(
-                    data=graph,
-                    num_neighbors={"radiomics": [3, 2]},
-                    input_nodes=subset_tuple,
-                    batch_size=1
-                )  
-                graph = next(iter(loader))
+                if num_nodes > self.max_num_nodes:
+                    num_sampled = int(num_nodes*self.sampling_rate)
+                    subset_dict = {"radiomics": np.random.choice(num_nodes, num_sampled, replace=False)}
+                    graph = graph.subgraph(subset_dict)
+                # subset_tuple = ("radiomics", np.random.choice(num_nodes, num_sampled, replace=False))
+                # loader = NeighborLoader(
+                #     data=graph,
+                #     num_neighbors={"radiomics": [3, 2]},
+                #     input_nodes=subset_tuple,
+                #     batch_size=1
+                # )  
+                # graph = next(iter(loader))
         return graph
     
     def len(self):
