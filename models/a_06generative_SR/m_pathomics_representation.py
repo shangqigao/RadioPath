@@ -28,9 +28,9 @@ from tiatoolbox import logger
 from common.m_utils import mkdir, create_pbar, load_json, rm_n_mkdir, recur_find_ext
 from common.m_utils import reset_logging, select_checkpoints, select_wsi
 
-from models.a_06generative_SR.m_generative_diffusion import SlideGraphSpectrumDataset
-from models.a_06generative_SR.m_generative_diffusion import SlideGraphSpectrumDiffusionArch
-from models.a_06generative_SR.m_generative_diffusion import ScalarMovingAverage
+from models.a_05feature_aggregation.m_gnn_diffusion import SlideGraphSpectrumDataset
+from models.a_05feature_aggregation.m_gnn_diffusion import SlideGraphSpectrumDiffusionArch
+from models.a_05feature_aggregation.m_gnn_diffusion import ScalarMovingAverage
 from tiatoolbox.models.architecture.gsdm.utils.loader import load_model, load_model_params, load_loss_fn2
 from tiatoolbox.models.architecture.gsdm.utils.loader import load_eval_settings, load_sampling_fn2
 from tiatoolbox.models.architecture.gsdm.utils.graph_utils import adjs_to_graphs

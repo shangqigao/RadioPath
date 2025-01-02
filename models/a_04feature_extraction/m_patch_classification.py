@@ -29,8 +29,8 @@ from common.m_utils import reset_logging, select_wsi_annotated
 
 from models.a_02tissue_masking.m_tissue_masking import generate_wsi_tissue_mask
 from models.a_03patch_extraction.m_patch_extraction import prepare_annotation_reader
-from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage
-from models.a_05feature_aggregation.m_graph_neural_network import PULoss
+from models.a_05feature_aggregation.m_gnn_cancer_grading import ScalarMovingAverage
+from models.a_05feature_aggregation.m_gnn_cancer_grading import PULoss
 
 torch.multiprocessing.set_sharing_strategy("file_system")
 

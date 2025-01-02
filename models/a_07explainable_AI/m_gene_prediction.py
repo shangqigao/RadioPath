@@ -36,8 +36,8 @@ from sklearn.linear_model import LogisticRegression as PlattScaling
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
-from models.a_05feature_aggregation.m_graph_neural_network import SurvivalGraphDataset, SurvivalGraphArch, SurvivalBayesGraphArch
-from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage, CoxSurvLoss
+from RadioPath.models.a_05feature_aggregation.m_gnn_gene_mutation import MutationGraphDataset, MutationGraphArch, MutationBayesGraphArch
+from RadioPath.models.a_05feature_aggregation.m_gnn_gene_mutation import ScalarMovingAverage
 
 
 
@@ -533,15 +533,15 @@ def run_once(
         optim_kwargs = {}
 
     if BayesGNN:
-        model = SurvivalBayesGraphArch(**arch_kwargs)
+        model = MutationBayesGraphArch(**arch_kwargs)
         kl = {"loss": bnn.BKLLoss(), "weight": 0.1}
     else:
-        model = SurvivalGraphArch(**arch_kwargs)
+        model = MutationGraphArch(**arch_kwargs)
         kl = None
     if pretrained is not None:
         model.load(*pretrained)
     model = model.to("cuda")
-    loss = CoxSurvLoss()
+    loss = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
     # lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[60, 80], gamma=0.1)

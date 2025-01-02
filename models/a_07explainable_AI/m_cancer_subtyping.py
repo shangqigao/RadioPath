@@ -29,9 +29,8 @@ from sklearn.metrics import balanced_accuracy_score as acc_scorer
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
-from models.a_05feature_aggregation.m_graph_neural_network import SubtypingGraphDataset, SubtypingGraphArch, SubtypingBayesGraphArch
-from models.a_05feature_aggregation.m_graph_neural_network import ScalarMovingAverage, CoxSurvLoss
-from models.a_05feature_aggregation.m_graph_neural_network import update_loss
+from RadioPath.models.a_05feature_aggregation.m_gnn_cancer_subtyping import SubtypingGraphDataset, SubtypingGraphArch, SubtypingBayesGraphArch
+from RadioPath.models.a_05feature_aggregation.m_gnn_survival_analysis import ScalarMovingAverage
 
 
 
@@ -274,7 +273,7 @@ def run_once(
     if pretrained is not None:
         model.load(*pretrained)
     model = model.to("cuda")
-    loss = update_loss(mode="CE")
+    loss = torch.nn.CrossEntropyLoss()
     # optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     optimizer = torch.optim.AdamW(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
