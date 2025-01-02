@@ -188,7 +188,6 @@ class ImportanceScoreArch(nn.Module):
             layers=None,
             dropout=0.0,
             conv="GINConv",
-            mode="encoder",
             **kwargs,
     ):
         super().__init__()
@@ -222,13 +221,7 @@ class ImportanceScoreArch(nn.Module):
         input_emb_dim = dim_features
         out_emb_dim = self.embedding_dims[0]
         self.head = create_block(input_emb_dim, out_emb_dim)
-        if mode == "encoder":
-            self.tail = nn.Sequential(
-                Linear(self.embedding_dims[-1], dim_target),
-                BatchNorm1d(dim_target),
-            )
-        elif mode == "decoder":
-            self.tail = Linear(self.embedding_dims[-1], dim_target)  
+        self.tail = Linear(self.embedding_dims[-1], dim_target)  
 
         input_emb_dim = out_emb_dim
         for out_emb_dim in self.embedding_dims[1:]:
@@ -259,6 +252,85 @@ class ImportanceScoreArch(nn.Module):
             feature = self.linears[layer - 1](feature)
         output = self.tail(feature)
         return output
+    
+class OmicsIntegrationArch(nn.Module):
+    """define importance score architecture
+    """
+    def __init__(
+            self, 
+            dim_teachers, 
+            dim_student,
+            dim_target,
+            dropout=0.0,
+            conv="GINConv",
+            **kwargs,
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.convs = nn.ModuleList()
+        self.linears = nn.ModuleList()
+        self.conv_name = conv
+
+        conv_dict = {
+            "MLP": [Linear, 1],
+            "GCNConv": [GCNConv, 1],
+            "GATConv": [GATv2Conv, 1],
+            "GINConv": [GINConv, 1], 
+            "EdgeConv": [EdgeConv, 2]
+        }
+        if self.conv_name not in conv_dict:
+            raise ValueError(f"Not support conv={conv}.")
+        
+        def create_block(in_dims, out_dims, normalize=False):
+            if normalize:
+                return nn.Sequential(
+                    Linear(in_dims, out_dims),
+                    BatchNorm1d(out_dims),
+                    ReLU(),
+                    Dropout(self.dropout)
+                )
+            else:
+                return nn.Sequential(
+                    Linear(in_dims, out_dims),
+                    ReLU(),
+                    Dropout(self.dropout)
+                )
+        
+        def conv_block(in_dims, out_dims, name="GCNConv", normalize=False):
+            conv_class, alpha = conv_dict[name]
+            if name in ["GINConv", "EdgeConv"]:
+                block = create_block(alpha * in_dims, out_dims, normalize)
+                subnet = conv_class(block, **kwargs)
+            elif self.conv_name in ["GCNConv", "GATConv"]:
+                subnet = conv_class(alpha * in_dims, out_dims)
+            else:
+                subnet = create_block(alpha * in_dims, out_dims, normalize)
+            return subnet
+        
+        self.align_teachers = nn.ModuleList()
+        for ch_t in dim_teachers:
+            self.align_teachers.append(
+                conv_block(ch_t, 2*dim_target, self.conv_name, normalize=True)
+            )
+
+        self.align_student = conv_block(dim_student, 2*dim_target, self.conv_name, normalize=True)
+
+        self.extractor = conv_block(2*dim_target, dim_target, self.conv_name, normalize=True)
+
+        self.recon_teachers = nn.ModuleList()
+        for ch_t in dim_teachers:
+            self.recon_teachers.append(
+                conv_block(dim_target, ch_t, self.conv_name, normalize=False)
+            )
+
+    def forward(self, ft, et, fs, es):
+        assert len(ft) == len(et)
+        aligned_t = [self.align_teachers[i](ft[i], et[i]) for i in range(len(ft))]
+        aligned_s = self.align_student(fs, es)
+        ht = [self.extractor(f, e) for f, e in zip(aligned_t, et)]
+        hs = self.extractor(aligned_s, es)
+        ft_ = [self.recon_teachers[i](ht[i], et) for i in range(len(ht))]
+        return (hs, ht), (ft_, ft)
 
 class SurvivalGraphArch(nn.Module):
     """define Graph architecture for survival analysis
@@ -323,9 +395,18 @@ class SurvivalGraphArch(nn.Module):
             )
             self.Aggregation = SumAggregation()
         elif aggregation == "SISIR":
+            dim_teachers = [dim_features[k] for k in keys]
+            dim_student = input_emb_dim
+
+            self.integration_nn = OmicsIntegrationArch(
+                dim_teachers=dim_teachers,
+                dim_student=dim_student,
+                dim_target=out_emb_dim,
+                conv=self.conv_name
+            )
             # out_emb_dim = self.embedding_dims[-1]
             self.score_nn = ImportanceScoreArch(
-                dim_features=input_emb_dim,
+                dim_features=out_emb_dim,
                 dim_target=2,
                 layers=self.embedding_dims[1:],
                 dropout=self.dropout,
@@ -378,11 +459,12 @@ class SurvivalGraphArch(nn.Module):
             edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
             # check = [[len(f), e.max().item()] for f, e in zip(feature_list, edge_index_list)]
             # print("Number of nodes and edge index: ", check)
+            edge_index = edge_index_list.copy()
             index_shift = 0
-            for i in range(1, len(edge_index_list)): 
+            for i in range(1, len(edge_index)): 
                 index_shift += len(feature_list[i-1])
-                edge_index_list[i] += index_shift
-            edge_index = torch.concat(edge_index_list, dim=1)
+                edge_index[i] += index_shift
+            edge_index = torch.concat(edge_index, dim=1)
             batch_list = [batch_dict[k] for k in self.keys]
             batch = torch.concat(batch_list, dim=0)
         else:
@@ -394,7 +476,12 @@ class SurvivalGraphArch(nn.Module):
             gate = self.gate_nn(feature)
             gate = softmax(gate, index=batch, dim=-2)
             VIparas = None
+            KAparas = None
         elif self.aggregation == "SISIR":
+            # integration, feature comes student
+            (feature, ht), (ft_, ft) = self.integration_nn(enc_list, edge_index_list, feature, edge_index)
+            KAparas = [feature, ht, ft_, ft]
+
             # encoder
             encode = self.score_nn(feature, edge_index)
             # encode = self.gate_nn(feature)
@@ -415,7 +502,7 @@ class SurvivalGraphArch(nn.Module):
             VIparas.append(dec_list)
         feature = self.Aggregation(feature * gate, index=batch)
         output = self.classifier(feature)
-        return output, VIparas
+        return output, VIparas, KAparas
     
     @staticmethod
     def train_batch(model, batch_data, on_gpu, loss, optimizer, kl=None):
@@ -424,7 +511,7 @@ class SurvivalGraphArch(nn.Module):
 
         model.train()
         optimizer.zero_grad()
-        wsi_outputs, VIparas = model(wsi_graphs)
+        wsi_outputs, VIparas, KAparas = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze()
         if hasattr(wsi_graphs, "y_dict"):
             wsi_labels = wsi_graphs.y_dict[model.keys[0]].squeeze()
@@ -432,7 +519,7 @@ class SurvivalGraphArch(nn.Module):
             wsi_labels = wsi_graphs.y.squeeze()
         else:
             raise AttributeError
-        loss = loss(wsi_outputs, wsi_labels[:, 0], wsi_labels[:, 1], VIparas)
+        loss = loss(wsi_outputs, wsi_labels[:, 0], wsi_labels[:, 1], VIparas, KAparas)
         loss.backward()
         optimizer.step()
 
@@ -448,14 +535,19 @@ class SurvivalGraphArch(nn.Module):
 
         model.eval()
         with torch.inference_mode():
-            wsi_outputs, _ = model(wsi_graphs)
+            wsi_outputs, _, _ = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
         wsi_labels = None
         if hasattr(wsi_graphs, "y_dict"):
-            wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
+            if wsi_graphs.y_dict is not None:
+                wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
         elif hasattr(wsi_graphs, "y"):
-            wsi_labels = wsi_graphs.y.cpu().numpy()
-        return [wsi_outputs, wsi_labels]
+            if wsi_graphs.y is not None:
+                wsi_labels = wsi_graphs.y.cpu().numpy()
+        if wsi_labels is not None:
+            return [wsi_outputs, wsi_labels]
+        else:
+            return [wsi_outputs]
 
 class SurvivalBayesGraphArch(nn.Module):
     """define Graph architecture for survival analysis
@@ -620,12 +712,98 @@ class ScalarMovingAverage:
             else:  # Init for variable which appear for the first time
                 new_ema_value = current_value
                 self.tracking_dict[key] = new_ema_value
+
+class VILoss(nn.Module):
+    """ variational inference loss
+    """
+    def __init__(self, mu0=0, lambda0=1, alpha0=2, beta0=1e-8, tau_kl=1.0):
+        super(VILoss, self).__init__()
+        self.mu0 = mu0
+        self.lambda0 = lambda0
+        self.alpha0 = alpha0
+        self.beta0 = beta0
+        self.tau_kl = tau_kl
+
+    def forward(self, loc, logvar, enc_list, dec_list):
+        alpha = 2*self.alpha0 + 1
+        beta = 2*self.beta0 + self.lambda0*(loc - self.mu0)**2 + self.lambda0*torch.exp(logvar)
+        mu_upsilon = (alpha / beta).clone().detach()
+        loss_kl = 0.5*torch.mean(self.lambda0*mu_upsilon*((loc - self.mu0)**2 + torch.exp(logvar)) - logvar)
+        loss_ae = sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
+        return loss_ae + self.tau_kl * loss_kl
     
-class CoxSurvLoss(object):
-    def __call__(self, hazards, time, c, VIparas, 
-                 mu0=0, lambda0=1, alpha0=2, beta0=1e-8, tau_ae=1e-4, tau_kl=1e-4,
-                 **kwargs
-        ):
+def calc_mmd(f1, f2, sigmas, normalized=False):
+    if len(f1.shape) != 2:
+        N, C, H, W = f1.shape
+        f1 = f1.view(N, -1)
+        N, C, H, W = f2.shape
+        f2 = f2.view(N, -1)
+
+    if normalized == True:
+        f1 = F.normalize(f1, p=2, dim=1)
+        f2 = F.normalize(f2, p=2, dim=1)
+
+    return mmd_rbf2(f1, f2, sigmas=sigmas)
+
+
+def mmd_rbf2(x, y, sigmas=None):
+    N, _ = x.shape
+    xx, yy, zz = torch.mm(x, x.t()), torch.mm(y, y.t()), torch.mm(x, y.t())
+
+    rx = (xx.diag().unsqueeze(0).expand_as(xx))
+    ry = (yy.diag().unsqueeze(0).expand_as(yy))
+
+    K = L = P = 0.0
+    XX2 = rx.t() + rx - 2*xx
+    YY2 = ry.t() + ry - 2*yy
+    XY2 = rx.t() + ry - 2*zz
+
+    if sigmas is None:
+        sigma2 = torch.mean((XX2.detach()+YY2.detach()+2*XY2.detach()) / 4)
+        sigmas2 = [sigma2/4, sigma2/2, sigma2, sigma2*2, sigma2*4]
+        alphas = [1.0 / (2 * sigma2) for sigma2 in sigmas2]
+    else:
+        alphas = [1.0 / (2 * sigma**2) for sigma in sigmas]
+
+    for alpha in alphas:
+        K += torch.exp(- alpha * (XX2.clamp(min=1e-12)))
+        L += torch.exp(- alpha * (YY2.clamp(min=1e-12)))
+        P += torch.exp(- alpha * (XY2.clamp(min=1e-12)))
+
+    beta = (1./(N*(N)))
+    gamma = (2./(N*N))
+
+    return F.relu(beta * (torch.sum(K)+torch.sum(L)) - gamma * torch.sum(P))
+
+class CFLoss(nn.Module):
+    """ Common Feature Learning Loss
+        CF Loss = MMD + beta * MSE
+    """
+    def __init__(self, sigmas=[0.001, 0.01, 0.05, 0.1, 0.2, 1, 2], normalized=True, beta=1.0):
+        super(CFLoss, self).__init__()
+        self.sigmas = sigmas
+        self.normalized = normalized
+        self.beta = beta
+
+    def forward(self, hs, ht, ft_, ft):
+        mmd_loss = 0.0
+        mse_loss = 0.0
+        for ht_i in ht:
+            mmd_loss += calc_mmd(hs, ht_i, sigmas=self.sigmas, normalized=self.normalized)
+        for i in range(len(ft_)):
+            mse_loss += F.mse_loss(ft_[i], ft[i])
+        
+        return mmd_loss + self.beta*mse_loss
+    
+class CoxSurvLoss(nn.Module):
+    def __init__(self, tau_vi=1e-4, tau_ka=1.0):
+        super(CoxSurvLoss, self).__init__()
+        self.tau_vi = tau_vi
+        self.tau_ka = tau_ka
+        self.loss_vi = VILoss()
+        self.loss_ka = CFLoss()
+
+    def forward(self, hazards, time, c, VIparas, KAparas):
         # This calculation credit to Travers Ching https://github.com/traversc/cox-nnet
         # Cox-nnet: An artificial neural network method for prognosis prediction of high-throughput omics data
         current_batch_len = len(time)
@@ -640,13 +818,10 @@ class CoxSurvLoss(object):
         exp_theta = torch.exp(theta)
         loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * c)
         if VIparas is not None:
-            loc, logvar, enc_list, dec_list = VIparas
-            mu_upsilon = (2*alpha0 + 1) / (2*beta0 + lambda0*(loc - mu0)**2 + lambda0*torch.exp(logvar))
-            mu_upsilon = mu_upsilon.clone().detach()
-            loss_kl = 0.5*torch.mean(lambda0*mu_upsilon*((loc - mu0)**2 + torch.exp(logvar)) - logvar)
-            loss_ae = sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
-            print(loss_cox.item(), loss_ae.item(), loss_kl.item())
-            loss_cox = loss_cox + tau_ae*loss_ae + tau_kl*loss_kl
-        # print(loss_cox)
-        # print(R_mat)
+            loss_vi = self.loss_vi(*VIparas)
+            loss_cox = loss_cox + self.tau_vi * loss_vi
+        if KAparas is not None:
+            loss_ka = self.loss_ka(*KAparas)
+            loss_cox = loss_cox + self.tau_ka * loss_ka
         return loss_cox
+    
