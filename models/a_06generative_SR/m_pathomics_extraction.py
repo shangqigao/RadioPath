@@ -139,18 +139,18 @@ if __name__ == "__main__":
     #         )
 
     # construct wsi graph
-    # bs = 32
-    # nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-    # for i in range(0, nb):
-    #     logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
-    #     start = i * bs
-    #     end = min(len(wsi_paths), (i + 1) * bs)
-    #     batch_wsi_paths = wsi_paths[start:end]
-    #     construct_wsi_graph(
-    #         wsi_paths=batch_wsi_paths,
-    #         save_dir=save_feature_dir,
-    #         n_jobs=8
-    #     )
+    bs = 32
+    nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
+    for i in range(0, nb):
+        logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+        start = i * bs
+        end = min(len(wsi_paths), (i + 1) * bs)
+        batch_wsi_paths = wsi_paths[start:end]
+        construct_wsi_graph(
+            wsi_paths=batch_wsi_paths,
+            save_dir=save_feature_dir,
+            n_jobs=8
+        )
 
     # # extract minimum spanning tree
     # wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
