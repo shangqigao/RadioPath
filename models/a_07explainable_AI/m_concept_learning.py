@@ -38,8 +38,8 @@ from sklearn.metrics import accuracy_score as acc_scorer
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
-from RadioPath.models.a_05feature_aggregation.m_gnn_concept_learning import ConceptGraphDataset, ConceptGraphArch
-from RadioPath.models.a_05feature_aggregation.m_gnn_concept_learning import ScalarMovingAverage, CoxSurvConceptLoss
+from models.a_05feature_aggregation.m_gnn_concept_learning import ConceptGraphDataset, ConceptGraphArch
+from models.a_05feature_aggregation.m_gnn_concept_learning import ScalarMovingAverage, CoxSurvConceptLoss
 from models.a_05feature_aggregation.m_graph_construction import visualize_pathomic_graph
 
 
