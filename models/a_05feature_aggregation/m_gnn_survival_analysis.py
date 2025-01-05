@@ -57,20 +57,15 @@ class SurvivalGraphDataset(Dataset):
             if any(v in self.mode for v in ["train", "valid"]):
                 graph_dict.update({"y": label})
 
-            graph = Data(**graph_dict)
             if self.sampling_rate < 1 and key == "radiomics":
                 num_nodes = len(graph_dict["x"])
                 if num_nodes > self.max_num_nodes:
                     num_sampled = int(num_nodes*self.sampling_rate)
-                    subset = np.random.choice(num_nodes, num_sampled, replace=False)
-                    graph = graph.subgraph(subset)
-                # loader = NeighborLoader(
-                #     data=graph,
-                #     num_neighbors=[3, 2],
-                #     input_nodes=subset,
-                #     batch_size=1
-                # )
-                # graph = next(iter(loader))
+                    subset = torch.randperm(num_nodes)[:num_sampled]
+                    edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=True)
+                    graph_dict["edge_index"] = edge_index
+                    graph_dict["x"] = graph_dict["x"][subset]
+            graph = Data(**graph_dict)
         else:
             graph_dict = {}
             for key in self.data_types:
@@ -88,23 +83,18 @@ class SurvivalGraphDataset(Dataset):
 
                 edge_dict = {"edge_index": subgraph_dict["edge_index"].type(torch.int64)}
                 subgraph_dict = {k: v.type(torch.float32) for k, v in subgraph_dict.items() if k != "edge_index"}
+
+                if self.sampling_rate < 1 and key == "radiomics":
+                    num_nodes = len(subgraph_dict["x"])
+                    if num_nodes > self.max_num_nodes:
+                        num_sampled = int(num_nodes*self.sampling_rate)
+                        subset = torch.randperm(num_nodes)[:num_sampled]
+                        edge_index, _ = subgraph(subset, subgraph_dict["edge_index"], relabel_nodes=True)
+                        subgraph_dict["edge_index"] = edge_index
+                        subgraph_dict["x"] = subgraph_dict["x"][subset]
                 graph_dict.update({key: subgraph_dict, (key, "to", key): edge_dict})
             
             graph = HeteroData(graph_dict)
-            if self.sampling_rate < 1 and "radiomics" in self.data_types:
-                num_nodes = len(graph_dict["radiomics"]["x"])
-                if num_nodes > self.max_num_nodes:
-                    num_sampled = int(num_nodes*self.sampling_rate)
-                    subset_dict = {"radiomics": np.random.choice(num_nodes, num_sampled, replace=False)}
-                    graph = graph.subgraph(subset_dict)
-                # subset_tuple = ("radiomics", np.random.choice(num_nodes, num_sampled, replace=False))
-                # loader = NeighborLoader(
-                #     data=graph,
-                #     num_neighbors={"radiomics": [3, 2]},
-                #     input_nodes=subset_tuple,
-                #     batch_size=1
-                # )  
-                # graph = next(iter(loader))
         return graph
     
     def len(self):
