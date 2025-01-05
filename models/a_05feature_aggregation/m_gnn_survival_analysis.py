@@ -23,7 +23,7 @@ class SurvivalGraphDataset(Dataset):
     def __init__(self, info_list, mode="train", preproc=None, 
                  data_types=["radiomics", "pathomics"],
                  sampling_rate=1.0,
-                 max_num_nodes=1e5
+                 max_num_nodes=1e4
         ):
         super().__init__()
         self.info_list = info_list
@@ -337,7 +337,7 @@ class OmicsIntegrationArch(nn.Module):
         aligned_s = self.align_student(fs, es)
         ht = [self.extractor(f, e) for f, e in zip(aligned_t, et)]
         hs = self.extractor(aligned_s, es)
-        ft_ = [self.recon_teachers[i](ht[i], et) for i in range(len(ht))]
+        ft_ = [self.recon_teachers[i](ht[i], et[i]) for i in range(len(ht))]
         return (hs, ht), (ft_, ft)
 
 class SurvivalGraphArch(nn.Module):
@@ -418,8 +418,7 @@ class SurvivalGraphArch(nn.Module):
                 dim_target=2,
                 layers=self.embedding_dims[1:],
                 dropout=self.dropout,
-                conv=self.conv_name,
-                mode="decoder"
+                conv=self.conv_name
             )
             # self.gate_nn = Attn_Net_Gated(
             #     L=out_emb_dim,
@@ -432,8 +431,7 @@ class SurvivalGraphArch(nn.Module):
                 dim_target=input_emb_dim,
                 layers=self.embedding_dims[::-1],
                 dropout=self.dropout,
-                conv=self.conv_name,
-                mode="decoder"
+                conv=self.conv_name
             )
             self.Aggregation = MeanAggregation()
             # input_emb_dim = out_emb_dim
