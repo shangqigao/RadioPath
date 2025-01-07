@@ -1155,6 +1155,8 @@ if __name__ == "__main__":
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--num_concepts', default=39, type=int)
+    parser.add_argument('--resolution', default=20, type=float)
+    parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
 
     ## get wsi path
@@ -1217,8 +1219,8 @@ if __name__ == "__main__":
     # splits = joblib.load(split_path)
     # num_train = len(splits[0]["train"])
     # logging.info(f"Number of training samples: {num_train}.")
-    # # num_valid = len(splits[0]["valid"])
-    # # logging.info(f"Number of validating samples: {num_valid}.")
+    # num_valid = len(splits[0]["valid"])
+    # logging.info(f"Number of validating samples: {num_valid}.")
     # num_test = len(splits[0]["test"])
     # logging.info(f"Number of testing samples: {num_test}.")
 
@@ -1298,9 +1300,11 @@ if __name__ == "__main__":
         if concept_label[i] == 1:
             visualize_pathomic_graph(
                 wsi_path=wsi_path,
-                graph_path=graph_path,
+                graph_path=graph_path["pathomics"],
                 label=attention[:, i],
                 save_name=f"concept{i}",
-                save_title=concept
+                save_title=concept,
+                resolution=args.resolution,
+                units=args.units
             )
     
