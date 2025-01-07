@@ -788,7 +788,8 @@ def run_once(
         optim_kwargs=None,
         BayesGNN=False,
         data_types=["pathomics"],
-        concept_weight=None
+        concept_weight=None,
+        use_histopath=False
 ):
     """running the inference or training loop once"""
     if loader_kwargs is None:
@@ -820,7 +821,8 @@ def run_once(
             subset, 
             mode=subset_name, 
             preproc=preproc_func,
-            data_types=data_types
+            data_types=data_types,
+            use_histopath=use_histopath
         )
         loader_dict[subset_name] = DataLoader(
             ds,
@@ -944,7 +946,8 @@ def training(
         BayesGNN=False,
         omic_keys=["pathomics"],
         aggregation="CBM",
-        concept_weight=None
+        concept_weight=None,
+        use_histopath=False
 ):
     """train node classification neural networks
     Args:
@@ -962,6 +965,7 @@ def training(
         "num_workers": n_works, 
         "batch_size": batch_size,
     }
+    if use_histopath: num_node_features += 35
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_concept": num_concepts,
@@ -976,10 +980,14 @@ def training(
         CL = "CL_unweighted"
     else:
         CL = "CL_weighted"
-    if BayesGNN:
-        model_dir = model_dir / f"{CL}_Bayes_Survival_Prediction_{conv}_{aggregation}"
+    if use_histopath:
+        HP = "Histopath"
     else:
-        model_dir = model_dir / f"{CL}_Survival_Prediction_{conv}_{aggregation}"
+        HP = ""
+    if BayesGNN:
+        model_dir = model_dir / f"{CL}_Bayes_Survival_Prediction_{conv}_{aggregation}_{HP}"
+    else:
+        model_dir = model_dir / f"{CL}_Survival_Prediction_{conv}_{aggregation}_{HP}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
@@ -1004,7 +1012,8 @@ def training(
             preproc_func=transform_dict,
             BayesGNN=BayesGNN,
             data_types=omic_keys,
-            concept_weight=concept_weight
+            concept_weight=concept_weight,
+            use_histopath=use_histopath
         )
     return
 
@@ -1260,51 +1269,52 @@ if __name__ == "__main__":
     omics_dims = {"pathomics": args.pathomics_dim}
     split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
     scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    # training(
-    #     num_epochs=args.epochs,
-    #     split_path=split_path,
-    #     scaler_path=scaler_paths,
-    #     num_node_features=omics_dims,
-    #     num_concepts=args.num_concepts,
-    #     model_dir=save_model_dir,
-    #     conv="GATConv",
-    #     n_works=8,
-    #     batch_size=32,
-    #     dropout=0.5,
-    #     BayesGNN=False,
-    #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "CBM"][1],
-    #     concept_weight=concept_weight
-    # )
-
-    # visualize concept attention
-    splits = joblib.load(split_path)
-    graph_path = splits[0]["test"][0][0]
-    graph_name = pathlib.Path(graph_path["pathomics"]).stem
-    print("Visualizing on wsi:", graph_name)
-    wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
-    pretrained_model = f"{save_model_dir}/CL_weighted_Survival_Prediction_GATConv_CBM/00/epoch=049.weights.pth"
-    hazard, concept_label, attention = test(
-        graph_path=graph_path,
+    training(
+        num_epochs=args.epochs,
+        split_path=split_path,
         scaler_path=scaler_paths,
         num_node_features=omics_dims,
         num_concepts=args.num_concepts,
-        pretrained_model=pretrained_model,
+        model_dir=save_model_dir,
         conv="GATConv",
+        n_works=8,
+        batch_size=32,
         dropout=0.5,
+        BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "CBM"][1]
+        aggregation=["ABMIL", "CBM"][1],
+        concept_weight=concept_weight,
+        use_histopath=True
     )
-    concepts = list(df_concepts.columns)
-    for i, concept in enumerate(concepts):
-        if concept_label[i] == 1:
-            visualize_pathomic_graph(
-                wsi_path=wsi_path,
-                graph_path=graph_path["pathomics"],
-                label=attention[:, i],
-                save_name=f"concept{i}",
-                save_title=concept,
-                resolution=args.resolution,
-                units=args.units
-            )
+
+    # visualize concept attention
+    # splits = joblib.load(split_path)
+    # graph_path = splits[0]["test"][0][0]
+    # graph_name = pathlib.Path(graph_path["pathomics"]).stem
+    # print("Visualizing on wsi:", graph_name)
+    # wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
+    # pretrained_model = f"{save_model_dir}/CL_weighted_Survival_Prediction_GATConv_CBM/00/epoch=049.weights.pth"
+    # hazard, concept_label, attention = test(
+    #     graph_path=graph_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     num_concepts=args.num_concepts,
+    #     pretrained_model=pretrained_model,
+    #     conv="GATConv",
+    #     dropout=0.5,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "CBM"][1]
+    # )
+    # concepts = list(df_concepts.columns)
+    # for i, concept in enumerate(concepts):
+    #     if concept_label[i] == 1:
+    #         visualize_pathomic_graph(
+    #             wsi_path=wsi_path,
+    #             graph_path=graph_path["pathomics"],
+    #             label=attention[:, i],
+    #             save_name=f"concept{i}",
+    #             save_title=concept,
+    #             resolution=args.resolution,
+    #             units=args.units
+    #         )
     

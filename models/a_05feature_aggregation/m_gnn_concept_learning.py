@@ -21,12 +21,13 @@ from torch_geometric.nn.aggr import SumAggregation, MeanAggregation, Attentional
 class ConceptGraphDataset(Dataset):
     """loading graph data for concept learning
     """
-    def __init__(self, info_list, mode="train", preproc=None, data_types=["pathomics"]):
+    def __init__(self, info_list, mode="train", preproc=None, data_types=["pathomics"], use_histopath=False):
         super().__init__()
         self.info_list = info_list
         self.mode = mode
         self.preproc = preproc
         self.data_types = data_types
+        self.use_histopath = use_histopath
     
     def get(self, idx):
         info = self.info_list[idx]
@@ -46,6 +47,10 @@ class ConceptGraphDataset(Dataset):
 
             if self.preproc is not None:
                 graph_dict["x"] = self.preproc[key](graph_dict["x"])
+
+            if self.use_histopath:
+                histopath = np.load(f"{graph_path[key]}".replace(".json", ".label.npy"))
+                graph_dict["x"] = np.concatenate([graph_dict["x"], histopath], axis=1)
 
             graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items()}
             if any(v in self.mode for v in ["train", "valid"]):
