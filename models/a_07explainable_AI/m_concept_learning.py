@@ -780,7 +780,7 @@ def run_once(
         dataset_dict,
         num_epochs,
         save_dir,
-        on_gpu=False,
+        on_gpu=True,
         preproc_func=None,
         pretrained=None,
         loader_kwargs=None,
@@ -1022,80 +1022,111 @@ def inference(
         split_path,
         scaler_path,
         num_node_features,
+        num_concepts,
         pretrained_dir,
+        conv="GCNConv",
         n_works=32,
         batch_size=32,
-        BayesGNN=False
+        dropout=0,
+        BayesGNN=False,
+        omic_keys=["pathomics"],
+        aggregation="CBM",
+        use_histopath=False
 ):
     """survival prediction
     """
     splits = joblib.load(split_path)
-    node_scaler = joblib.load(scaler_path)
+    node_scalers = [joblib.load(scaler_path[k]) for k in omic_keys] 
+    transform_dict = {k: s.transform for k, s in zip(omic_keys, node_scalers)}
     
     loader_kwargs = {
-        "num_workers": n_works,
+        "num_workers": n_works, 
         "batch_size": batch_size,
     }
     arch_kwargs = {
         "dim_features": num_node_features,
+        "dim_concept": num_concepts,
         "dim_target": 1,
-        "layers": [16, 16, 8],
-        "dropout": 0.5,
-        "conv": "GATConv"
+        "layers": [384, 256, 128, 64], # [16, 16, 8]
+        "dropout": dropout,  #0.5
+        "conv": conv,
+        "keys": omic_keys,
+        "aggregation": aggregation
     }
-    pretrained_dir = pretrained_dir / f"Survival_Prediction_{arch_kwargs['conv']}"
+    pretrained_dir = pretrained_dir / f"CL_unweighted_Survival_Prediction_GINconv_"
     cum_stats = []
-    for split_idx, split in enumerate(splits):
-        new_split = {"infer": [v[0] for v in split["test"]]}
+    for split_idx, split in enumerate(splits[0:1]):
+        new_split = {"infer-valid": [v[0] for v in split["test"]]}
 
-        stat_files = recur_find_ext(f"{pretrained_dir}/{split_idx:02d}/", [".json"])
-        stat_files = [v for v in stat_files if ".old.json" not in v]
-        assert len(stat_files) == 1
-        chkpts, _ = select_checkpoints(
-            stat_files[0],
-            top_k=1,
-            metric="infer-valid-A-auroc",
-        )
+        # stat_files = recur_find_ext(f"{pretrained_dir}/{split_idx:02d}/", [".json"])
+        # stat_files = [v for v in stat_files if ".old.json" not in v]
+        # assert len(stat_files) == 1
+        # chkpts, _ = select_checkpoints(
+        #     stat_files[0],
+        #     top_k=1,
+        #     metric="infer-valid-A-auroc",
+        # )
+        chkpt = pretrained_dir / "00/epoch=049.weights.pth"
         # Perform ensembling by averaging probabilities
         # across checkpoint predictions
-
-        cum_results = []
-        for i, chkpt_info in enumerate(chkpts):
-            chkpt_results = run_once(
-                new_split,
-                num_epochs=1,
-                save_dir=None,
-                pretrained=chkpt_info,
-                arch_kwargs=arch_kwargs,
-                loader_kwargs=loader_kwargs,
-                preproc_func=node_scaler.transform,
-            )
-            chkpt_results = list(zip(*chkpt_results))
-            chkpt_results = np.array(chkpt_results).squeeze()
-            cum_results.append(chkpt_results)
-        cum_results = np.array(cum_results)
-        cum_results = np.squeeze(cum_results)
-
-        prob = cum_results
-        if len(cum_results.shape) == 2:
-            prob = np.mean(cum_results, axis=0)
+        outputs = run_once(
+            new_split,
+            num_epochs=1,
+            on_gpu=False,
+            arch_kwargs=arch_kwargs,
+            loader_kwargs=loader_kwargs,
+            preproc_func=transform_dict,
+            pretrained=chkpt,
+            BayesGNN=BayesGNN,
+            data_types=omic_keys,
+            concept_weight=concept_weight,
+            use_histopath=use_histopath
+        )
+        pred_logit, concept_logit, _ = list(zip(*outputs))
+        hazard = np.exp(np.array(pred_logit).squeeze())
+        concept_logit = np.array(concept_logit).squeeze()
+        concept_prob = 1 / (1 + np.exp(-concept_logit))
+        concept_label = (concept_prob > 0.5).astype(np.int8)
 
         # * Calculate split statistics
-        true = np.array([v[1] for v in split["test"]])
-        event_status = true[:, 1] > 0
-        event_time = true[:, 0]
-        cindex = concordance_index_censored(event_status, event_time, prob)[0]
+        pred_true = np.array([v[1]["label"] for v in split["test"]])
+        concept_true = np.array([v[1]["concept"] for v in split["test"]])
+
+        pred_true = np.array(pred_true).squeeze()
+        event_status = pred_true[:, 1] > 0
+        event_time = pred_true[:, 0]
+        cindex = concordance_index_censored(event_status, event_time, hazard)[0]
+
+        concept_true = np.array(concept_true).squeeze().astype(np.int8)
+        acc_list = []
+        for i in range(concept_true.shape[1]):
+            acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
+
+        concept_sum = concept_true.sum(axis=0)
+        concept_true = concept_true[:, concept_sum > 0]
+        concept_prob = concept_prob[:, concept_sum > 0]
+        auroc_list = []
+        for i in range(concept_true.shape[1]):
+            auroc_list.append(auroc_scorer(concept_true[:, i], concept_prob[:, i]))
 
         cum_stats.append(
             {
-                "C-Index": np.array(cindex)
+                "C-Index": np.array(cindex),
+                "ACC": np.array(acc_list),
+                "AUROC": np.array(auroc_list)
             }
         )
         print(f"Fold-{split_idx}:", cum_stats[-1])
     cindex_list = [stat["C-Index"] for stat in cum_stats]
+    acc_list = [stat["ACC"] for stat in cum_stats]
+    auroc_list = [stat["AUROC"] for stat in cum_stats]
     avg_stat = {
         "C-Index mean": np.stack(cindex_list, axis=0).mean(axis=0),
         "C-Index std": np.stack(cindex_list, axis=0).std(axis=0),
+        "ACC mean": np.stack(acc_list, axis=0).mean(axis=0),
+        "ACC std": np.stack(acc_list, axis=0).std(axis=0),
+        "AUROC mean": np.stack(auroc_list, axis=0).mean(axis=0),
+        "AUROC std": np.stack(auroc_list, axis=0).std(axis=0),
     }
     print(f"Avg:", avg_stat)
     return cum_stats
@@ -1205,16 +1236,16 @@ if __name__ == "__main__":
     concept_weight = len(concepts) / np.array(concepts).sum(axis=0)
 
     # split data set
-    # num_folds = 5
-    # test_ratio = 0.2
-    # train_ratio = 0.8 * 0.9
-    # valid_ratio = 0.8 * 0.1
-    # data_types = ["pathomics"]
-    # # stages=["Stage I", "Stage II"]
-    # df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    # labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    # concepts = [concepts[i] for i in matched_i]
-    # print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
+    num_folds = 5
+    test_ratio = 0.2
+    train_ratio = 0.8 * 0.9
+    valid_ratio = 0.8 * 0.1
+    data_types = ["pathomics"]
+    # stages=["Stage I", "Stage II"]
+    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    concepts = [concepts[i] for i in matched_i]
+    print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
     # y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
     # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
     # kp = data_types[0]
@@ -1336,4 +1367,42 @@ if __name__ == "__main__":
         resolution=args.resolution,
         units=args.units
     )
+
+    # inference and visualize metrics
+    outputs = inference(
+        split_path=split_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        num_concepts=args.num_concepts,
+        pretrained_dir=save_model_dir,
+        conv="GATConv",
+        n_works=8,
+        batch_size=8,
+        dropout=0.5,
+        BayesGNN=False,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "CBM"][1],
+        use_histopath=False
+    )
+    concept_names = list(df_concepts.columns)
+    counts = np.sum(np.array(concepts) == 1.0, axis=0)
+    acc = outputs[0]["ACC"]
+    auroc = outputs[0]["AUROC"]
+    sorted_index = np.argsort(acc).tolist()
+    sorted_names = [concept_names[i] for i in sorted_index]
+    sorted_counts = counts[sorted_index] / len(concepts)
+    sorted_acc = acc[sorted_index]
+    sorted_auroc = auroc[sorted_index]
+    x = np.arange(len(concepts)) + 1
+    plt.figure()
+    ax = plt.subplot(1,1,1)
+    ax.plot(x, sorted_counts, color='green', marker='o', label="ratio of concept")
+    ax.plot(x, sorted_acc, color='blue', marker='^', label="ACC")
+    ax.plot(x, sorted_auroc, color='purple', marker='*', label="AUROC")
+    ax.set_xticklabels(sorted_names, rotation=45, ha='right')
+    plt.subplots_adjust(bottom=0.3)
+    plt.savefig("a_07explainable_AI/concept_acc_auroc.jpg")
+
+
+
     
