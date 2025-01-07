@@ -71,6 +71,8 @@ class ConceptGraphDataset(Dataset):
                 edge_dict = {"edge_index": subgraph_dict["edge_index"].type(torch.int64)}
                 subgraph_dict = {k: v.type(torch.float32) for k, v in subgraph_dict.items() if k != "edge_index"}
                 graph_dict.update({key: subgraph_dict, (key, "to", key): edge_dict})
+                del edge_dict
+                del subgraph_dict
             
             graph = HeteroData(graph_dict)
         return graph

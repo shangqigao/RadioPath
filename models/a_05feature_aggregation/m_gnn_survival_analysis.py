@@ -81,9 +81,6 @@ class SurvivalGraphDataset(Dataset):
                 if any(v in self.mode for v in ["train", "valid"]):
                     subgraph_dict.update({"y": label})
 
-                edge_dict = {"edge_index": subgraph_dict["edge_index"].type(torch.int64)}
-                subgraph_dict = {k: v.type(torch.float32) for k, v in subgraph_dict.items() if k != "edge_index"}
-
                 if self.sampling_rate < 1 and key == "radiomics":
                     num_nodes = len(subgraph_dict["x"])
                     if num_nodes > self.max_num_nodes:
@@ -92,7 +89,14 @@ class SurvivalGraphDataset(Dataset):
                         edge_index, _ = subgraph(subset, subgraph_dict["edge_index"], relabel_nodes=True)
                         subgraph_dict["edge_index"] = edge_index
                         subgraph_dict["x"] = subgraph_dict["x"][subset]
+                        del edge_index
+
+                edge_dict = {"edge_index": subgraph_dict["edge_index"].type(torch.int64)}
+                subgraph_dict = {k: v.type(torch.float32) for k, v in subgraph_dict.items() if k != "edge_index"}
+
                 graph_dict.update({key: subgraph_dict, (key, "to", key): edge_dict})
+                del edge_dict
+                del subgraph_dict
             
             graph = HeteroData(graph_dict)
         return graph
@@ -328,6 +332,7 @@ class OmicsIntegrationArch(nn.Module):
         ht = [self.extractor(f, e) for f, e in zip(aligned_t, et)]
         hs = self.extractor(aligned_s, es)
         ft_ = [self.recon_teachers[i](ht[i], et[i]) for i in range(len(ht))]
+        ht = [torch.concat(ht, axis=0)]
         return (hs, ht), (ft_, ft)
 
 class SurvivalGraphArch(nn.Module):
@@ -455,7 +460,7 @@ class SurvivalGraphArch(nn.Module):
             edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
             # check = [[len(f), e.max().item()] for f, e in zip(feature_list, edge_index_list)]
             # print("Number of nodes and edge index: ", check)
-            edge_index = edge_index_list.copy()
+            edge_index = [e.clone() for e in edge_index_list]
             index_shift = 0
             for i in range(1, len(edge_index)): 
                 index_shift += len(feature_list[i-1])
@@ -784,6 +789,12 @@ class CFLoss(nn.Module):
     def forward(self, hs, ht, ft_, ft):
         mmd_loss = 0.0
         mse_loss = 0.0
+        # random sampling if hs is large-scale
+        if len(hs) > 1e5:
+            num_sampled = int(len(hs) * 0.01)
+            subset = torch.randperm(len(hs))[:num_sampled]
+            hs = hs[subset]
+            ht = [ht_i[subset] for ht_i in ht]
         for ht_i in ht:
             mmd_loss += calc_mmd(hs, ht_i, sigmas=self.sigmas, normalized=self.normalized)
         for i in range(len(ft_)):

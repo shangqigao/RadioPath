@@ -803,7 +803,10 @@ def run_once(
     model = ConceptGraphArch(**arch_kwargs)
     if pretrained is not None:
         model.load(*pretrained)
-    model = model.to("cuda")
+    if on_gpu:
+        model = model.to("cuda")
+    else:
+        model = model.to("cpu")
     loss = CoxSurvConceptLoss(tau=0.01, concept_weight=concept_weight)
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)

@@ -762,7 +762,7 @@ def run_once(
         dataset_dict,
         num_epochs,
         save_dir,
-        on_gpu=False,
+        on_gpu=True,
         preproc_func=None,
         pretrained=None,
         loader_kwargs=None,
@@ -790,7 +790,10 @@ def run_once(
         kl = None
     if pretrained is not None:
         model.load(*pretrained)
-    model = model.to("cpu")
+    if on_gpu:
+        model = model.to("cuda")
+    else:
+        model = model.to("cpu")
     loss = CoxSurvLoss()
     optimizer = torch.optim.Adam(model.parameters(), **optim_kwargs)
     # optimizer = torch.optim.SGD(model.parameters(), momentum=0.9, nesterov=True, **optim_kwargs)
@@ -801,7 +804,7 @@ def run_once(
     for subset_name, subset in dataset_dict.items():
         _loader_kwargs = copy.deepcopy(loader_kwargs)
         if not "train" in subset_name: 
-            _loader_kwargs["batch_size"] = 4
+            _loader_kwargs["batch_size"] = 8
             sampling_rate = 1.0
         ds = SurvivalGraphDataset(
             subset, 
@@ -1224,9 +1227,9 @@ if __name__ == "__main__":
         model_dir=save_model_dir,
         conv="GINConv",
         n_works=8,
-        batch_size=8,
+        batch_size=32,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
         aggregation=["ABMIL", "SISIR"][1],
-        sampling_rate=0.2
+        sampling_rate=0.1
     )
