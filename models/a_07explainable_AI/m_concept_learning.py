@@ -780,7 +780,7 @@ def run_once(
         dataset_dict,
         num_epochs,
         save_dir,
-        on_gpu=True,
+        on_gpu=False,
         preproc_func=None,
         pretrained=None,
         loader_kwargs=None,
@@ -965,7 +965,8 @@ def training(
         "num_workers": n_works, 
         "batch_size": batch_size,
     }
-    if use_histopath: num_node_features += 35
+    if use_histopath: 
+        num_node_features["pathomics"] = num_node_features["pathomics"] + 35
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_concept": num_concepts,
@@ -1108,7 +1109,8 @@ def test(
     conv="MLP",
     dropout=0,
     omic_keys=["pathomics"],
-    aggregation="CBM"
+    aggregation="CBM",
+    use_histopath=False
 ):
     """node classification 
     """
@@ -1119,6 +1121,8 @@ def test(
         "num_workers": 1,
         "batch_size": 1,
     }
+    if use_histopath: 
+        num_node_features["pathomics"] = num_node_features["pathomics"] + 35
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_concept": num_concepts,
@@ -1139,7 +1143,8 @@ def test(
         arch_kwargs=arch_kwargs,
         loader_kwargs=loader_kwargs,
         preproc_func=transform_dict,
-        data_types=omic_keys
+        data_types=omic_keys,
+        use_histopath=use_histopath
     )
 
     pred_logit, concept_logit, attention = list(zip(*outputs))
@@ -1269,31 +1274,31 @@ if __name__ == "__main__":
     omics_dims = {"pathomics": args.pathomics_dim}
     split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
     scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_paths,
-        num_node_features=omics_dims,
-        num_concepts=args.num_concepts,
-        model_dir=save_model_dir,
-        conv="GATConv",
-        n_works=8,
-        batch_size=32,
-        dropout=0.5,
-        BayesGNN=False,
-        omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "CBM"][1],
-        concept_weight=concept_weight,
-        use_histopath=True
-    )
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     num_concepts=args.num_concepts,
+    #     model_dir=save_model_dir,
+    #     conv="GATConv",
+    #     n_works=8,
+    #     batch_size=32,
+    #     dropout=0.5,
+    #     BayesGNN=False,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "CBM"][1],
+    #     concept_weight=concept_weight,
+    #     use_histopath=True
+    # )
 
     # visualize concept attention
-    # splits = joblib.load(split_path)
-    # graph_path = splits[0]["test"][0][0]
-    # graph_name = pathlib.Path(graph_path["pathomics"]).stem
-    # print("Visualizing on wsi:", graph_name)
-    # wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
-    # pretrained_model = f"{save_model_dir}/CL_weighted_Survival_Prediction_GATConv_CBM/00/epoch=049.weights.pth"
+    splits = joblib.load(split_path)
+    graph_path = splits[0]["test"][0][0]
+    graph_name = pathlib.Path(graph_path["pathomics"]).stem
+    print("Visualizing on wsi:", graph_name)
+    wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
+    pretrained_model = f"{save_model_dir}/CL_weighted_Survival_Prediction_GATConv_CBM_Histopath/00/epoch=049.weights.pth"
     # hazard, concept_label, attention = test(
     #     graph_path=graph_path,
     #     scaler_path=scaler_paths,
@@ -1303,7 +1308,8 @@ if __name__ == "__main__":
     #     conv="GATConv",
     #     dropout=0.5,
     #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "CBM"][1]
+    #     aggregation=["ABMIL", "CBM"][1],
+    #     use_histopath=True
     # )
     # concepts = list(df_concepts.columns)
     # for i, concept in enumerate(concepts):
@@ -1317,4 +1323,17 @@ if __name__ == "__main__":
     #             resolution=args.resolution,
     #             units=args.units
     #         )
+
+    # visualize conch prediction
+    graph_path = graph_path["pathomics"]
+    label_path = f"{graph_path}".replace(".json", ".label.npy")
+    visualize_pathomic_graph(
+        wsi_path=wsi_path,
+        graph_path=graph_path,
+        label=label_path,
+        save_name=f"conch",
+        save_title="CONCH Prediction",
+        resolution=args.resolution,
+        units=args.units
+    )
     

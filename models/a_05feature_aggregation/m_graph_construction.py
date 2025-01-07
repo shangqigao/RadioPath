@@ -559,7 +559,7 @@ def visualize_pathomic_graph(
     graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items() if k != "cluster_points"}
 
     uncertainty_map = None
-    if isinstance(label, pathlib.Path):
+    if isinstance(label, pathlib.Path) or isinstance(label, str):
         node_activations = np.load(label)
         if node_activations.ndim == 2:
             node_activations = np.argmax(node_activations, axis=1)
