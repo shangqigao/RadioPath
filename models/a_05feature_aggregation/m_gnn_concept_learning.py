@@ -284,21 +284,23 @@ class ConceptGraphArch(nn.Module):
                 n_classes=1
             )
         elif aggregation == "CBM":
-            out_emb_dim = dim_concept
-            self.concept_nn = ConceptScoreArch(
-                dim_features=input_emb_dim,
-                dim_target=out_emb_dim,
-                layers=self.embedding_dims[1:],
-                dropout=self.dropout,
-                conv=self.conv_name
-            )
-            input_emb_dim = out_emb_dim
+            # out_emb_dim = dim_concept
+            # self.concept_nn = ConceptScoreArch(
+            #     dim_features=input_emb_dim,
+            #     dim_target=out_emb_dim,
+            #     layers=self.embedding_dims[1:],
+            #     dropout=self.dropout,
+            #     conv=self.conv_name
+            # )
+            # input_emb_dim = out_emb_dim
             self.gate_nn = Attn_Net_Gated(
                 L=input_emb_dim,
-                D=64,
+                D=256,
                 dropout=0.25,
-                n_classes=dim_concept
+                n_classes=1
             )
+            self.concept_mlp = Linear(input_emb_dim, dim_concept)
+            input_emb_dim = dim_concept
         else:
             raise NotImplementedError
         self.SumAggregation = SumAggregation()
@@ -337,16 +339,17 @@ class ConceptGraphArch(nn.Module):
             feature, edge_index, batch = data.x, data.edge_index, data.batch
 
         feature = self.head(feature)
-        if self.aggregation == "ABMIL":
-            gate = self.gate_nn(feature)
-        elif self.aggregation == "CBM":
-            feature = self.concept_nn(feature, edge_index)
-            gate = self.gate_nn(feature)
+        # if self.aggregation == "ABMIL":
+        #     gate = self.gate_nn(feature)
+        # elif self.aggregation == "CBM":
+            # feature = self.concept_nn(feature, edge_index)
+        gate = self.gate_nn(feature)
         gate = softmax(gate, index=batch, dim=-2)
         feature = self.SumAggregation(feature * gate, index=batch)
         if self.aggregation == "ABMIL":
             concept_logit = None
         elif self.aggregation == "CBM":
+            feature = self.concept_mlp(feature)
             concept_logit = feature
         output = self.classifier(feature)
         return output, concept_logit, gate
