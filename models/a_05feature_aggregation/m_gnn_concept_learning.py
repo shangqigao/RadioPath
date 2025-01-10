@@ -308,8 +308,11 @@ class ConceptGraphArch(nn.Module):
         state_dict = self.state_dict()
         torch.save(state_dict, path)
 
-    def load(self, path):
-        state_dict = torch.load(path)
+    def load(self, path, on_gpu=False):
+        if on_gpu:
+            state_dict = torch.load(path)
+        else:
+            state_dict = torch.load(path, map_location=torch.device('cpu'))
         self.load_state_dict(state_dict)
 
     def forward(self, data):
@@ -462,4 +465,4 @@ class CoxSurvConceptLoss(object):
             loss_cox = loss_cox + self.tau * loss_cbm
         # print(loss_cox)
         # print(R_mat)
-        return loss_cox
+        return loss_cbm

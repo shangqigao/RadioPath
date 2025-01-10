@@ -189,7 +189,7 @@ def prepare_graph_pathomics(
         }
         subgraph_ids = [subgraph_dict[k] for k in subgraphs]
     graph_dict = load_json(graph_path)
-    label_path = f"{graph_path}".replace(".MST.json", ".label.npy")
+    label_path = f"{graph_path}".replace(".json", ".label.npy")
     label = np.load(label_path)
     if label.ndim == 2: label = np.argmax(label, axis=1)
     feature = np.array(graph_dict["x"])
@@ -499,20 +499,21 @@ def cox_regression(
         used="all", 
         n_jobs=32,
         radiomics_aggregation=False,
-        pathomics_aggregation=False
+        pathomics_aggregation=False,
+        alpha_min=0.01
         ):
     splits = joblib.load(split_path)
-    cv_results = {}
+    predict_results = {}
     for split_idx, split in enumerate(splits):
         print(f"Performing cross-validation on fold {split_idx}...")
         data_tr, data_va, data_te = split["train"], split["valid"], split["test"]
         data_tr = data_tr + data_va
 
-        tr_y = np.array([p[1]["pathomics"] for p in data_tr])
-        tr_y = pd.DataFrame({'event': tr_y[:, 1], 'duration': tr_y[:, 0]})
+        tr_y = np.array([p[1] for p in data_tr])
+        tr_y = pd.DataFrame({'event': tr_y[:, 1].astype(bool), 'duration': tr_y[:, 0]})
         tr_y = tr_y.to_records(index=False)
-        te_y = np.array([p[1]["pathomics"] for p in data_te])
-        te_y = pd.DataFrame({'event': te_y[:, 1], 'duration': te_y[:, 0]})
+        te_y = np.array([p[1] for p in data_te])
+        te_y = pd.DataFrame({'event': te_y[:, 1].astype(bool), 'duration': te_y[:, 0]})
         te_y = te_y.to_records(index=False)
 
         # prepare radiomics
@@ -549,7 +550,7 @@ def cox_regression(
         for d in dict_list: radiomics_dict.update(d)
         radiomics_te_X = [radiomics_dict[f"{i}"] for i in range(len(radiomics_te_paths))]
         radiomics_te_X = pd.DataFrame(radiomics_te_X)
-        print("Selected training radiomics:", radiomics_te_X.shape)
+        print("Selected testing radiomics:", radiomics_te_X.shape)
         print(radiomics_te_X.head())
 
 
@@ -587,7 +588,7 @@ def cox_regression(
         for d in dict_list: pathomics_dict.update(d)
         pathomics_te_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_te_paths))]
         pathomics_te_X = pd.DataFrame(pathomics_te_X)
-        print("Selected training pathomics:", pathomics_te_X.shape)
+        print("Selected testing pathomics:", pathomics_te_X.shape)
         print(pathomics_te_X.head())
 
         # Concatenate multi-omics if required
@@ -608,20 +609,20 @@ def cox_regression(
 
         # COX regreession
         print("Selecting the best regularization parameter...")
-        cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio="auto")
+        cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min)
         cox_elastic_net.fit(tr_X, tr_y)
         coefficients = pd.DataFrame(cox_elastic_net.coef_, index=tr_X.columns, columns=np.round(cox_elastic_net.alphas_, 5))
         
         plot_coefficients(coefficients, n_highlight=5)
 
         # choosing penalty strength by cross validation
-        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio="auto", max_iter=1000)
+        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min, max_iter=1000)
         coxnet_pipe = make_pipeline(StandardScaler(), cox)
         warnings.simplefilter("ignore", UserWarning)
         warnings.simplefilter("ignore", FitFailedWarning)
         coxnet_pipe.fit(tr_X, tr_y)
         estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
-        cv = KFold(n_splits=5, shuffle=True, random_state=0)
+        cv = KFold(n_splits=10, shuffle=True, random_state=0)
         cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
         gcv = GridSearchCV(
             make_pipeline(StandardScaler(), cox),
@@ -672,8 +673,9 @@ def cox_regression(
         coxnet_pred.fit(tr_X, tr_y)
 
         print(f"Updating regression results on fold {split_idx}")
-        cv_results.update({f"Fold {split_idx}": coxnet_pred.score(te_X, te_y)})
-    print(cv_results)
+        predict_results.update({f"Fold {split_idx}": coxnet_pred.score(te_X, te_y)})
+    print(predict_results)
+    print("CV mean", np.array(list(predict_results.values())).mean())
     return
 
 def generate_data_split(
@@ -1057,7 +1059,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--pathomics_mode', default="chief", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--radiomics_mode', default="SegVol", choices=["pyradiomics", "SegVol"], type=str)
     parser.add_argument('--radiomics_dim', default=768, choices=[107, 768], type=int)
@@ -1127,15 +1129,15 @@ if __name__ == "__main__":
     #     "graph_assortativity",
     #     # "mean_neighbor_degree"
     # ]
-    # radiomic_propereties = [
-    #     "shape",
-    #     # "firstorder",
-    #     "glcm",
-    #     "gldm",
-    #     # "glrlm",
-    #     # "glszm",
-    #     "ngtdm",
-    # ]
+    radiomic_propereties = [
+        "shape",
+        # "firstorder",
+        "glcm",
+        "gldm",
+        # "glrlm",
+        # "glszm",
+        "ngtdm",
+    ]
     # integrated = ["all", "pathomics", "radiomics", "deep_pathomics", "radiopathomics", "radioDeepPathomics", "pathoDeepPathomics"]
     # cox_proportional_hazard_regression(
     #     save_clinical_dir=save_clinical_dir,
@@ -1152,46 +1154,48 @@ if __name__ == "__main__":
     # )
 
     # split data set
-    # num_folds = 5
-    # test_ratio = 0.2
-    # train_ratio = 0.8 * 0.8
-    # valid_ratio = 0.8 * 0.2
-    # data_types = ["radiomics", "pathomics"]
-    # # stages=["Stage I", "Stage II"]
-    # df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    # y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
-    # matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
-    # kr, kp = data_types[0], data_types[1]
-    # matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
-    # splits = generate_data_split(
-    #     x=matched_graph_paths,
-    #     y=y,
-    #     train=train_ratio,
-    #     valid=valid_ratio,
-    #     test=test_ratio,
-    #     num_folds=num_folds
-    # )
-    # mkdir(save_model_dir)
-    # split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
-    # joblib.dump(splits, split_path)
-    # splits = joblib.load(split_path)
-    # num_train = len(splits[0]["train"])
-    # logging.info(f"Number of training samples: {num_train}.")
-    # num_valid = len(splits[0]["valid"])
-    # logging.info(f"Number of validating samples: {num_valid}.")
-    # num_test = len(splits[0]["test"])
-    # logging.info(f"Number of testing samples: {num_test}.")
+    num_folds = 5
+    test_ratio = 0.2
+    train_ratio = 0.8 * 0.8
+    valid_ratio = 0.8 * 0.2
+    data_types = ["radiomics", "pathomics"]
+    # stages=["Stage I", "Stage II"]
+    df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
+    matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
+    kr, kp = data_types[0], data_types[1]
+    matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
+    splits = generate_data_split(
+        x=matched_graph_paths,
+        y=y,
+        train=train_ratio,
+        valid=valid_ratio,
+        test=test_ratio,
+        num_folds=num_folds
+    )
+    mkdir(save_model_dir)
+    split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
+    joblib.dump(splits, split_path)
+    splits = joblib.load(split_path)
+    num_train = len(splits[0]["train"])
+    logging.info(f"Number of training samples: {num_train}.")
+    num_valid = len(splits[0]["valid"])
+    logging.info(f"Number of validating samples: {num_valid}.")
+    num_test = len(splits[0]["test"])
+    logging.info(f"Number of testing samples: {num_test}.")
 
     # cox regression from the splits
-    # cox_regression(
-    #     split_path=split_path,
-    #     l1_ratio=0.9,
-    #     used=["radiomics", "pathomics", "radiopathomics"][0],
-    #     n_jobs=32,
-    #     radiomics_aggregation=radiomics_aggregation,
-    #     pathomics_aggregation=pathomics_aggregation
-    # )
+    cox_regression(
+        split_path=split_path,
+        l1_ratio=0.9,
+        used=["radiomics", "pathomics", "radiopathomics"][0],
+        n_jobs=8,
+        radiomics_aggregation=radiomics_aggregation,
+        pathomics_aggregation=pathomics_aggregation,
+        radiomics_keys=radiomic_propereties,
+        alpha_min=0.1
+    )
 
     # compute mean and std on training data for normalization 
     # splits = joblib.load(split_path)
@@ -1219,17 +1223,17 @@ if __name__ == "__main__":
     omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
     split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
     scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_paths,
-        num_node_features=omics_dims,
-        model_dir=save_model_dir,
-        conv="GINConv",
-        n_works=8,
-        batch_size=32,
-        BayesGNN=False,
-        omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "SISIR"][1],
-        sampling_rate=0.1
-    )
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     model_dir=save_model_dir,
+    #     conv="GINConv",
+    #     n_works=8,
+    #     batch_size=32,
+    #     BayesGNN=False,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "SISIR"][1],
+    #     sampling_rate=0.1
+    # )
