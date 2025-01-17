@@ -1058,10 +1058,10 @@ if __name__ == "__main__":
     parser.add_argument('--save_radiomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/radiomics", type=str)
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
-    parser.add_argument('--epochs', default=50, type=int)
+    parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
-    parser.add_argument('--radiomics_mode', default="pyradiomics", choices=["pyradiomics", "SegVol"], type=str)
+    parser.add_argument('--radiomics_mode', default="SegVol", choices=["pyradiomics", "SegVol"], type=str)
     parser.add_argument('--radiomics_dim', default=768, choices=[107, 768], type=int)
     args = parser.parse_args()
 
@@ -1175,7 +1175,7 @@ if __name__ == "__main__":
     #     num_folds=num_folds
     # )
     # mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
+    # split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
     # joblib.dump(splits, split_path)
     # splits = joblib.load(split_path)
     # num_train = len(splits[0]["train"])
@@ -1186,17 +1186,17 @@ if __name__ == "__main__":
     # logging.info(f"Number of testing samples: {num_test}.")
 
     # cox regression from the splits
-    cox_regression(
-        split_path=split_path,
-        l1_ratio=0.9,
-        used=["radiomics", "pathomics", "radiopathomics"][1],
-        n_jobs=8,
-        radiomics_aggregation=radiomics_aggregation,
-        pathomics_aggregation=pathomics_aggregation,
-        radiomics_keys=radiomic_propereties,
-        pathomics_keys=["TUM", "NORM", "DEB"],
-        alpha_min=0.2
-    )
+    # cox_regression(
+    #     split_path=split_path,
+    #     l1_ratio=0.9,
+    #     used=["radiomics", "pathomics", "radiopathomics"][1],
+    #     n_jobs=8,
+    #     radiomics_aggregation=radiomics_aggregation,
+    #     pathomics_aggregation=pathomics_aggregation,
+    #     radiomics_keys=radiomic_propereties,
+    #     pathomics_keys=["TUM", "NORM", "DEB"],
+    #     alpha_min=0.2
+    # )
 
     # compute mean and std on training data for normalization 
     # splits = joblib.load(split_path)
@@ -1220,21 +1220,21 @@ if __name__ == "__main__":
     #     joblib.dump(node_scaler, scaler_path)
 
     # training
-    # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
-    # omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
-    # split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
-    # scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    # training(
-    #     num_epochs=args.epochs,
-    #     split_path=split_path,
-    #     scaler_path=scaler_paths,
-    #     num_node_features=omics_dims,
-    #     model_dir=save_model_dir,
-    #     conv="GINConv",
-    #     n_works=8,
-    #     batch_size=32,
-    #     BayesGNN=False,
-    #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "SISIR"][0],
-    #     sampling_rate=0.1
-    # )
+    omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
+    omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
+    split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
+    scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    training(
+        num_epochs=args.epochs,
+        split_path=split_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        model_dir=save_model_dir,
+        conv="GINConv",
+        n_works=8,
+        batch_size=32,
+        BayesGNN=False,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "SISIR"][0],
+        sampling_rate=0.1
+    )
