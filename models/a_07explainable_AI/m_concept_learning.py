@@ -990,7 +990,7 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"{CL}_Bayes_Survival_Prediction_{conv}_{aggregation}_{HP}"
     else:
-        model_dir = model_dir / f"{CL}_Subtyping_{conv}_{aggregation}_{HP}"
+        model_dir = model_dir / f"{CL}_Survival_Prediction_{conv}_{aggregation}_{HP}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
@@ -1057,9 +1057,9 @@ def inference(
         "keys": omic_keys,
         "aggregation": aggregation
     }
-    pretrained_dir = pretrained_dir / f"CL_weighted_Survival_Prediction_GATConv_CBM"
+    pretrained_dir = pretrained_dir / f"CL_weighted_Survival_Prediction_GATConv_CBM_"
     cum_stats = []
-    for split_idx, split in enumerate(splits):
+    for split_idx, split in enumerate(splits[:3]):
         new_split = {"infer": [v[0] for v in split["test"]]}
 
         # stat_files = recur_find_ext(f"{pretrained_dir}/{split_idx:02d}/", [".json"])
@@ -1229,46 +1229,46 @@ if __name__ == "__main__":
     # pathomics_paths = sorted(pathlib.Path(save_pathomics_dir).rglob("*.json"))
     df_concepts, matched_i = matched_concepts_graph(save_clinical_dir, pathomics_paths)
     matched_pathomics_paths = [pathomics_paths[i] for i in matched_i]
-    df_concepts = df_concepts[["Tumor type: clear cell", "Tumor type: papillary", "Tumor type: chromophobe"]]
+    # df_concepts = df_concepts[["Tumor type: clear cell", "Tumor type: papillary", "Tumor type: chromophobe"]]
     concepts = df_concepts.to_numpy(dtype=np.float32)
-    # selected = np.array(concepts).sum(axis=0) > 50
-    # concepts = concepts[:, selected].tolist()
+    selected = np.array(concepts).sum(axis=0) > 50
+    concepts = concepts[:, selected].tolist()
     concept_weight = len(concepts) / np.array(concepts).sum(axis=0)
     args.num_concepts = len(concept_weight)
 
     # split data set
-    num_folds = 5
-    test_ratio = 0.2
-    train_ratio = 0.8 * 0.9
-    valid_ratio = 0.8 * 0.1
-    data_types = ["pathomics"]
-    # stages=["Stage I", "Stage II"]
-    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    concepts = [concepts[i] for i in matched_i]
-    print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
-    y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
-    matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
-    kp = data_types[0]
-    matched_graph_paths = [{kp : p} for p in matched_pathomics_paths]
-    splits = generate_data_split(
-        x=matched_graph_paths,
-        y=y,
-        train=train_ratio,
-        valid=valid_ratio,
-        test=test_ratio,
-        num_folds=num_folds
-    )
-    mkdir(save_model_dir)
-    split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
-    joblib.dump(splits, split_path)
-    splits = joblib.load(split_path)
-    num_train = len(splits[0]["train"])
-    logging.info(f"Number of training samples: {num_train}.")
-    num_valid = len(splits[0]["valid"])
-    logging.info(f"Number of validating samples: {num_valid}.")
-    num_test = len(splits[0]["test"])
-    logging.info(f"Number of testing samples: {num_test}.")
+    # num_folds = 5
+    # test_ratio = 0.2
+    # train_ratio = 0.8 * 0.9
+    # valid_ratio = 0.8 * 0.1
+    # data_types = ["pathomics"]
+    # # stages=["Stage I", "Stage II"]
+    # df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    # labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    # concepts = [concepts[i] for i in matched_i]
+    # print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
+    # y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
+    # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
+    # kp = data_types[0]
+    # matched_graph_paths = [{kp : p} for p in matched_pathomics_paths]
+    # splits = generate_data_split(
+    #     x=matched_graph_paths,
+    #     y=y,
+    #     train=train_ratio,
+    #     valid=valid_ratio,
+    #     test=test_ratio,
+    #     num_folds=num_folds
+    # )
+    # mkdir(save_model_dir)
+    # split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
+    # joblib.dump(splits, split_path)
+    # splits = joblib.load(split_path)
+    # num_train = len(splits[0]["train"])
+    # logging.info(f"Number of training samples: {num_train}.")
+    # num_valid = len(splits[0]["valid"])
+    # logging.info(f"Number of validating samples: {num_valid}.")
+    # num_test = len(splits[0]["test"])
+    # logging.info(f"Number of testing samples: {num_test}.")
 
     # cox regression from the splits
     # cox_regression(
@@ -1281,25 +1281,25 @@ if __name__ == "__main__":
     # )
 
     # compute mean and std on training data for normalization 
-    splits = joblib.load(split_path)
-    train_graph_paths = [path for path, _ in splits[0]["train"]]
-    loader = ConceptGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
-    loader = DataLoader(
-        loader,
-        num_workers=8,
-        batch_size=1,
-        shuffle=False,
-        drop_last=False,
-    )
-    omic_features = [{k: v.x.numpy() for k in data_types} for v in loader]
-    omics_modes = {"pathomics": args.pathomics_mode}
-    for k, v in omics_modes.items():
-        node_features = [d[k] for d in omic_features]
-        node_features = np.concatenate(node_features, axis=0)
-        node_scaler = StandardScaler(copy=False)
-        node_scaler.fit(node_features)
-        scaler_path = f"{save_model_dir}/concept_{k}_{v}_scaler.dat"
-        joblib.dump(node_scaler, scaler_path)
+    # splits = joblib.load(split_path)
+    # train_graph_paths = [path for path, _ in splits[0]["train"]]
+    # loader = ConceptGraphDataset(train_graph_paths, mode="infer", data_types=data_types)
+    # loader = DataLoader(
+    #     loader,
+    #     num_workers=8,
+    #     batch_size=1,
+    #     shuffle=False,
+    #     drop_last=False,
+    # )
+    # omic_features = [{k: v.x.numpy() for k in data_types} for v in loader]
+    # omics_modes = {"pathomics": args.pathomics_mode}
+    # for k, v in omics_modes.items():
+    #     node_features = [d[k] for d in omic_features]
+    #     node_features = np.concatenate(node_features, axis=0)
+    #     node_scaler = StandardScaler(copy=False)
+    #     node_scaler.fit(node_features)
+    #     scaler_path = f"{save_model_dir}/concept_{k}_{v}_scaler.dat"
+    #     joblib.dump(node_scaler, scaler_path)
 
     # training
     omics_modes = {"pathomics": args.pathomics_mode}
@@ -1386,6 +1386,7 @@ if __name__ == "__main__":
     #     use_histopath=False
     # )
     # concept_names = list(df_concepts.columns)
+    # concept_names = [concept_names[i] for i, v in enumerate(selected.tolist()) if v]
     # counts = np.sum(np.array(concepts) == 1.0, axis=0)
     # acc_mean = outputs["ACC mean"]
     # acc_std = outputs["ACC std"]
