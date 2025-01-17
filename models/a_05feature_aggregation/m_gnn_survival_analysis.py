@@ -369,7 +369,7 @@ class SurvivalGraphArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                BatchNorm1d(out_dims),
+                # BatchNorm1d(out_dims),
                 ReLU(),
                 Dropout(self.dropout)
             )
@@ -390,7 +390,13 @@ class SurvivalGraphArch(nn.Module):
         input_emb_dim = out_emb_dim
 
         if aggregation == "ABMIL":
-            self.gate_nn = Attn_Net_Gated(
+            self.radio_gate_nn = Attn_Net_Gated(
+                L=input_emb_dim,
+                D=256,
+                dropout=0.25,
+                n_classes=1
+            )
+            self.patho_gate_nn = Attn_Net_Gated(
                 L=input_emb_dim,
                 D=256,
                 dropout=0.25,
@@ -432,7 +438,7 @@ class SurvivalGraphArch(nn.Module):
             # input_emb_dim = out_emb_dim
         else:
             raise NotImplementedError
-        self.classifier = Linear(input_emb_dim, dim_target)
+        self.classifier = Linear(2*input_emb_dim, dim_target)
 
     def save(self, path):
         state_dict = self.state_dict()
@@ -455,27 +461,29 @@ class SurvivalGraphArch(nn.Module):
             edge_index_dict = data.edge_index_dict
             batch_dict = data.batch_dict
             enc_list = [x_dict[k] for k in self.keys]
-            feature_list = [self.enc_branches[k](enc) for k, enc in zip(self.keys, enc_list)]
-            feature = torch.concat(feature_list, dim=0)
-            edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
-            # check = [[len(f), e.max().item()] for f, e in zip(feature_list, edge_index_list)]
-            # print("Number of nodes and edge index: ", check)
-            edge_index = [e.clone() for e in edge_index_list]
-            index_shift = 0
-            for i in range(1, len(edge_index)): 
-                index_shift += len(feature_list[i-1])
-                edge_index[i] += index_shift
-            edge_index = torch.concat(edge_index, dim=1)
-            batch_list = [batch_dict[k] for k in self.keys]
-            batch = torch.concat(batch_list, dim=0)
+            feature_dict = {k : self.enc_branches[k](enc) for k, enc in zip(self.keys, enc_list)}
+            # feature = torch.concat(list(feature_dict), dim=0)
+            # edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
+            # # check = [[len(f), e.max().item()] for f, e in zip(feature_list, edge_index_list)]
+            # # print("Number of nodes and edge index: ", check)
+            # edge_index = [e.clone() for e in edge_index_list]
+            # index_shift = 0
+            # for i in range(1, len(edge_index)): 
+            #     index_shift += len(feature_list[i-1])
+            #     edge_index[i] += index_shift
+            # edge_index = torch.concat(edge_index, dim=1)
+            # batch_list = [batch_dict[k] for k in self.keys]
+            # batch = torch.concat(batch_list, dim=0)
         else:
             enc_list = [data.x]
             feature, edge_index, batch = data.x, data.edge_index, data.batch
+            feature = self.head(feature)
 
-        feature = self.head(feature)
         if self.aggregation == "ABMIL":
-            gate = self.gate_nn(feature)
-            gate = softmax(gate, index=batch, dim=-2)
+            radio_gate = self.radio_gate_nn(feature_dict["radiomics"])
+            radio_gate = softmax(radio_gate, index=batch_dict["radiomics"], dim=-2)
+            patho_gate = self.patho_gate_nn(feature_dict["pathomics"])
+            patho_gate = softmax(patho_gate, index=batch_dict["pathomics"], dim=-2)
             VIparas = None
             KAparas = None
         elif self.aggregation == "SISIR":
@@ -501,7 +509,10 @@ class SurvivalGraphArch(nn.Module):
                 dec_list = [decode]
             VIparas.append(enc_list)
             VIparas.append(dec_list)
-        feature = self.Aggregation(feature * gate, index=batch)
+        # feature = self.Aggregation(feature * gate, index=batch)
+        radio_feature = self.Aggregation(feature_dict["radiomics"] * radio_gate, index=batch_dict["radiomics"])
+        patho_feature = self.Aggregation(feature_dict["pathomics"] * patho_gate, index=batch_dict["pathomics"])
+        feature = torch.concat([radio_feature, patho_feature], dim=-1)
         output = self.classifier(feature)
         return output, VIparas, KAparas
     
