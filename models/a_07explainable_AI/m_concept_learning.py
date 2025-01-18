@@ -512,64 +512,37 @@ def cox_proportional_hazard_regression(
 
 def cox_regression(
         split_path,
-        radiomics_keys=None,
+        concepts,
         pathomics_keys=None,
         l1_ratio=1.0, 
         used="all", 
         n_jobs=32,
-        radiomics_aggregation=False,
-        pathomics_aggregation=False
+        pathomics_aggregation=False,
+        alpha_min=0.01
         ):
     splits = joblib.load(split_path)
-    cv_results = {}
+    predict_results = {}
     for split_idx, split in enumerate(splits):
         print(f"Performing cross-validation on fold {split_idx}...")
-        data_tr, data_te = split["train"], split["test"]
+        data_tr, data_va, data_te = split["train"], split["valid"], split["test"]
+        data_tr = data_tr + data_va
 
-        tr_y = np.array([p[1]["pathomics"] for p in data_tr])
-        tr_y = pd.DataFrame({'event': tr_y[:, 1], 'duration': tr_y[:, 0]})
+        tr_y = np.array([p[1]["label"] for p in data_tr])
+        tr_y = pd.DataFrame({'event': tr_y[:, 1].astype(bool), 'duration': tr_y[:, 0]})
         tr_y = tr_y.to_records(index=False)
-        te_y = np.array([p[1]["pathomics"] for p in data_te])
-        te_y = pd.DataFrame({'event': te_y[:, 1], 'duration': te_y[:, 0]})
+        te_y = np.array([p[1]["label"] for p in data_te])
+        te_y = pd.DataFrame({'event': te_y[:, 1].astype(bool), 'duration': te_y[:, 0]})
         te_y = te_y.to_records(index=False)
-
-        # prepare radiomics
-        radiomics_tr_paths = [p[0]["radiomics"] for p in data_tr]
-        if radiomics_aggregation:
-            dict_list = joblib.Parallel(n_jobs=n_jobs)(
-                joblib.delayed(prepare_graph_radiomics)(idx, graph_path)
-                for idx, graph_path in enumerate(radiomics_tr_paths)
-            )
-        else:
-            dict_list = joblib.Parallel(n_jobs=n_jobs)(
-                joblib.delayed(load_pyradiomic_properties)(idx, graph_path, radiomics_keys)
-                for idx, graph_path in enumerate(radiomics_tr_paths)
-            )
-        radiomics_dict = {}
-        for d in dict_list: radiomics_dict.update(d)
-        radiomics_tr_X = [radiomics_dict[f"{i}"] for i in range(len(radiomics_tr_paths))]
-        radiomics_tr_X = pd.DataFrame(radiomics_tr_X)
-        print("Selected training radiomics:", radiomics_tr_X.shape)
-        print(radiomics_tr_X.head())
-
-        radiomics_te_paths = [p[0]["radiomics"] for p in data_te]
-        if radiomics_aggregation:
-            dict_list = joblib.Parallel(n_jobs=n_jobs)(
-                joblib.delayed(prepare_graph_radiomics)(idx, graph_path)
-                for idx, graph_path in enumerate(radiomics_te_paths)
-            )
-        else:
-            dict_list = joblib.Parallel(n_jobs=n_jobs)(
-                joblib.delayed(load_pyradiomic_properties)(idx, graph_path, radiomics_keys)
-                for idx, graph_path in enumerate(radiomics_te_paths)
-            )
-        radiomics_dict = {}
-        for d in dict_list: radiomics_dict.update(d)
-        radiomics_te_X = [radiomics_dict[f"{i}"] for i in range(len(radiomics_te_paths))]
-        radiomics_te_X = pd.DataFrame(radiomics_te_X)
-        print("Selected training radiomics:", radiomics_te_X.shape)
-        print(radiomics_te_X.head())
-
+        
+        # prepare concepts
+        concept_tr_X = np.array([p[1]["concept"] for p in data_tr])
+        concept_tr_X = pd.DataFrame({c: concept_tr_X[:, i] for i, c in enumerate(concepts)})
+        print("Selected training concepts:", concept_tr_X.shape)
+        print(concept_tr_X.head())
+        concept_te_X = np.array([p[1]["concept"] for p in data_te])
+        concept_te_X = pd.DataFrame({c: concept_te_X[:, i] for i, c in enumerate(concepts)})
+        print("Selected testing concepts:", concept_te_X.shape)
+        print(concept_te_X.head())
 
         # Prepare pathomics
         pathomics_tr_paths = [p[0]["pathomics"] for p in data_tr]
@@ -605,17 +578,15 @@ def cox_regression(
         for d in dict_list: pathomics_dict.update(d)
         pathomics_te_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_te_paths))]
         pathomics_te_X = pd.DataFrame(pathomics_te_X)
-        print("Selected training pathomics:", pathomics_te_X.shape)
+        print("Selected testing pathomics:", pathomics_te_X.shape)
         print(pathomics_te_X.head())
 
         # Concatenate multi-omics if required
-        if used == "radiopathomics":
-            tr_X = pd.concat([radiomics_tr_X, pathomics_tr_X], axis=1)
-            te_X = pd.concat([radiomics_te_X, pathomics_te_X], axis=1)
-        elif used == "pathomics":
+        if used == "pathomics":
             tr_X, te_X = pathomics_tr_X, pathomics_te_X
-        elif used == "radiomics":
-            tr_X, te_X = radiomics_tr_X, radiomics_te_X
+        elif used == "concepts":
+
+            tr_X, te_X = concept_tr_X, concept_te_X
         else:
             raise NotImplementedError
         # df_prop = df_prop.apply(zscore)
@@ -626,14 +597,14 @@ def cox_regression(
 
         # COX regreession
         print("Selecting the best regularization parameter...")
-        cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio="auto")
+        cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min)
         cox_elastic_net.fit(tr_X, tr_y)
         coefficients = pd.DataFrame(cox_elastic_net.coef_, index=tr_X.columns, columns=np.round(cox_elastic_net.alphas_, 5))
         
         plot_coefficients(coefficients, n_highlight=5)
 
         # choosing penalty strength by cross validation
-        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio="auto", max_iter=1000)
+        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min, max_iter=1000)
         coxnet_pipe = make_pipeline(StandardScaler(), cox)
         warnings.simplefilter("ignore", UserWarning)
         warnings.simplefilter("ignore", FitFailedWarning)
@@ -690,8 +661,9 @@ def cox_regression(
         coxnet_pred.fit(tr_X, tr_y)
 
         print(f"Updating regression results on fold {split_idx}")
-        cv_results.update({f"Fold {split_idx}": coxnet_pred.score(te_X, te_y)})
-    print(cv_results)
+        predict_results.update({f"Fold {split_idx}": coxnet_pred.score(te_X, te_y)})
+    print(predict_results)
+    print("CV mean", np.array(list(predict_results.values())).mean())
     return
 
 def generate_data_split(
@@ -1257,6 +1229,8 @@ if __name__ == "__main__":
     concepts = concepts[:, selected].tolist()
     concept_weight = len(concepts) / np.array(concepts).sum(axis=0)
     args.num_concepts = len(concept_weight)
+    concept_names = list(df_concepts.columns)
+    concept_names = [concept_names[i] for i, v in enumerate(selected.tolist()) if v]
 
     # split data set
     # num_folds = 5
@@ -1282,7 +1256,7 @@ if __name__ == "__main__":
     #     num_folds=num_folds
     # )
     # mkdir(save_model_dir)
-    # split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
+    split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
     # joblib.dump(splits, split_path)
     # splits = joblib.load(split_path)
     # num_train = len(splits[0]["train"])
@@ -1293,14 +1267,15 @@ if __name__ == "__main__":
     # logging.info(f"Number of testing samples: {num_test}.")
 
     # cox regression from the splits
-    # cox_regression(
-    #     split_path=split_path,
-    #     l1_ratio=0.9,
-    #     used=["radiomics", "pathomics", "radiopathomics"][0],
-    #     n_jobs=32,
-    #     radiomics_aggregation=radiomics_aggregation,
-    #     pathomics_aggregation=pathomics_aggregation
-    # )
+    cox_regression(
+        split_path=split_path,
+        concepts=concept_names,
+        l1_ratio=0.9,
+        used=["pathomics", "concepts"][1],
+        n_jobs=32,
+        pathomics_aggregation=True,
+        alpha_min=1e-4
+    )
 
     # compute mean and std on training data for normalization 
     # splits = joblib.load(split_path)
