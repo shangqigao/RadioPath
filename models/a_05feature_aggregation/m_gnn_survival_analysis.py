@@ -457,7 +457,7 @@ class SurvivalGraphArch(nn.Module):
             batch_dict = data.batch_dict
             enc_list = [x_dict[k] for k in self.keys]
             feature_dict = {k : self.enc_branches[k](enc) for k, enc in zip(self.keys, enc_list)}
-            feature = torch.concat(list(feature_dict), dim=0)
+            feature = torch.concat(list(feature_dict.values()), dim=0)
             edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
             # check = [[len(f), e.max().item()] for f, e in zip(feature_list, edge_index_list)]
             # print("Number of nodes and edge index: ", check)

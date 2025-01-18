@@ -897,6 +897,7 @@ def run_once(
                         concept_prob = []
                         for i in range(concept_logit.shape[1]):
                             scaler = model.aux_model[f"scaler{i+1}"]
+                            logit = concept_logit[:, i:i+1]
                             prob = scaler.predict_proba(logit)[:, 1:2]
                             concept_prob.append(prob)
                         concept_prob = np.concatenate(concept_prob, axis=1)

@@ -943,7 +943,7 @@ def training(
         "weight_decay": {"ABMIL": 1.0e-5, "SISIR": 0.0}[aggregation],
     }
     for split_idx, split in enumerate(splits):
-        if split_idx == 1 or split_idx == 2: continue
+        # if split_idx == 1 or split_idx == 2: continue
         new_split = {
             "train": split["train"],
             "infer-train": split["train"],
@@ -1104,7 +1104,7 @@ if __name__ == "__main__":
 
     # use radiomics and pathomics
     class_name = ["kidney_and_mass", "mass", "tumour"][2]
-    radiomics_aggregation = False # false if load image-level features else true
+    radiomics_aggregation = True # false if load image-level features else true
     if radiomics_aggregation:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.json"))
     else:
@@ -1236,6 +1236,6 @@ if __name__ == "__main__":
         batch_size=32,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "SISIR"][0],
+        aggregation=["ABMIL", "SISIR"][1],
         sampling_rate=0.1
     )
