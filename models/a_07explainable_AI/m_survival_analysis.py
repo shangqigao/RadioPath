@@ -943,6 +943,7 @@ def training(
         "weight_decay": {"ABMIL": 1.0e-5, "SISIR": 0.0}[aggregation],
     }
     for split_idx, split in enumerate(splits):
+        if split_idx == 1 or split_idx == 2: continue
         new_split = {
             "train": split["train"],
             "infer-train": split["train"],
