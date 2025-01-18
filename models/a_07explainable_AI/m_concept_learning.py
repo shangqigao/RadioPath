@@ -891,12 +891,15 @@ def run_once(
                             scaler.fit(logit, true)
                             model.aux_model[f"scaler{i+1}"] = scaler
 
-                    concept_prob = []
-                    for i in range(concept_logit.shape[1]):
-                        scaler = model.aux_model[f"scaler{i+1}"]
-                        prob = scaler.predict_proba(logit)[:, 1:2]
-                        concept_prob.append(prob)
-                    concept_prob = np.concatenate(concept_prob, axis=1)
+                    if len(model.aux_model) == 0:
+                        concept_prob = 1 / (1 + np.exp(-concept_logit))
+                    else:
+                        concept_prob = []
+                        for i in range(concept_logit.shape[1]):
+                            scaler = model.aux_model[f"scaler{i+1}"]
+                            prob = scaler.predict_proba(logit)[:, 1:2]
+                            concept_prob.append(prob)
+                        concept_prob = np.concatenate(concept_prob, axis=1)
                     
                     concept_label = (concept_prob > 0.5).astype(np.int8)
 
@@ -1008,7 +1011,7 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"{CL}_Bayes_Survival_Prediction_{conv}_{aggregation}_{HP}"
     else:
-        model_dir = model_dir / f"{CL}_Survival_Prediction_{conv}_{aggregation}_{HP}"
+        model_dir = model_dir / f"{CL}_Calibrated_Survival_Prediction_{conv}_{aggregation}_{HP}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
