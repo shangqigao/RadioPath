@@ -306,16 +306,20 @@ class ConceptGraphArch(nn.Module):
         self.SumAggregation = SumAggregation()
         self.classifier = Linear(input_emb_dim, dim_target)
 
-    def save(self, path):
+        self.aux_model = {}
+
+    def save(self, path, aux_path):
         state_dict = self.state_dict()
         torch.save(state_dict, path)
+        joblib.dump(self.aux_model, aux_path)
 
-    def load(self, path, on_gpu=False):
+    def load(self, path, aux_path, on_gpu=False):
         if on_gpu:
             state_dict = torch.load(path)
         else:
             state_dict = torch.load(path, map_location=torch.device('cpu'))
         self.load_state_dict(state_dict)
+        self.aux_model = joblib.load(aux_path)
 
     def forward(self, data):
         if len(self.keys) > 1:

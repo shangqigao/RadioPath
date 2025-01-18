@@ -804,7 +804,7 @@ def run_once(
     model = ConceptGraphArch(**arch_kwargs)
     if pretrained is not None:
         logging.info(f"loading {pretrained}...")
-        model.load(pretrained, on_gpu)
+        model.load(*pretrained, on_gpu)
     if on_gpu:
         model = model.to("cuda")
     else:
@@ -874,14 +874,31 @@ def run_once(
 
                 if "valid-A" in loader_name and cindex > best_score: 
                     best_score = cindex
-                    model.save(f"{save_dir}/best_model.weights.pth")
+                    model.save(
+                        f"{save_dir}/best_model.weights.pth",
+                        f"{save_dir}/best_model.aux.dat",
+                        )
 
                 if arch_kwargs["aggregation"] == "CBM":
                     concept_logit, concept_true = output[2], output[3]
                     concept_logit = np.array(concept_logit).squeeze()
-                    concept_prob = 1 / (1 + np.exp(-concept_logit))
-                    concept_label = (concept_prob > 0.5).astype(np.int8)
                     concept_true = np.array(concept_true).squeeze().astype(np.int8)
+                    if "valid-A" in loader_name:
+                        for i in range(concept_logit.shape[1]):
+                            scaler = PlattScaling(solver="liblinear", multi_class="ovr")
+                            logit = concept_logit[:, i:i+1]
+                            true = concept_true[:, i]
+                            scaler.fit(logit, true)
+                            model.aux_model[f"scaler{i+1}"] = scaler
+
+                    concept_prob = []
+                    for i in range(concept_logit.shape[1]):
+                        scaler = model.aux_model[f"scaler{i+1}"]
+                        prob = scaler.predict_proba(logit)[:, 1:2]
+                        concept_prob.append(prob)
+                    concept_prob = np.concatenate(concept_prob, axis=1)
+                    
+                    concept_label = (concept_prob > 0.5).astype(np.int8)
 
                     acc_list = []
                     for i in range(concept_true.shape[1]):
@@ -928,6 +945,7 @@ def run_once(
                 save_as_json(new_stats, f"{save_dir}/stats.json", exist_ok=True)
                 model.save(
                     f"{save_dir}/epoch={epoch:03d}.weights.pth",
+                    f"{save_dir}/epoch={epoch:03d}.aux.dat",
                 )
         lr_scheduler.step()
     
