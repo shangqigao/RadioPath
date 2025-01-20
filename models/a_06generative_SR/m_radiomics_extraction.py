@@ -21,8 +21,8 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
     parser.add_argument('--modality', default="CT", type=str)
     parser.add_argument('--save_dir', default="/home/sg2162/rds/hpc-work/Experiments/radiomics", type=str)
-    parser.add_argument('--feature_mode', default="SegVol", choices=["pyradiomics", "SegVol"], type=str)
-    parser.add_argument('--feature_dim', default=1024, choices=[2048, 384, 1024, 35], type=int)
+    parser.add_argument('--feature_mode', default="SegVol", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
+    parser.add_argument('--feature_dim', default=1024, choices=[2048, 768, 768], type=int)
     parser.add_argument('--resolution', default=1.024, type=float)
     parser.add_argument('--units', default="mm", type=str)
     args = parser.parse_args()
@@ -40,24 +40,24 @@ if __name__ == "__main__":
     save_feature_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_{args.modality}_radiomic_features/{args.feature_mode}")
     
     # extract radiomics
-    # bs = 32
-    # nb = len(img_paths) // bs if len(img_paths) % bs == 0 else len(img_paths) // bs + 1
-    # for i in range(0, nb):
-    #     logging.info(f"Processing images of batch [{i+1}/{nb}] ...")
-    #     start = i * bs
-    #     end = min(len(img_paths), (i + 1) * bs)
-    #     batch_img_paths = img_paths[start:end]
-    #     batch_lab_paths = lab_paths[start:end]
-    #     extract_radiomic_feature(
-    #         img_paths=batch_img_paths,
-    #         lab_paths=batch_lab_paths,
-    #         feature_mode=args.feature_mode,
-    #         save_dir=save_feature_dir,
-    #         class_name=class_name,
-    #         label=1,
-    #         n_jobs=32,
-    #         resolution=args.resolution
-    #     )
+    bs = 32
+    nb = len(img_paths) // bs if len(img_paths) % bs == 0 else len(img_paths) // bs + 1
+    for i in range(0, nb):
+        logging.info(f"Processing images of batch [{i+1}/{nb}] ...")
+        start = i * bs
+        end = min(len(img_paths), (i + 1) * bs)
+        batch_img_paths = img_paths[start:end]
+        batch_lab_paths = lab_paths[start:end]
+        extract_radiomic_feature(
+            img_paths=batch_img_paths,
+            lab_paths=batch_lab_paths,
+            feature_mode=args.feature_mode,
+            save_dir=save_feature_dir,
+            class_name=class_name,
+            label=1,
+            n_jobs=32,
+            resolution=args.resolution
+        )
 
     # construct image graph
     # construct_img_graph(

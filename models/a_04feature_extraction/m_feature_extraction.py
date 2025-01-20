@@ -159,6 +159,16 @@ def extract_radiomic_feature(
             resolution,
             units
         )
+    elif feature_mode == "M3D-CLIP":
+        _ = extract_M3DCLIPradiomics(
+            img_paths,
+            lab_paths,
+            save_dir,
+            class_name,
+            label,
+            resolution,
+            units
+        )
     else:
         raise ValueError(f"Invalid feature mode: {feature_mode}")
     return
@@ -741,14 +751,17 @@ def extract_pyradiomics(img_paths, lab_paths, save_dir, class_name, label=None, 
     )
     return
 
-def extract_VOI(image, label, patch_size, padding):
+def extract_VOI(image, label, patch_size, padding, output_shape=None):
     assert image.ndim == 3
     label = get_largest_connected_component_mask(label)
     s, e = generate_spatial_bounding_box(np.expand_dims(label, 0))
     s = np.array(s) - np.array(padding)
     e = np.array(e) + np.array(padding)
     image = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
-    shape = image.shape * np.array(patch_size, np.int32)
+    if output_shape is not None:
+        shape = output_shape
+    else:
+        shape = image.shape * np.array(patch_size, np.int32)
     image = skimage.transform.resize(image, output_shape=shape)
     bbox = [s, e]
     return image, bbox
@@ -881,6 +894,52 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
         coordinates_path = f"{save_dir}/{img_name}_{class_name}_coordinates.npy"
         np.save(coordinates_path, coordinates)
     return
+
+def extract_M3DCLIPradiomics(img_paths, lab_paths, save_dir, class_name, label=1, resolution=1.024, units="mm", device="cuda"):
+    from transformers import AutoTokenizer, AutoModel
+    
+    roi_size = (32, 256, 256)
+    tokenizer = AutoTokenizer.from_pretrained(
+        "GoodBaiBai88/M3D-CLIP",
+        model_max_length=512,
+        padding_side="right",
+        use_fast=False
+    )
+    model = AutoModel.from_pretrained(
+        "GoodBaiBai88/M3D-CLIP",
+        trust_remote_code=True
+    )
+    model = model.to(device=device)
+
+    spacing = (resolution, resolution, resolution)
+    keys = ["image", "label"]
+    padding = (4, 8, 8)
+    transform = image_transforms(keys, spacing, padding)
+    case_dicts = [
+        {"image": img_path, "label": lab_path} for img_path, lab_path in zip(img_paths, lab_paths)
+    ]
+    data_dicts = transform(case_dicts)
+    mkdir(save_dir)
+    
+    for case, data in zip(case_dicts, data_dicts):
+        image = data["image"].squeeze()
+        label = data["label"].squeeze()
+        voi, bbox = extract_VOI(image, label, None, padding, roi_size)
+        img_shape, voi_shape = image.shape, voi.shape
+        voi = torch.from_numpy(voi).unsqueeze(0).to(device)
+        with torch.inference_mode():
+            feature = model.encode_image(voi)[:, 0]
+        feat_shape = feature.shape
+        logging.info(f"Got image of shape {img_shape}, VOI of shape {voi_shape}, feature of shape {feat_shape}")
+        feature = feature.squeeze().cpu().numpy()
+        logging.info(f"Saving radiomics...")
+        img_name = pathlib.Path(case["image"]).name.replace(".nii.gz", "")
+        feature_path = f"{save_dir}/{img_name}_{class_name}_radiomics.npy"
+        np.save(feature_path, feature)
+        coordinates_path = f"{save_dir}/{img_name}_{class_name}_coordinates.npy"
+        np.save(coordinates_path, np.array(bbox))
+    return
+
 
 
 if __name__ == "__main__":
