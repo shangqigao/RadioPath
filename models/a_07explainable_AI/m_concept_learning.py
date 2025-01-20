@@ -191,7 +191,7 @@ def prepare_graph_pathomics(
         }
         subgraph_ids = [subgraph_dict[k] for k in subgraphs]
     graph_dict = load_json(graph_path)
-    label_path = f"{graph_path}".replace(".MST.json", ".label.npy")
+    label_path = f"{graph_path}".replace(".json", ".label.npy")
     label = np.load(label_path)
     if label.ndim == 2: label = np.argmax(label, axis=1)
     feature = np.array(graph_dict["x"])
@@ -984,7 +984,7 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"{CL}_Bayes_Survival_Prediction_{conv}_{aggregation}_{HP}"
     else:
-        model_dir = model_dir / f"{CL}_Calibrated_Survival_Prediction_{conv}_{aggregation}_{HP}"
+        model_dir = model_dir / f"{CL}_Survival_Prediction_{conv}_{aggregation}_{HP}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
@@ -1187,7 +1187,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_radiomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/radiomics", type=str)
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
-    parser.add_argument('--epochs', default=50, type=int)
+    parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--num_concepts', default=39, type=int)
@@ -1267,15 +1267,16 @@ if __name__ == "__main__":
     # logging.info(f"Number of testing samples: {num_test}.")
 
     # cox regression from the splits
-    cox_regression(
-        split_path=split_path,
-        concepts=concept_names,
-        l1_ratio=0.9,
-        used=["pathomics", "concepts"][1],
-        n_jobs=32,
-        pathomics_aggregation=True,
-        alpha_min=1e-4
-    )
+    # cox_regression(
+    #     split_path=split_path,
+    #     concepts=concept_names,
+    #     pathomics_keys=["TUM", "NORM", "DEB"],
+    #     l1_ratio=0.9,
+    #     used=["pathomics", "concepts"][0],
+    #     n_jobs=8,
+    #     pathomics_aggregation=True,
+    #     alpha_min=1e-2
+    # )
 
     # compute mean and std on training data for normalization 
     # splits = joblib.load(split_path)
@@ -1299,27 +1300,27 @@ if __name__ == "__main__":
     #     joblib.dump(node_scaler, scaler_path)
 
     # training
-    omics_modes = {"pathomics": args.pathomics_mode}
-    omics_dims = {"pathomics": args.pathomics_dim}
-    split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
-    scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_paths,
-        num_node_features=omics_dims,
-        num_concepts=args.num_concepts,
-        model_dir=save_model_dir,
-        conv="GATConv",
-        n_works=8,
-        batch_size=32,
-        dropout=0.5,
-        BayesGNN=False,
-        omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "CBM"][1],
-        concept_weight=concept_weight,
-        use_histopath=False
-    )
+    # omics_modes = {"pathomics": args.pathomics_mode}
+    # omics_dims = {"pathomics": args.pathomics_dim}
+    # split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
+    # scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     num_concepts=args.num_concepts,
+    #     model_dir=save_model_dir,
+    #     conv="GATConv",
+    #     n_works=8,
+    #     batch_size=32,
+    #     dropout=0.5,
+    #     BayesGNN=False,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "CBM"][0],
+    #     concept_weight=concept_weight,
+    #     use_histopath=False
+    # )
 
     # visualize concept attention
     # splits = joblib.load(split_path)

@@ -74,29 +74,29 @@ if __name__ == "__main__":
     #         )
 
     # extract wsi feature patch by patch
-    if args.mode == "wsi":
-        msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
-        logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
-    else:
-        msk_paths = None
-    if args.mode == "wsi":
-        bs = 32
-        nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-        for i in range(0, nb):
-            logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
-            start = i * bs
-            end = min(len(wsi_paths), (i + 1) * bs)
-            batch_wsi_paths = wsi_paths[start:end]
-            batch_msk_paths = msk_paths[start:end]
-            extract_pathomic_feature(
-                wsi_paths=batch_wsi_paths,
-                wsi_msk_paths=batch_msk_paths,
-                feature_mode=args.feature_mode,
-                save_dir=save_feature_dir,
-                mode=args.mode,
-                resolution=args.resolution,
-                units=args.units
-            )
+    # if args.mode == "wsi":
+    #     msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
+    #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
+    # else:
+    #     msk_paths = None
+    # if args.mode == "wsi":
+    #     bs = 32
+    #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
+    #     for i in range(0, nb):
+    #         logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+    #         start = i * bs
+    #         end = min(len(wsi_paths), (i + 1) * bs)
+    #         batch_wsi_paths = wsi_paths[start:end]
+    #         batch_msk_paths = msk_paths[start:end]
+    #         extract_pathomic_feature(
+    #             wsi_paths=batch_wsi_paths,
+    #             wsi_msk_paths=batch_msk_paths,
+    #             feature_mode=args.feature_mode,
+    #             save_dir=save_feature_dir,
+    #             mode=args.mode,
+    #             resolution=args.resolution,
+    #             units=args.units
+    #         )
 
     # extract WSI-level features
     # label_dict = {
@@ -149,7 +149,7 @@ if __name__ == "__main__":
         construct_wsi_graph(
             wsi_paths=batch_wsi_paths,
             save_dir=save_feature_dir,
-            n_jobs=8
+            n_jobs=1
         )
 
     # # extract minimum spanning tree

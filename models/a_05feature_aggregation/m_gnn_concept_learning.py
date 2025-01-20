@@ -472,4 +472,4 @@ class CoxSurvConceptLoss(object):
             loss_cox = loss_cox + self.tau * loss_cbm
         # print(loss_cox)
         # print(R_mat)
-        return loss_cbm
+        return loss_cox
