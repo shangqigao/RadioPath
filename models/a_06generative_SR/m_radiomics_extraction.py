@@ -21,7 +21,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
     parser.add_argument('--modality', default="CT", type=str)
     parser.add_argument('--save_dir', default="/home/sg2162/rds/hpc-work/Experiments/radiomics", type=str)
-    parser.add_argument('--feature_mode', default="SegVol", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
+    parser.add_argument('--feature_mode', default="M3D-CLIP", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
     parser.add_argument('--feature_dim', default=1024, choices=[2048, 768, 768], type=int)
     parser.add_argument('--resolution', default=1.024, type=float)
     parser.add_argument('--units', default="mm", type=str)
@@ -55,7 +55,7 @@ if __name__ == "__main__":
             save_dir=save_feature_dir,
             class_name=class_name,
             label=1,
-            n_jobs=32,
+            n_jobs=8,
             resolution=args.resolution
         )
 
@@ -78,12 +78,12 @@ if __name__ == "__main__":
     # )
 
     # visualize radiomic graph
-    for i in range(0, 200, 20):
-        visualize_radiomic_graph(
-            img_path=img_paths[i],
-            lab_path=lab_paths[i],
-            save_graph_dir=save_feature_dir,
-            class_name=class_name,
-            save_name=i
-        )
+    # for i in range(0, 200, 20):
+    #     visualize_radiomic_graph(
+    #         img_path=img_paths[i],
+    #         lab_path=lab_paths[i],
+    #         save_graph_dir=save_feature_dir,
+    #         class_name=class_name,
+    #         save_name=i
+    #     )
 

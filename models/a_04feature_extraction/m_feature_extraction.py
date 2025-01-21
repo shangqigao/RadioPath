@@ -926,7 +926,7 @@ def extract_M3DCLIPradiomics(img_paths, lab_paths, save_dir, class_name, label=1
         label = data["label"].squeeze()
         voi, bbox = extract_VOI(image, label, None, padding, roi_size)
         img_shape, voi_shape = image.shape, voi.shape
-        voi = torch.from_numpy(voi).unsqueeze(0).to(device)
+        voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to(device)
         with torch.inference_mode():
             feature = model.encode_image(voi)[:, 0]
         feat_shape = feature.shape

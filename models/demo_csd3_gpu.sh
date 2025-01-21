@@ -26,9 +26,9 @@ conda activate radiopath
 # python a_06generative_SR/m_pathomics_representation.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir
 
 ## extract radiomics
-# img_dir="/home/s/sg2162/projects/TCIA_NIFTI/image"
-# lab_dir="/home/s/sg2162/projects/TCIA_NIFTI/binary_label"
-# save_dir="/home/s/sg2162/projects/Experiments/radiomics"
+# img_dir="/home/sg2162/rds/hpc-work/TCIA_NIFTI/image"
+# lab_dir="/home/sg2162/rds/hpc-work/TCIA_NIFTI/binary_label"
+# save_dir="/home/sg2162/rds/hpc-work/Experiments/radiomics"
 # python a_06generative_SR/m_radiomics_extraction.py --img_dir $img_dir --lab_dir $lab_dir --save_dir $save_dir
 
 ## survival analysis

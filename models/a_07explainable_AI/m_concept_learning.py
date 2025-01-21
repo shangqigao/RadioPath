@@ -1300,27 +1300,27 @@ if __name__ == "__main__":
     #     joblib.dump(node_scaler, scaler_path)
 
     # training
-    # omics_modes = {"pathomics": args.pathomics_mode}
-    # omics_dims = {"pathomics": args.pathomics_dim}
-    # split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
-    # scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    # training(
-    #     num_epochs=args.epochs,
-    #     split_path=split_path,
-    #     scaler_path=scaler_paths,
-    #     num_node_features=omics_dims,
-    #     num_concepts=args.num_concepts,
-    #     model_dir=save_model_dir,
-    #     conv="GATConv",
-    #     n_works=8,
-    #     batch_size=32,
-    #     dropout=0.5,
-    #     BayesGNN=False,
-    #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "CBM"][0],
-    #     concept_weight=concept_weight,
-    #     use_histopath=False
-    # )
+    omics_modes = {"pathomics": args.pathomics_mode}
+    omics_dims = {"pathomics": args.pathomics_dim}
+    split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
+    scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    training(
+        num_epochs=args.epochs,
+        split_path=split_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        num_concepts=args.num_concepts,
+        model_dir=save_model_dir,
+        conv="GATConv",
+        n_works=8,
+        batch_size=32,
+        dropout=0.5,
+        BayesGNN=False,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "CBM"][0],
+        concept_weight=concept_weight,
+        use_histopath=False
+    )
 
     # visualize concept attention
     # splits = joblib.load(split_path)
