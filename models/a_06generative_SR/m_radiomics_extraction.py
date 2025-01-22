@@ -40,7 +40,7 @@ if __name__ == "__main__":
     save_feature_dir = pathlib.Path(f"{args.save_dir}/{args.dataset}_{args.modality}_radiomic_features/{args.feature_mode}")
     
     # extract radiomics
-    bs = 32
+    bs = 8
     nb = len(img_paths) // bs if len(img_paths) % bs == 0 else len(img_paths) // bs + 1
     for i in range(0, nb):
         logging.info(f"Processing images of batch [{i+1}/{nb}] ...")

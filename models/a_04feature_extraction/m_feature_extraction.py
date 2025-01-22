@@ -766,7 +766,7 @@ def extract_VOI(image, label, patch_size, padding, output_shape=None):
     bbox = [s, e]
     return image, bbox
 
-def image_transforms(keys, spacing, padding):
+def SegVol_image_transforms(keys, spacing, padding):
     from monai import transforms
 
     class MinMaxNormalization(transforms.Transform):
@@ -792,7 +792,7 @@ def image_transforms(keys, spacing, padding):
             return d
         
         def normalize(self, ct_narray):
-            ct_voxel_ndarray = ct_narray.copy()
+            ct_voxel_ndarray = ct_narray.clone()
             ct_voxel_ndarray = ct_voxel_ndarray.flatten()
             thred = np.mean(ct_voxel_ndarray)
             voxel_filtered = ct_voxel_ndarray[(ct_voxel_ndarray > thred)]
@@ -863,7 +863,7 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     spacing = (resolution, resolution, resolution)
     keys = ["image", "label"]
     padding = (4, 8, 8)
-    transform = image_transforms(keys, spacing, padding)
+    transform = SegVol_image_transforms(keys, spacing, padding)
     case_dicts = [
         {"image": img_path, "label": lab_path} for img_path, lab_path in zip(img_paths, lab_paths)
     ]
@@ -872,8 +872,8 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
     mkdir(save_dir)
     
     for case, data in zip(case_dicts, data_dicts):
-        image = data["image"].squeeze()
-        label = data["label"].squeeze()
+        image = data["image"].squeeze().numpy()
+        label = data["label"].squeeze().numpy()
         voi, bbox = extract_VOI(image, label, patch_size, padding)
         img_shape, voi_shape = image.shape, voi.shape
         voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to('cpu')
@@ -895,7 +895,68 @@ def extract_ViTradiomics(img_paths, lab_paths, save_dir, class_name, label=1, re
         np.save(coordinates_path, coordinates)
     return
 
-def extract_M3DCLIPradiomics(img_paths, lab_paths, save_dir, class_name, label=1, resolution=1.024, units="mm", device="cuda"):
+def M3DCLIP_image_transforms(keys, padding):
+    from monai import transforms
+
+    class MinMaxNormalization(transforms.Transform):
+        def __init__(self, keys):
+            self.keys = keys
+
+        def __call__(self, data):
+            d = dict(data)
+            for k in self.keys:
+                d[k] = d[k] - d[k].min()
+                d[k] = d[k] / np.clip(d[k].max(), a_min=1e-8, a_max=None)
+            return d
+
+    class ForegroundNormalization(transforms.Transform):
+        def __init__(self, keys):
+            self.keys = keys
+        
+        def __call__(self, data):
+            d = dict(data)
+            
+            for key in self.keys:
+                d[key] = self.normalize(d[key])
+            return d
+        
+        def normalize(self, ct_narray):
+            ct_voxel_ndarray = ct_narray.clone()
+            ct_voxel_ndarray = ct_voxel_ndarray.flatten()
+            thred = np.mean(ct_voxel_ndarray)
+            voxel_filtered = ct_voxel_ndarray[(ct_voxel_ndarray > thred)]
+            upper_bound = np.percentile(voxel_filtered, 99.95)
+            lower_bound = np.percentile(voxel_filtered, 00.05)
+            mean = np.mean(voxel_filtered)
+            std = np.std(voxel_filtered)
+            ### transform ###
+            ct_narray = np.clip(ct_narray, lower_bound, upper_bound)
+            ct_narray = (ct_narray - mean) / max(std, 1e-8)
+            return ct_narray
+
+    class DimTranspose(transforms.Transform):
+        def __init__(self, keys):
+            self.keys = keys
+        
+        def __call__(self, data):
+            d = dict(data)
+            for key in self.keys:
+                d[key] = np.swapaxes(d[key], -1, -3)
+            return d
+
+    transform = transforms.Compose(
+            [
+                transforms.LoadImaged(keys, ensure_channel_first=True, allow_missing_keys=True),
+                transforms.Orientationd(keys=["image", "label"], axcodes="RAS"),
+                ForegroundNormalization(keys=["image"]),
+                MinMaxNormalization(keys=["image"]),
+                DimTranspose(keys=["image", "label"]),
+                transforms.BorderPadd(keys=["image", "label"], spatial_border=padding)
+            ]
+        )
+    return transform
+
+def extract_M3DCLIPradiomics(img_paths, lab_paths, save_dir, class_name, label=1, resolution=1.024, units="mm", device="cpu"):
     from transformers import AutoTokenizer, AutoModel
     
     roi_size = (32, 256, 256)
@@ -911,10 +972,9 @@ def extract_M3DCLIPradiomics(img_paths, lab_paths, save_dir, class_name, label=1
     )
     model = model.to(device=device)
 
-    spacing = (resolution, resolution, resolution)
     keys = ["image", "label"]
     padding = (4, 8, 8)
-    transform = image_transforms(keys, spacing, padding)
+    transform = M3DCLIP_image_transforms(keys, padding)
     case_dicts = [
         {"image": img_path, "label": lab_path} for img_path, lab_path in zip(img_paths, lab_paths)
     ]
@@ -922,8 +982,8 @@ def extract_M3DCLIPradiomics(img_paths, lab_paths, save_dir, class_name, label=1
     mkdir(save_dir)
     
     for case, data in zip(case_dicts, data_dicts):
-        image = data["image"].squeeze()
-        label = data["label"].squeeze()
+        image = data["image"].squeeze().numpy()
+        label = data["label"].squeeze().numpy()
         voi, bbox = extract_VOI(image, label, None, padding, roi_size)
         img_shape, voi_shape = image.shape, voi.shape
         voi = torch.from_numpy(voi).unsqueeze(0).unsqueeze(0).to(device)
