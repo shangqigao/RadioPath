@@ -159,7 +159,7 @@ def prepare_graph_properties(data_dict, prop_keys):
 
 def load_radiomic_properties(idx, radiomic_path, prop_keys=None):
     suffix = pathlib.Path(radiomic_path).suffix
-    if suffix == "json":
+    if suffix == ".json":
         if prop_keys is None: 
             prop_keys = ["shape", "firstorder", "glcm", "gldm", "glrlm", "glszm", "ngtdm"]
         data_dict = load_json(radiomic_path)
@@ -167,7 +167,7 @@ def load_radiomic_properties(idx, radiomic_path, prop_keys=None):
         for key, value in data_dict.items():
             selected = [((k in key) and ("diagnostics" not in key)) for k in prop_keys]
             if any(selected): properties[key] = value
-    elif suffix == "npy":
+    elif suffix == ".npy":
         feature = np.load(radiomic_path)
         feat_list = np.array(feature).squeeze().tolist()
         properties = {}
@@ -1071,8 +1071,8 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
-    parser.add_argument('--radiomics_mode', default="SegVol", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
-    parser.add_argument('--radiomics_dim', default=768, choices=[107, 768], type=int)
+    parser.add_argument('--radiomics_mode', default="pyradiomics", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
+    parser.add_argument('--radiomics_dim', default=768, choices=[107, 768, 768], type=int)
     args = parser.parse_args()
 
     ## get wsi path
@@ -1113,14 +1113,14 @@ if __name__ == "__main__":
 
     # use radiomics and pathomics
     class_name = ["kidney_and_mass", "mass", "tumour"][2]
-    radiomics_aggregation = True # false if load image-level features else true
+    radiomics_aggregation = False # false if load image-level features else true
     if radiomics_aggregation:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.json"))
     else:
         if args.radiomics_mode == "pyradiomics":
             radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json"))
         elif args.radiomics_mode == "M3D-CLIP":
-            radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.npy"))
+            radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}_radiomics.npy"))
     matched_pathomics_indices, matched_radiomics_indices = matched_pathomics_radiomics(
         save_pathomics_paths=pathomics_paths,
         save_radiomics_paths=radiomics_paths,
@@ -1167,48 +1167,48 @@ if __name__ == "__main__":
     # )
 
     # split data set
-    # num_folds = 5
-    # test_ratio = 0.2
-    # train_ratio = 0.8 * 0.8
-    # valid_ratio = 0.8 * 0.2
-    # data_types = ["radiomics", "pathomics"]
-    # # stages=["Stage I", "Stage II"]
-    # df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    # y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
-    # matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
-    # kr, kp = data_types[0], data_types[1]
-    # matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
-    # splits = generate_data_split(
-    #     x=matched_graph_paths,
-    #     y=y,
-    #     train=train_ratio,
-    #     valid=valid_ratio,
-    #     test=test_ratio,
-    #     num_folds=num_folds
-    # )
-    # mkdir(save_model_dir)
+    num_folds = 5
+    test_ratio = 0.2
+    train_ratio = 0.8 * 0.8
+    valid_ratio = 0.8 * 0.2
+    data_types = ["radiomics", "pathomics"]
+    # stages=["Stage I", "Stage II"]
+    df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
+    matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
+    kr, kp = data_types[0], data_types[1]
+    matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
+    splits = generate_data_split(
+        x=matched_graph_paths,
+        y=y,
+        train=train_ratio,
+        valid=valid_ratio,
+        test=test_ratio,
+        num_folds=num_folds
+    )
+    mkdir(save_model_dir)
     split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
-    # joblib.dump(splits, split_path)
-    # splits = joblib.load(split_path)
-    # num_train = len(splits[0]["train"])
-    # logging.info(f"Number of training samples: {num_train}.")
-    # num_valid = len(splits[0]["valid"])
-    # logging.info(f"Number of validating samples: {num_valid}.")
-    # num_test = len(splits[0]["test"])
-    # logging.info(f"Number of testing samples: {num_test}.")
+    joblib.dump(splits, split_path)
+    splits = joblib.load(split_path)
+    num_train = len(splits[0]["train"])
+    logging.info(f"Number of training samples: {num_train}.")
+    num_valid = len(splits[0]["valid"])
+    logging.info(f"Number of validating samples: {num_valid}.")
+    num_test = len(splits[0]["test"])
+    logging.info(f"Number of testing samples: {num_test}.")
 
     # cox regression from the splits
     cox_regression(
         split_path=split_path,
         l1_ratio=0.9,
-        used=["radiomics", "pathomics", "radiopathomics"][1],
+        used=["radiomics", "pathomics", "radiopathomics"][2],
         n_jobs=8,
         radiomics_aggregation=radiomics_aggregation,
         pathomics_aggregation=pathomics_aggregation,
-        radiomics_keys=radiomic_propereties,
-        pathomics_keys=["TUM", "NORM", "DEB"],
-        alpha_min=0.2
+        radiomics_keys=None, #radiomic_propereties,
+        pathomics_keys=None, #["TUM", "NORM", "DEB"],
+        alpha_min=0.1
     )
 
     # compute mean and std on training data for normalization 
