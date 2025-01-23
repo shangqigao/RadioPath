@@ -29,7 +29,7 @@ from sklearn import set_config
 from sklearn.exceptions import FitFailedWarning
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.feature_selection import RFECV
-from sklearn.pipeline import make_pipeline
+from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.model_selection import StratifiedShuffleSplit
@@ -806,7 +806,7 @@ def cox_regression_plus(
 
         # choosing features by cross validation
         print("Selecting the best features...")
-        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min, max_iter=1000)
+        cox = CoxPHSurvivalAnalysis(alpha=0.9)
         cv = KFold(n_splits=10, shuffle=True, random_state=0)
         rfecv = RFECV(
             estimator=cox,
@@ -815,9 +815,16 @@ def cox_regression_plus(
             # scoring="accuracy",
             min_features_to_select=1,
             n_jobs=n_jobs
-        ).fit(tr_X, tr_y)
+        )
+        pipe = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("rfecv", rfecv),
+            ]
+        )
+        pipe.fit(tr_X, tr_y)
 
-        cv_results = pd.DataFrame(rfecv.cv_results_)
+        cv_results = pd.DataFrame(pipe.named_steps["rfecv"].cv_results_)
         plt.figure()
         plt.xlabel("Number of features selected")
         plt.ylabel("Mean C-index")
