@@ -379,15 +379,13 @@ class SurvivalGraphArch(nn.Module):
             self.enc_branches = nn.ModuleDict({k: create_block(dim_features[k], out_emb_dim) for k in keys})
             self.dec_branches = nn.ModuleDict({k: create_block(out_emb_dim, dim_features[k]) for k in keys})
             input_emb_dim = out_emb_dim
-            out_emb_dim = self.embedding_dims[0]
         elif len(keys) == 1:
             input_emb_dim = dim_features[keys[0]]
             out_emb_dim = self.embedding_dims[0]
+            self.head = create_block(input_emb_dim, out_emb_dim)
+            input_emb_dim = out_emb_dim
         else:
             raise NotImplementedError
-
-        self.head = create_block(input_emb_dim, out_emb_dim)
-        input_emb_dim = out_emb_dim
 
         if aggregation == "ABMIL":
             self.gate_nn_dict = nn.ModuleDict(
@@ -398,39 +396,38 @@ class SurvivalGraphArch(nn.Module):
             )
             self.Aggregation = SumAggregation()
         elif aggregation == "SISIR":
-            dim_teachers = [dim_features[k] for k in keys]
-            dim_student = input_emb_dim
+            # dim_teachers = [dim_features[k] for k in keys]
+            # dim_student = input_emb_dim
 
-            self.integration_nn = OmicsIntegrationArch(
-                dim_teachers=dim_teachers,
-                dim_student=dim_student,
-                dim_target=out_emb_dim,
+            # self.integration_nn = OmicsIntegrationArch(
+            #     dim_teachers=dim_teachers,
+            #     dim_student=dim_student,
+            #     dim_target=out_emb_dim,
+            #     conv=self.conv_name
+            # )
+            # self.gate_nn_dict = nn.ModuleDict(
+            #     {
+            #         k: Attn_Net_Gated(L=out_emb_dim, D=64, dropout=0.25, n_classes=1)
+            #         for k in self.keys
+            #     }
+            # )
+            # self.Aggregation = SumAggregation()
+            # out_emb_dim = self.embedding_dims[-1]
+            self.score_nn = ImportanceScoreArch(
+                dim_features=input_emb_dim,
+                dim_target=2 * input_emb_dim,
+                layers=self.embedding_dims[1:],
+                dropout=self.dropout,
                 conv=self.conv_name
             )
-            self.gate_nn_dict = nn.ModuleDict(
-                {
-                    k: Attn_Net_Gated(L=out_emb_dim, D=64, dropout=0.25, n_classes=1)
-                    for k in self.keys
-                }
+            self.inverse_score_nn = ImportanceScoreArch(
+                dim_features=input_emb_dim,
+                dim_target=input_emb_dim,
+                layers=self.embedding_dims[::-1],
+                dropout=self.dropout,
+                conv=self.conv_name
             )
-            self.Aggregation = SumAggregation()
-            # out_emb_dim = self.embedding_dims[-1]
-            # self.score_nn = ImportanceScoreArch(
-            #     dim_features=out_emb_dim,
-            #     dim_target=2,
-            #     layers=self.embedding_dims[1:],
-            #     dropout=self.dropout,
-            #     conv=self.conv_name
-            # )
-            # self.inverse_score_nn = ImportanceScoreArch(
-            #     dim_features=2,
-            #     dim_target=input_emb_dim,
-            #     layers=self.embedding_dims[::-1],
-            #     dropout=self.dropout,
-            #     conv=self.conv_name
-            # )
-            # self.Aggregation = MeanAggregation()
-            # input_emb_dim = out_emb_dim
+            self.Aggregation = MeanAggregation()
         else:
             raise NotImplementedError
         self.classifier = Linear(len(self.keys)*out_emb_dim, dim_target)
@@ -445,8 +442,8 @@ class SurvivalGraphArch(nn.Module):
 
     def sampling(self, data):
         assert data.size(-1) == 2
-        loc, logvar = data[..., 0:1], data[..., 1:2]
-        logvar = torch.clamp(logvar, min=-20, max=0)
+        loc, logvar = torch.chunk(data, chunks=2, dim=-1)
+        logvar = torch.clamp(logvar, min=-20, max=20)
         gauss = torch.distributions.Normal(loc, torch.exp(0.5*logvar))
         return gauss.sample(), [loc, logvar]
 
@@ -488,40 +485,37 @@ class SurvivalGraphArch(nn.Module):
             VIparas = None
             KAparas = None
         elif self.aggregation == "SISIR":
-            # integration, feature comes student
-            (feature, ht), (ft_, ft) = self.integration_nn(enc_list, edge_index_list, feature, edge_index)
-            KAparas = [feature, ht, ft_, ft]
+            # feature alignment by knowledge amalgamation
+            # (feature, ht), (ft_, ft) = self.integration_nn(enc_list, edge_index_list, feature, edge_index)
+            # KAparas = [feature, ht, ft_, ft]
+            KAparas = None
 
-            feature_dict = {k: feature[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
-            gate_dict = {}
-            for k in self.keys:
-                gate = self.gate_nn_dict[k](feature_dict[k])
-                gate = softmax(gate, index=batch_dict[k], dim=-2)
-                gate_dict.update({k: gate})
-            VIparas = None
+            # feature_dict = {k: feature[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
+            # gate_dict = {}
+            # for k in self.keys:
+            #     gate = self.gate_nn_dict[k](feature_dict[k])
+            #     gate = softmax(gate, index=batch_dict[k], dim=-2)
+            #     gate_dict.update({k: gate})
+            # VIparas = None
             
 
             # encoder
-            # encode = self.score_nn(feature, edge_index)
+            encode = self.score_nn(feature, edge_index)
             # encode = self.gate_nn(feature)
             # reparameterization
-            # gate, VIparas = self.sampling(encode)
+            gate, VIparas = self.sampling(encode)
 
-            # feature_dict = {k: feature[ins[i]:ins[i+1]] for k, i in enumerate(self.keys)}
-            # gate_dict = {k: gate[ins[i]:ins[i+1]] for k, i in enumerate(self.keys)}
+            feature_dict = {k: feature[ins[i]:ins[i+1]] for k, i in enumerate(self.keys)}
+            gate_dict = {k: gate[ins[i]:ins[i+1]] for k, i in enumerate(self.keys)}
             # decoder
-            # decode = self.inverse_score_nn(encode, edge_index)
+            decode = self.inverse_score_nn(gate, edge_index)
 
-            # if len(self.keys) > 1:
-            #     dec_list, index_s, index_e = [], 0, 0
-            #     for i, k in enumerate(self.keys):
-            #         index_e += len(enc_list[i])
-            #         dec_list.append(self.dec_branches[k](decode[index_s:index_e, ...]))
-            #         index_s = index_e
-            # else:
-            #     dec_list = [decode]
-            # VIparas.append(enc_list)
-            # VIparas.append(dec_list)
+            if len(self.keys) > 1:
+                dec_list = [self.dec_branches[k](decode[ins[i]:ins[i+1], ...]) for k, i in enumerate(self.keys)]
+            else:
+                dec_list = [decode]
+            VIparas.append(enc_list)
+            VIparas.append(dec_list)
         feature_list = []
         for k in self.keys:
             feature_list.append(
@@ -757,6 +751,7 @@ class VILoss(nn.Module):
         mu_upsilon = (alpha / beta).clone().detach()
         loss_kl = 0.5*torch.mean(self.lambda0*mu_upsilon*((loc - self.mu0)**2 + torch.exp(logvar)) - logvar)
         loss_ae = sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
+        print(loss_ae.item(), loss_kl.item())
         return loss_ae + self.tau_kl * loss_kl
     
 def calc_mmd(f1, f2, sigmas, normalized=False):
@@ -829,7 +824,7 @@ class CFLoss(nn.Module):
         return mmd_loss + self.beta*mse_loss
     
 class CoxSurvLoss(nn.Module):
-    def __init__(self, tau_vi=1e-4, tau_ka=1e-2):
+    def __init__(self, tau_vi=1, tau_ka=1e-2):
         super(CoxSurvLoss, self).__init__()
         self.tau_vi = tau_vi
         self.tau_ka = tau_ka
