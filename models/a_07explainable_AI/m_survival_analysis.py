@@ -28,6 +28,7 @@ from sksurv.metrics import concordance_index_censored
 from sklearn import set_config
 from sklearn.exceptions import FitFailedWarning
 from sklearn.model_selection import GridSearchCV, KFold
+from sklearn.feature_selection import RFECV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
@@ -643,6 +644,228 @@ def cox_regression(
 
         # plot cross validation results
         cv_results = pd.DataFrame(gcv.cv_results_)
+        alphas = cv_results.param_coxnetsurvivalanalysis__alphas.map(lambda x: x[0])
+        mean = cv_results.mean_test_score
+        std = cv_results.std_test_score
+        fig, ax = plt.subplots(figsize=(9, 6))
+        ax.plot(alphas, mean)
+        ax.fill_between(alphas, mean - std, mean + std, alpha=0.15)
+        ax.set_xscale("log")
+        ax.set_ylabel("concordance index")
+        ax.set_xlabel("alpha")
+        ax.axvline(gcv.best_params_["coxnetsurvivalanalysis__alphas"][0], c="C1")
+        ax.axhline(0.5, color="grey", linestyle="--")
+        ax.grid(True)
+        plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
+
+        # Visualize coefficients of the best estimator
+        best_model = gcv.best_estimator_.named_steps["coxnetsurvivalanalysis"]
+        best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+
+        non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
+        print(f"Number of non-zero coefficients: {non_zero}")
+
+        non_zero_coefs = best_coefs.query("coefficient != 0")
+        coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+
+        _, ax = plt.subplots(figsize=(8, 6))
+        non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
+        ax.set_xlabel("coefficient")
+        ax.grid(True)
+        plt.subplots_adjust(left=0.3)
+        plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
+
+        # perform prediction using the best params
+        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True)
+
+        coxnet_pred = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True))
+        coxnet_pred.set_params(**gcv.best_params_)
+        coxnet_pred.fit(tr_X, tr_y)
+
+        print(f"Updating regression results on fold {split_idx}")
+        predict_results.update({f"Fold {split_idx}": coxnet_pred.score(te_X, te_y)})
+    print(predict_results)
+    print("CV mean", np.array(list(predict_results.values())).mean())
+    return
+
+def cox_regression_plus(
+        split_path,
+        radiomics_keys=None,
+        pathomics_keys=None,
+        l1_ratio=1.0, 
+        used="all", 
+        n_jobs=32,
+        radiomics_aggregation=False,
+        pathomics_aggregation=False,
+        alpha_min=0.01
+        ):
+    splits = joblib.load(split_path)
+    predict_results = {}
+    for split_idx, split in enumerate(splits):
+        print(f"Performing cross-validation on fold {split_idx}...")
+        data_tr, data_va, data_te = split["train"], split["valid"], split["test"]
+        data_tr = data_tr + data_va
+
+        tr_y = np.array([p[1] for p in data_tr])
+        tr_y = pd.DataFrame({'event': tr_y[:, 1].astype(bool), 'duration': tr_y[:, 0]})
+        tr_y = tr_y.to_records(index=False)
+        te_y = np.array([p[1] for p in data_te])
+        te_y = pd.DataFrame({'event': te_y[:, 1].astype(bool), 'duration': te_y[:, 0]})
+        te_y = te_y.to_records(index=False)
+
+        # prepare radiomics
+        radiomics_tr_paths = [p[0]["radiomics"] for p in data_tr]
+        if radiomics_aggregation:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(prepare_graph_radiomics)(idx, graph_path)
+                for idx, graph_path in enumerate(radiomics_tr_paths)
+            )
+        else:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(load_radiomic_properties)(idx, graph_path, radiomics_keys)
+                for idx, graph_path in enumerate(radiomics_tr_paths)
+            )
+        radiomics_dict = {}
+        for d in dict_list: radiomics_dict.update(d)
+        radiomics_tr_X = [radiomics_dict[f"{i}"] for i in range(len(radiomics_tr_paths))]
+        radiomics_tr_X = pd.DataFrame(radiomics_tr_X)
+        print("Selected training radiomics:", radiomics_tr_X.shape)
+        print(radiomics_tr_X.head())
+
+        radiomics_te_paths = [p[0]["radiomics"] for p in data_te]
+        if radiomics_aggregation:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(prepare_graph_radiomics)(idx, graph_path)
+                for idx, graph_path in enumerate(radiomics_te_paths)
+            )
+        else:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(load_radiomic_properties)(idx, graph_path, radiomics_keys)
+                for idx, graph_path in enumerate(radiomics_te_paths)
+            )
+        radiomics_dict = {}
+        for d in dict_list: radiomics_dict.update(d)
+        radiomics_te_X = [radiomics_dict[f"{i}"] for i in range(len(radiomics_te_paths))]
+        radiomics_te_X = pd.DataFrame(radiomics_te_X)
+        print("Selected testing radiomics:", radiomics_te_X.shape)
+        print(radiomics_te_X.head())
+
+
+        # Prepare pathomics
+        pathomics_tr_paths = [p[0]["pathomics"] for p in data_tr]
+        if pathomics_aggregation:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(prepare_graph_pathomics)(idx, graph_path, pathomics_keys)
+                for idx, graph_path in enumerate(pathomics_tr_paths)
+            )
+        else:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(load_wsi_level_features)(idx, graph_path)
+                for idx, graph_path in enumerate(pathomics_tr_paths)
+            )
+        pathomics_dict = {}
+        for d in dict_list: pathomics_dict.update(d)
+        pathomics_tr_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_tr_paths))]
+        pathomics_tr_X = pd.DataFrame(pathomics_tr_X)
+        print("Original training pathomics:", pathomics_tr_X.shape)
+        print(pathomics_tr_X.head())
+
+        pathomics_te_paths = [p[0]["pathomics"] for p in data_te]
+        if pathomics_aggregation:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(prepare_graph_pathomics)(idx, graph_path, pathomics_keys)
+                for idx, graph_path in enumerate(pathomics_te_paths)
+            )
+        else:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(load_wsi_level_features)(idx, graph_path)
+                for idx, graph_path in enumerate(pathomics_te_paths)
+            )
+        pathomics_dict = {}
+        for d in dict_list: pathomics_dict.update(d)
+        pathomics_te_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_te_paths))]
+        pathomics_te_X = pd.DataFrame(pathomics_te_X)
+        print("Original testing pathomics:", pathomics_te_X.shape)
+        print(pathomics_te_X.head())
+
+        # Concatenate multi-omics if required
+        if used == "radiopathomics":
+            tr_X = pd.concat([radiomics_tr_X, pathomics_tr_X], axis=1)
+            te_X = pd.concat([radiomics_te_X, pathomics_te_X], axis=1)
+        elif used == "pathomics":
+            tr_X, te_X = pathomics_tr_X, pathomics_te_X
+        elif used == "radiomics":
+            tr_X, te_X = radiomics_tr_X, radiomics_te_X
+        else:
+            raise NotImplementedError
+        # df_prop = df_prop.apply(zscore)
+        print("Original training omics:", tr_X.shape)
+        print(tr_X.head())
+        print("Original testing omics:", te_X.shape)
+        print(te_X.head())
+
+        # choosing features by cross validation
+        print("Selecting the best features...")
+        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min, max_iter=1000)
+        cv = KFold(n_splits=10, shuffle=True, random_state=0)
+        rfecv = RFECV(
+            estimator=make_pipeline(StandardScaler(), cox),
+            step=1,
+            cv=cv,
+            scoring="accuracy",
+            min_features_to_select=1,
+            n_jobs=n_jobs
+        ).fit(tr_X, tr_y)
+
+        cv_results = pd.DataFrame(rfecv.cv_results_)
+        plt.figure()
+        plt.xlabel("Number of features selected")
+        plt.ylabel("Mean C-index")
+        plt.errorbar(
+            x=cv_results["n_features"],
+            y=cv_results["mean_test_score"],
+            yerr=cv_results["std_test_score"],
+        )
+        plt.title("Recursive Feature Elimination \nwith correlated features")
+        plt.savefig(f"a_07explainable_AI/feature_selection_fold{split_idx}.jpg")
+
+        # select features
+        selected_name = np.array(tr_X.columns)[rfecv.get_support()]
+        tr_X = tr_X[selected_name]
+        print("Selected training omics:", tr_X.shape)
+        print(tr_X.head())
+        te_X = te_X[selected_name]
+        print("Selected testing omics:", tr_X.shape)
+        print(tr_X.head())
+
+
+        # COX regreession
+        print("Selecting the best regularization parameter...")
+        cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min)
+        cox_elastic_net.fit(tr_X, tr_y)
+        coefficients = pd.DataFrame(cox_elastic_net.coef_, index=tr_X.columns, columns=np.round(cox_elastic_net.alphas_, 5))
+        
+        plot_coefficients(coefficients, n_highlight=5)
+
+        # choosing penalty strength by cross validation
+        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min, max_iter=1000)
+        coxnet_pipe = make_pipeline(StandardScaler(), cox)
+        warnings.simplefilter("ignore", UserWarning)
+        warnings.simplefilter("ignore", FitFailedWarning)
+        coxnet_pipe.fit(tr_X, tr_y)
+        estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
+        cv = KFold(n_splits=10, shuffle=True, random_state=0)
+        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
+        gcv = GridSearchCV(
+            make_pipeline(StandardScaler(), cox),
+            param_grid={"coxnetsurvivalanalysis__alphas": [[v] for v in estimated_alphas]},
+            cv=cv,
+            error_score=0.5,
+            n_jobs=1,
+        ).fit(tr_X, tr_y)
+
+        # plot cross validation results
+        cv_results = pd.DataFrame(rfecv.cv_results_)
         alphas = cv_results.param_coxnetsurvivalanalysis__alphas.map(lambda x: x[0])
         mean = cv_results.mean_test_score
         std = cv_results.std_test_score
