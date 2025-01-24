@@ -1440,7 +1440,7 @@ if __name__ == "__main__":
         n_jobs=8,
         radiomics_aggregation=radiomics_aggregation,
         pathomics_aggregation=pathomics_aggregation,
-        radiomics_keys=None, #radiomic_propereties,
+        radiomics_keys=radiomic_propereties,
         pathomics_keys=None, #["TUM", "NORM", "DEB"],
         alpha_min=0.1
     )
