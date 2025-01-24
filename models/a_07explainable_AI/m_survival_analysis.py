@@ -806,47 +806,56 @@ def cox_regression_plus(
 
         # choosing features by cross validation
         print("Selecting features from model...")
-        cox = CoxPHSurvivalAnalysis(alpha=0.9)
+        cox = CoxPHSurvivalAnalysis(alpha=alpha_min)
         selector = SelectFromModel(estimator=cox, threshold="mean")
+        # selector = SequentialFeatureSelector(cox, n_features_to_select=64)
         make_pipeline(StandardScaler(), selector).fit(tr_X, tr_y)
         selected_name = np.array(tr_X.columns)[selector.get_support()]
         tr_X = tr_X[selected_name]
-        print("Sequentially selected training omics:", tr_X.shape)
+        print("Initially selected training omics:", tr_X.shape)
         print(tr_X.head())
         te_X = te_X[selected_name]
-        print("Sequentially selected testing omics:", tr_X.shape)
+        print("Initially selected testing omics:", tr_X.shape)
         print(tr_X.head())
 
-        print("Selecting the best features...")
-        cv = KFold(n_splits=5, shuffle=True, random_state=0)
-        rfecv = RFECV(
-            estimator=cox,
-            step=1,
-            cv=cv,
-            min_features_to_select=1,
-            n_jobs=n_jobs
-        )
-        make_pipeline(StandardScaler(), rfecv).fit(tr_X, tr_y)
-        cv_results = pd.DataFrame(rfecv.cv_results_)
-        plt.figure()
-        plt.xlabel("Number of features selected")
-        plt.ylabel("Mean C-index")
-        plt.errorbar(
-            x=cv_results["n_features"],
-            y=cv_results["mean_test_score"],
-            yerr=cv_results["std_test_score"],
-        )
-        plt.title("Recursive Feature Elimination \nwith correlated features")
-        plt.savefig(f"a_07explainable_AI/feature_selection_fold{split_idx}.jpg")
+        # cox = CoxPHSurvivalAnalysis(alpha=1e-4)
+        # coxnet_pred = make_pipeline(StandardScaler(), cox)
+        # coxnet_pred.fit(tr_X, tr_y)
+        # print(coxnet_pred.score(te_X, te_y))
 
-        # select features
-        selected_name = np.array(tr_X.columns)[rfecv.get_support()]
-        tr_X = tr_X[selected_name]
-        print("Finally selected training omics:", tr_X.shape)
-        print(tr_X.head())
-        te_X = te_X[selected_name]
-        print("Finally selected testing omics:", tr_X.shape)
-        print(tr_X.head())
+        # print("Selecting the best features...")
+        # cox = CoxPHSurvivalAnalysis(alpha=alpha_min)
+        # cv = KFold(n_splits=5, shuffle=True, random_state=0)
+        # rfecv = RFECV(
+        #     estimator=cox,
+        #     step=1,
+        #     cv=cv,
+        #     min_features_to_select=1,
+        #     n_jobs=n_jobs
+        # )
+        # make_pipeline(StandardScaler(), rfecv).fit(tr_X, tr_y)
+        # cv_results = pd.DataFrame(rfecv.cv_results_)
+        # plt.figure()
+        # plt.xlabel("Number of features selected")
+        # plt.ylabel("Mean C-index")
+        # plt.errorbar(
+        #     x=cv_results["n_features"],
+        #     y=cv_results["mean_test_score"],
+        #     yerr=cv_results["std_test_score"],
+        # )
+        # plt.title("Recursive Feature Elimination \nwith correlated features")
+        # plt.savefig(f"a_07explainable_AI/feature_selection_fold{split_idx}.jpg")
+
+        # selected_name = np.array(tr_X.columns)[rfecv.get_support()]
+        # tr_X = tr_X[selected_name]
+        # print("Finally selected training omics:", tr_X.shape)
+        # print(tr_X.head())
+        # te_X = te_X[selected_name]
+        # print("Finally selected testing omics:", tr_X.shape)
+        # print(tr_X.head())
+
+        # cox.fit(tr_X, tr_y)
+        # print(cox.score(te_X, te_y))
 
 
         # COX regreession
@@ -871,11 +880,11 @@ def cox_regression_plus(
             param_grid={"coxnetsurvivalanalysis__alphas": [[v] for v in estimated_alphas]},
             cv=cv,
             error_score=0.5,
-            n_jobs=1,
+            n_jobs=n_jobs,
         ).fit(tr_X, tr_y)
 
         # plot cross validation results
-        cv_results = pd.DataFrame(rfecv.cv_results_)
+        cv_results = pd.DataFrame(gcv.cv_results_)
         alphas = cv_results.param_coxnetsurvivalanalysis__alphas.map(lambda x: x[0])
         mean = cv_results.mean_test_score
         std = cv_results.std_test_score
