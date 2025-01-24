@@ -28,8 +28,8 @@ from sksurv.metrics import concordance_index_censored
 from sklearn import set_config
 from sklearn.exceptions import FitFailedWarning
 from sklearn.model_selection import GridSearchCV, KFold
-from sklearn.feature_selection import RFECV, SequentialFeatureSelector, SelectFromModel
-from sklearn.pipeline import make_pipeline
+from sklearn.feature_selection import SelectKBest
+from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.model_selection import StratifiedShuffleSplit
@@ -697,7 +697,8 @@ def cox_regression_plus(
         n_jobs=32,
         radiomics_aggregation=False,
         pathomics_aggregation=False,
-        alpha_min=0.01
+        alpha_min=0.01,
+        model="CoxPH"
         ):
     splits = joblib.load(split_path)
     predict_results = {}
@@ -804,57 +805,96 @@ def cox_regression_plus(
         print("Original testing omics:", te_X.shape)
         print(te_X.head())
 
-        # COX regreession
-        print("Selecting the best regularization parameter...")
-        cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min)
-        cox_elastic_net.fit(tr_X, tr_y)
-        coefficients = pd.DataFrame(cox_elastic_net.coef_, index=tr_X.columns, columns=np.round(cox_elastic_net.alphas_, 5))
+        # feature and parameteer selection by cross validation
+        def _fit_and_score_features(X, y):
+            n_features = X.shape[1]
+            scores = np.empty(n_features)
+            m = CoxPHSurvivalAnalysis()
+            for j in range(n_features):
+                Xj = X[:, j : j + 1]
+                m.fit(Xj, y)
+                scores[j] = m.score(Xj, y)
+            return scores
         
-        plot_coefficients(coefficients, n_highlight=5)
+        print("Selecting the best settings...")
+        if model == "Coxnet":
+            cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min)
+            cox_elastic_net.fit(tr_X, tr_y)
+            coefficients = pd.DataFrame(cox_elastic_net.coef_, index=tr_X.columns, columns=np.round(cox_elastic_net.alphas_, 5))  
+            plot_coefficients(coefficients, n_highlight=5)
 
-        # choosing penalty strength by cross validation
-        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min, max_iter=1000)
-        coxnet_pipe = make_pipeline(StandardScaler(), cox)
-        warnings.simplefilter("ignore", UserWarning)
-        warnings.simplefilter("ignore", FitFailedWarning)
-        coxnet_pipe.fit(tr_X, tr_y)
-        estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
-        cv = KFold(n_splits=10, shuffle=True, random_state=0)
-        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
+            cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min, max_iter=1000)
+            coxnet_pipe = make_pipeline(StandardScaler(), cox)
+            warnings.simplefilter("ignore", UserWarning)
+            warnings.simplefilter("ignore", FitFailedWarning)
+            coxnet_pipe.fit(tr_X, tr_y)
+            estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
+            cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
+        elif model == "CoxPH":
+            cox = CoxPHSurvivalAnalysis()
+        else:
+            raise NotImplementedError
+        
+        pipe = Pipeline(
+            [
+                ("scale", StandardScaler()),
+                ("select", SelectKBest(_fit_and_score_features, k=3)),
+                ("model", cox),
+            ]
+        )
+        if model == "Coxnet":
+            param_grid = {
+                "select__k": np.arange(1, tr_X.values.shape[1] + 1),
+                "model__alphas": [[v] for v in estimated_alphas]
+            }
+        elif model == "CoxPH":
+            param_grid = {
+                "select__k": np.arange(1, tr_X.values.shape[1] + 1)
+            }
+    
+        cv = KFold(n_splits=3, random_state=1, shuffle=True)
         gcv = GridSearchCV(
-            make_pipeline(StandardScaler(), cox),
-            param_grid={"coxnetsurvivalanalysis__alphas": [[v] for v in estimated_alphas]},
-            cv=cv,
-            error_score=0.5,
+            pipe, 
+            param_grid, 
+            return_train_score=True, 
+            cv=cv, 
             n_jobs=n_jobs,
-        ).fit(tr_X, tr_y)
+            error_score=0.5
+        )
+        gcv.fit(tr_X, tr_y)
+
+        pipe.set_params(**gcv.best_params_)
+        pipe.fit(tr_X, tr_y)
+        _, transformer, final_estimator = (s[1] for s in pipe.steps)
 
         # plot cross validation results
         cv_results = pd.DataFrame(gcv.cv_results_)
-        alphas = cv_results.param_coxnetsurvivalanalysis__alphas.map(lambda x: x[0])
+        ks = cv_results.param_select__k
         mean = cv_results.mean_test_score
+        best_k = gcv.best_params_["select__k"]
         std = cv_results.std_test_score
+        if model == "Coxnet":
+            best_mean = mean[best_k]
+            best_alpha_index = np.argmax(best_mean)
+            mean = mean[:, best_alpha_index]
+            std = std[:, best_alpha_index]
         fig, ax = plt.subplots(figsize=(9, 6))
-        ax.plot(alphas, mean)
-        ax.fill_between(alphas, mean - std, mean + std, alpha=0.15)
-        ax.set_xscale("log")
+        ax.plot(ks, mean)
+        ax.fill_between(ks, mean - std, mean + std, alpha=0.15)
+        ax.set_xscale("linear")
         ax.set_ylabel("concordance index")
-        ax.set_xlabel("alpha")
-        ax.axvline(gcv.best_params_["coxnetsurvivalanalysis__alphas"][0], c="C1")
+        ax.set_xlabel("Num of features")
+        ax.axvline(gcv.best_params_["select__k"], c="C1")
         ax.axhline(0.5, color="grey", linestyle="--")
         ax.grid(True)
         plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
 
         # Visualize coefficients of the best estimator
-        best_model = gcv.best_estimator_.named_steps["coxnetsurvivalanalysis"]
-        best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
-
+        best_coefs = pd.DataFrame(final_estimator.coef_, index=tr_X.columns[transformer.get_support()], columns=["coefficient"])
         non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
         print(f"Number of non-zero coefficients: {non_zero}")
-
         non_zero_coefs = best_coefs.query("coefficient != 0")
         coef_order = non_zero_coefs.abs().sort_values("coefficient").index
-
         _, ax = plt.subplots(figsize=(8, 6))
         non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
         ax.set_xlabel("coefficient")
@@ -862,68 +902,8 @@ def cox_regression_plus(
         plt.subplots_adjust(left=0.3)
         plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
 
-        # perform prediction using the best params
-        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=False)
-        cox.set_params(**gcv.best_params_)
-
-        # choosing features by cross validation
-        print("Selecting features from model...")
-        selector = SelectFromModel(estimator=cox, threshold="mean")
-        # selector = SequentialFeatureSelector(cox, n_features_to_select=64)
-        make_pipeline(StandardScaler(), selector).fit(tr_X, tr_y)
-        selected_name = np.array(tr_X.columns)[selector.get_support()]
-        tr_X = tr_X[selected_name]
-        print("Initially selected training omics:", tr_X.shape)
-        print(tr_X.head())
-        te_X = te_X[selected_name]
-        print("Initially selected testing omics:", tr_X.shape)
-        print(tr_X.head())
-
-        # cox = CoxPHSurvivalAnalysis(alpha=1e-4)
-        # coxnet_pred = make_pipeline(StandardScaler(), cox)
-        # coxnet_pred.fit(tr_X, tr_y)
-        # print(coxnet_pred.score(te_X, te_y))
-
-        # print("Selecting the best features...")
-        # cox = CoxPHSurvivalAnalysis(alpha=alpha_min)
-        # cv = KFold(n_splits=5, shuffle=True, random_state=0)
-        # rfecv = RFECV(
-        #     estimator=cox,
-        #     step=1,
-        #     cv=cv,
-        #     min_features_to_select=1,
-        #     n_jobs=n_jobs
-        # )
-        # make_pipeline(StandardScaler(), rfecv).fit(tr_X, tr_y)
-        # cv_results = pd.DataFrame(rfecv.cv_results_)
-        # plt.figure()
-        # plt.xlabel("Number of features selected")
-        # plt.ylabel("Mean C-index")
-        # plt.errorbar(
-        #     x=cv_results["n_features"],
-        #     y=cv_results["mean_test_score"],
-        #     yerr=cv_results["std_test_score"],
-        # )
-        # plt.title("Recursive Feature Elimination \nwith correlated features")
-        # plt.savefig(f"a_07explainable_AI/feature_selection_fold{split_idx}.jpg")
-
-        # selected_name = np.array(tr_X.columns)[rfecv.get_support()]
-        # tr_X = tr_X[selected_name]
-        # print("Finally selected training omics:", tr_X.shape)
-        # print(tr_X.head())
-        # te_X = te_X[selected_name]
-        # print("Finally selected testing omics:", tr_X.shape)
-        # print(tr_X.head())
-
-        # cox.fit(tr_X, tr_y)
-        # print(cox.score(te_X, te_y))
-
-        coxnet_pred = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True))
-        coxnet_pred.set_params(**gcv.best_params_)
-        coxnet_pred.fit(tr_X, tr_y)
-
         print(f"Updating regression results on fold {split_idx}")
-        predict_results.update({f"Fold {split_idx}": coxnet_pred.score(te_X, te_y)})
+        predict_results.update({f"Fold {split_idx}": pipe.score(te_X, te_y)})
     print(predict_results)
     print("CV mean", np.array(list(predict_results.values())).mean())
     return
