@@ -28,7 +28,7 @@ from sksurv.metrics import concordance_index_censored
 from sklearn import set_config
 from sklearn.exceptions import FitFailedWarning
 from sklearn.model_selection import GridSearchCV, KFold
-from sklearn.feature_selection import RFECV, SequentialFeatureSelector
+from sklearn.feature_selection import RFECV, SequentialFeatureSelector, SelectFromModel
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
@@ -805,11 +805,11 @@ def cox_regression_plus(
         print(te_X.head())
 
         # choosing features by cross validation
-        print("Sequentially selecting features...")
+        print("Selecting features from model...")
         cox = CoxPHSurvivalAnalysis(alpha=0.9)
-        sfs = SequentialFeatureSelector(estimator=cox, n_features_to_select=64)
-        make_pipeline(StandardScaler(), sfs).fit(tr_X, tr_y)
-        selected_name = np.array(tr_X.columns)[sfs.get_support()]
+        selector = SelectFromModel(estimator=cox, threshold="mean")
+        make_pipeline(StandardScaler(), selector).fit(tr_X, tr_y)
+        selected_name = np.array(tr_X.columns)[selector.get_support()]
         tr_X = tr_X[selected_name]
         print("Sequentially selected training omics:", tr_X.shape)
         print(tr_X.head())
