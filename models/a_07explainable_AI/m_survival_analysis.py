@@ -31,7 +31,7 @@ from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.feature_selection import SelectKBest
 from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, FeatureAgglomeration
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegression as PlattScaling
 
@@ -838,17 +838,20 @@ def cox_regression_plus(
         pipe = Pipeline(
             [
                 ("scale", StandardScaler()),
+                # ("ward", FeatureAgglomeration(n_clusters=32)),
                 ("select", SelectKBest(_fit_and_score_features, k=3)),
                 ("model", cox),
             ]
         )
         if model == "Coxnet":
             param_grid = {
+                # "ward__n_clusters": np.arange(64, 128 + 1, 8), 
                 "select__k": np.arange(1, tr_X.values.shape[1] + 1),
                 "model__alphas": [[v] for v in estimated_alphas]
             }
         elif model == "CoxPH":
             param_grid = {
+                # "ward__n_clusters": np.arange(64, 128 + 1, 8), 
                 "select__k": np.arange(1, tr_X.values.shape[1] + 1)
             }
     
