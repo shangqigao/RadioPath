@@ -804,60 +804,6 @@ def cox_regression_plus(
         print("Original testing omics:", te_X.shape)
         print(te_X.head())
 
-        # choosing features by cross validation
-        print("Selecting features from model...")
-        cox = CoxPHSurvivalAnalysis(alpha=alpha_min)
-        selector = SelectFromModel(estimator=cox, threshold="mean")
-        # selector = SequentialFeatureSelector(cox, n_features_to_select=64)
-        make_pipeline(StandardScaler(), selector).fit(tr_X, tr_y)
-        selected_name = np.array(tr_X.columns)[selector.get_support()]
-        tr_X = tr_X[selected_name]
-        print("Initially selected training omics:", tr_X.shape)
-        print(tr_X.head())
-        te_X = te_X[selected_name]
-        print("Initially selected testing omics:", tr_X.shape)
-        print(tr_X.head())
-
-        # cox = CoxPHSurvivalAnalysis(alpha=1e-4)
-        # coxnet_pred = make_pipeline(StandardScaler(), cox)
-        # coxnet_pred.fit(tr_X, tr_y)
-        # print(coxnet_pred.score(te_X, te_y))
-
-        # print("Selecting the best features...")
-        # cox = CoxPHSurvivalAnalysis(alpha=alpha_min)
-        # cv = KFold(n_splits=5, shuffle=True, random_state=0)
-        # rfecv = RFECV(
-        #     estimator=cox,
-        #     step=1,
-        #     cv=cv,
-        #     min_features_to_select=1,
-        #     n_jobs=n_jobs
-        # )
-        # make_pipeline(StandardScaler(), rfecv).fit(tr_X, tr_y)
-        # cv_results = pd.DataFrame(rfecv.cv_results_)
-        # plt.figure()
-        # plt.xlabel("Number of features selected")
-        # plt.ylabel("Mean C-index")
-        # plt.errorbar(
-        #     x=cv_results["n_features"],
-        #     y=cv_results["mean_test_score"],
-        #     yerr=cv_results["std_test_score"],
-        # )
-        # plt.title("Recursive Feature Elimination \nwith correlated features")
-        # plt.savefig(f"a_07explainable_AI/feature_selection_fold{split_idx}.jpg")
-
-        # selected_name = np.array(tr_X.columns)[rfecv.get_support()]
-        # tr_X = tr_X[selected_name]
-        # print("Finally selected training omics:", tr_X.shape)
-        # print(tr_X.head())
-        # te_X = te_X[selected_name]
-        # print("Finally selected testing omics:", tr_X.shape)
-        # print(tr_X.head())
-
-        # cox.fit(tr_X, tr_y)
-        # print(cox.score(te_X, te_y))
-
-
         # COX regreession
         print("Selecting the best regularization parameter...")
         cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min)
@@ -917,7 +863,60 @@ def cox_regression_plus(
         plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
 
         # perform prediction using the best params
-        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True)
+        cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=False)
+        cox.set_params(**gcv.best_params_)
+
+        # choosing features by cross validation
+        print("Selecting features from model...")
+        selector = SelectFromModel(estimator=cox, threshold="mean")
+        # selector = SequentialFeatureSelector(cox, n_features_to_select=64)
+        make_pipeline(StandardScaler(), selector).fit(tr_X, tr_y)
+        selected_name = np.array(tr_X.columns)[selector.get_support()]
+        tr_X = tr_X[selected_name]
+        print("Initially selected training omics:", tr_X.shape)
+        print(tr_X.head())
+        te_X = te_X[selected_name]
+        print("Initially selected testing omics:", tr_X.shape)
+        print(tr_X.head())
+
+        # cox = CoxPHSurvivalAnalysis(alpha=1e-4)
+        # coxnet_pred = make_pipeline(StandardScaler(), cox)
+        # coxnet_pred.fit(tr_X, tr_y)
+        # print(coxnet_pred.score(te_X, te_y))
+
+        # print("Selecting the best features...")
+        # cox = CoxPHSurvivalAnalysis(alpha=alpha_min)
+        # cv = KFold(n_splits=5, shuffle=True, random_state=0)
+        # rfecv = RFECV(
+        #     estimator=cox,
+        #     step=1,
+        #     cv=cv,
+        #     min_features_to_select=1,
+        #     n_jobs=n_jobs
+        # )
+        # make_pipeline(StandardScaler(), rfecv).fit(tr_X, tr_y)
+        # cv_results = pd.DataFrame(rfecv.cv_results_)
+        # plt.figure()
+        # plt.xlabel("Number of features selected")
+        # plt.ylabel("Mean C-index")
+        # plt.errorbar(
+        #     x=cv_results["n_features"],
+        #     y=cv_results["mean_test_score"],
+        #     yerr=cv_results["std_test_score"],
+        # )
+        # plt.title("Recursive Feature Elimination \nwith correlated features")
+        # plt.savefig(f"a_07explainable_AI/feature_selection_fold{split_idx}.jpg")
+
+        # selected_name = np.array(tr_X.columns)[rfecv.get_support()]
+        # tr_X = tr_X[selected_name]
+        # print("Finally selected training omics:", tr_X.shape)
+        # print(tr_X.head())
+        # te_X = te_X[selected_name]
+        # print("Finally selected testing omics:", tr_X.shape)
+        # print(tr_X.head())
+
+        # cox.fit(tr_X, tr_y)
+        # print(cox.score(te_X, te_y))
 
         coxnet_pred = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True))
         coxnet_pred.set_params(**gcv.best_params_)
