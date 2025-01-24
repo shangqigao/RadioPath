@@ -28,7 +28,7 @@ from sksurv.metrics import concordance_index_censored
 from sklearn import set_config
 from sklearn.exceptions import FitFailedWarning
 from sklearn.model_selection import GridSearchCV, KFold
-from sklearn.feature_selection import RFECV
+from sklearn.feature_selection import RFECV, SequentialFeatureSelector
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
@@ -805,8 +805,19 @@ def cox_regression_plus(
         print(te_X.head())
 
         # choosing features by cross validation
-        print("Selecting the best features...")
+        print("Sequentially selecting features...")
         cox = CoxPHSurvivalAnalysis(alpha=0.9)
+        sfs = SequentialFeatureSelector(estimator=cox, n_features_to_select=64)
+        make_pipeline(StandardScaler(), sfs).fit(tr_X, tr_y)
+        selected_name = np.array(tr_X.columns)[sfs.get_support()]
+        tr_X = tr_X[selected_name]
+        print("Sequentially selected training omics:", tr_X.shape)
+        print(tr_X.head())
+        te_X = te_X[selected_name]
+        print("Sequentially selected testing omics:", tr_X.shape)
+        print(tr_X.head())
+
+        print("Selecting the best features...")
         cv = KFold(n_splits=5, shuffle=True, random_state=0)
         rfecv = RFECV(
             estimator=cox,
@@ -815,8 +826,8 @@ def cox_regression_plus(
             min_features_to_select=1,
             n_jobs=n_jobs
         )
-        pipe = make_pipeline(StandardScaler(), rfecv).fit(tr_X, tr_y)
-        cv_results = pd.DataFrame(pipe.named_steps["rfecv"].cv_results_)
+        make_pipeline(StandardScaler(), rfecv).fit(tr_X, tr_y)
+        cv_results = pd.DataFrame(rfecv.cv_results_)
         plt.figure()
         plt.xlabel("Number of features selected")
         plt.ylabel("Mean C-index")
@@ -831,10 +842,10 @@ def cox_regression_plus(
         # select features
         selected_name = np.array(tr_X.columns)[rfecv.get_support()]
         tr_X = tr_X[selected_name]
-        print("Selected training omics:", tr_X.shape)
+        print("Finally selected training omics:", tr_X.shape)
         print(tr_X.head())
         te_X = te_X[selected_name]
-        print("Selected testing omics:", tr_X.shape)
+        print("Finally selected testing omics:", tr_X.shape)
         print(tr_X.head())
 
 
