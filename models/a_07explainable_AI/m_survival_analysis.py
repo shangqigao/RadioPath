@@ -28,7 +28,7 @@ from sksurv.metrics import concordance_index_censored
 from sklearn import set_config
 from sklearn.exceptions import FitFailedWarning
 from sklearn.model_selection import GridSearchCV, KFold
-from sklearn.feature_selection import SelectKBest
+from sklearn.feature_selection import SelectKBest, SequentialFeatureSelector
 from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, FeatureAgglomeration
@@ -223,9 +223,9 @@ def prepare_graph_pathomics(
     elif mode == "std":
         feat_list = np.std(feature, axis=0).tolist()
     elif mode == "kmeans":
-        kmeans = KMeans(n_clusters=1)
+        kmeans = KMeans(n_clusters=4)
         feat_list = kmeans.fit(feature).cluster_centers_
-        feat_list = feat_list.squeeze().tolist()
+        feat_list = feat_list.flatten().tolist()
         
     feat_dict = {}
     for i, feat in enumerate(feat_list):
@@ -251,9 +251,9 @@ def prepare_graph_radiomics(
     elif mode == "std":
         feat_list = np.std(feature, axis=0).tolist()
     elif mode == "kmeans":
-        kmeans = KMeans(n_clusters=1)
+        kmeans = KMeans(n_clusters=4)
         feat_list = kmeans.fit(feature).cluster_centers_
-        feat_list = feat_list.squeeze().tolist()
+        feat_list = feat_list.flatten().tolist()
         
     feat_dict = {}
     for i, feat in enumerate(feat_list):
@@ -831,69 +831,87 @@ def cox_regression_plus(
             estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
             cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
         elif model == "CoxPH":
-            cox = CoxPHSurvivalAnalysis()
+            cox = CoxPHSurvivalAnalysis(alpha=1e-2)
         else:
             raise NotImplementedError
-        
+        n_clusters = 64 if used == "radiomics" else 128
+        step = 1 if used == "radiomics" else 2
         pipe = Pipeline(
             [
                 ("scale", StandardScaler()),
-                # ("ward", FeatureAgglomeration(n_clusters=32)),
-                ("select", SelectKBest(_fit_and_score_features, k=3)),
+                # ("ward", FeatureAgglomeration(n_clusters=n_clusters)),
+                # ("select", SelectKBest(_fit_and_score_features, k=3)),
+                ("select", SequentialFeatureSelector(
+                    cox, 
+                    n_features_to_select="auto", 
+                    direction="forward",
+                    tol=0.001,
+                    n_jobs=n_jobs
+                    )
+                ),
                 ("model", cox),
             ]
-        )
-        if model == "Coxnet":
-            param_grid = {
-                # "ward__n_clusters": np.arange(64, 128 + 1, 8), 
-                "select__k": np.arange(1, tr_X.values.shape[1] + 1),
-                "model__alphas": [[v] for v in estimated_alphas]
-            }
-        elif model == "CoxPH":
-            param_grid = {
-                # "ward__n_clusters": np.arange(64, 128 + 1, 8), 
-                "select__k": np.arange(1, tr_X.values.shape[1] + 1)
-            }
+        ).fit(tr_X, tr_y)
+        # if model == "Coxnet":
+        #     param_grid = {
+        #         # "ward__n_clusters": np.arange(64, 128 + 1, 8), 
+        #         "select__k": np.arange(2, n_clusters + 1, step),
+        #         "model__alphas": [[v] for v in estimated_alphas]
+        #     }
+        # elif model == "CoxPH":
+        #     param_grid = {
+        #         # "ward__n_clusters": [2, 4, 8, 16], 
+        #         # "select__k": np.arange(2, n_clusters + 1, step)
+        #         "select__n_features_to_select": np.arange(2, n_clusters + 1, step)
+        #     }
     
-        cv = KFold(n_splits=3, random_state=1, shuffle=True)
-        gcv = GridSearchCV(
-            pipe, 
-            param_grid, 
-            return_train_score=True, 
-            cv=cv, 
-            n_jobs=n_jobs,
-            error_score=0.5
-        )
-        gcv.fit(tr_X, tr_y)
+        # cv = KFold(n_splits=10, random_state=1, shuffle=True)
+        # gcv = GridSearchCV(
+        #     pipe, 
+        #     param_grid, 
+        #     return_train_score=True, 
+        #     cv=cv, 
+        #     n_jobs=n_jobs,
+        #     error_score=0.5
+        # )
+        # gcv.fit(tr_X, tr_y)
 
-        pipe.set_params(**gcv.best_params_)
-        pipe.fit(tr_X, tr_y)
-        _, transformer, final_estimator = (s[1] for s in pipe.steps)
+        # pipe.set_params(**gcv.best_params_)
+        _, transformer, _ = (s[1] for s in pipe.steps)
+        selected_names = np.array(tr_X.columns)[transformer.get_support()]
+        tr_X = tr_X[selected_names]
+        te_X = te_X[selected_names]
+        pipe = Pipeline(
+            [
+                ("scale", StandardScaler()),
+                ("model", cox),
+            ]
+        ).fit(tr_X, tr_y)
+        _, final_estimator = (s[1] for s in pipe.steps)
 
         # plot cross validation results
-        cv_results = pd.DataFrame(gcv.cv_results_)
-        ks = cv_results.param_select__k
-        mean = cv_results.mean_test_score
-        best_k = gcv.best_params_["select__k"]
-        std = cv_results.std_test_score
-        if model == "Coxnet":
-            best_mean = mean[best_k]
-            best_alpha_index = np.argmax(best_mean)
-            mean = mean[:, best_alpha_index]
-            std = std[:, best_alpha_index]
-        fig, ax = plt.subplots(figsize=(9, 6))
-        ax.plot(ks, mean)
-        ax.fill_between(ks, mean - std, mean + std, alpha=0.15)
-        ax.set_xscale("linear")
-        ax.set_ylabel("concordance index")
-        ax.set_xlabel("Num of features")
-        ax.axvline(gcv.best_params_["select__k"], c="C1")
-        ax.axhline(0.5, color="grey", linestyle="--")
-        ax.grid(True)
-        plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
+        # cv_results = pd.DataFrame(gcv.cv_results_)
+        # # ks = cv_results.param_select__k
+        # # best_k = gcv.best_params_["select__k"]
+        # ks = cv_results.param_select__n_features_to_select
+        # best_k = gcv.best_params_["select__n_features_to_select"]
+        # mean = cv_results.mean_test_score
+        # std = cv_results.std_test_score
+        # fig, ax = plt.subplots(figsize=(9, 6))
+        # ax.plot(ks, mean)
+        # ax.fill_between(ks, mean - std, mean + std, alpha=0.15)
+        # ax.set_xscale("linear")
+        # ax.set_ylabel("concordance index")
+        # ax.set_xlabel("Num of features")
+        # ax.axvline(best_k, c="C1")
+        # ax.axhline(0.5, color="grey", linestyle="--")
+        # ax.grid(True)
+        # plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
 
         # Visualize coefficients of the best estimator
-        best_coefs = pd.DataFrame(final_estimator.coef_, index=tr_X.columns[transformer.get_support()], columns=["coefficient"])
+        # selected_names = np.array(warder.get_feature_names_out())[transformer.get_support()]
+        # selected_names = np.array(tr_X.columns)[transformer.get_support()]
+        best_coefs = pd.DataFrame(final_estimator.coef_, index=selected_names, columns=["coefficient"])
         non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
         print(f"Number of non-zero coefficients: {non_zero}")
         non_zero_coefs = best_coefs.query("coefficient != 0")
@@ -1442,9 +1460,10 @@ if __name__ == "__main__":
         n_jobs=8,
         radiomics_aggregation=radiomics_aggregation,
         pathomics_aggregation=pathomics_aggregation,
-        radiomics_keys=radiomic_propereties,
+        radiomics_keys=None, #adiomic_propereties,
         pathomics_keys=None, #["TUM", "NORM", "DEB"],
-        alpha_min=0.1
+        alpha_min=1e-4,
+        model="CoxPH"
     )
 
     # compute mean and std on training data for normalization 

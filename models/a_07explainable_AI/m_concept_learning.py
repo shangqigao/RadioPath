@@ -1064,7 +1064,10 @@ def inference(
         #     top_k=1,
         #     metric="infer-valid-A-auroc",
         # )
-        chkpt = pretrained_dir / f"0{split_idx}/epoch=049.weights.pth"
+        chkpts = [
+            pretrained_dir / f"0{split_idx}/epoch=049.weights.pth",
+            pretrained_dir / f"0{split_idx}/epoch=049.aux.dat"
+        ]
         print(str(chkpt))
         # Perform ensembling by averaging probabilities
         # across checkpoint predictions
@@ -1076,7 +1079,7 @@ def inference(
             arch_kwargs=arch_kwargs,
             loader_kwargs=loader_kwargs,
             preproc_func=transform_dict,
-            pretrained=chkpt,
+            pretrained=chkpts,
             BayesGNN=BayesGNN,
             data_types=omic_keys,
             concept_weight=concept_weight,
@@ -1085,7 +1088,17 @@ def inference(
         pred_logit, concept_logit, _ = list(zip(*outputs))
         hazard = np.exp(np.array(pred_logit).squeeze())
         concept_logit = np.array(concept_logit).squeeze()
-        concept_prob = 1 / (1 + np.exp(-concept_logit))
+
+        model = ConceptGraphArch(**arch_kwargs)
+        model.load(*chkpts)
+        concept_prob = []
+        for i in range(concept_logit.shape[1]):
+            scaler = model.aux_model[f"scaler{i+1}"]
+            logit = concept_logit[:, i:i+1]
+            prob = scaler.predict_proba(logit)[:, 1:2]
+            concept_prob.append(prob)
+        concept_prob = np.concatenate(concept_prob, axis=1)
+        # concept_prob = 1 / (1 + np.exp(-concept_logit))
         concept_label = (concept_prob > 0.5).astype(np.int8)
 
         # * Calculate split statistics
