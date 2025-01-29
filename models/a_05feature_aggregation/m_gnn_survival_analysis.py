@@ -14,7 +14,7 @@ from torch_geometric.data import Data, Dataset, HeteroData
 from torch_geometric.loader import NeighborLoader
 from torch_geometric.utils import subgraph, softmax
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATv2Conv
-from torch_geometric.nn import global_mean_pool
+from torch_geometric.nn import global_mean_pool, TopKPooling
 from torch_geometric.nn.aggr import SumAggregation, MeanAggregation, AttentionalAggregation
     
 class SurvivalGraphDataset(Dataset):
@@ -255,6 +255,67 @@ class ImportanceScoreArch(nn.Module):
         output = self.tail(feature)
         return output
     
+class DownsampleArch(nn.Module):
+    """define downsample architecture
+    """
+    def __init__(
+            self, 
+            dim_features, 
+            dim_hidden,
+            dropout=0.0,
+            pool_ratio=0.1,
+            conv="GINConv",
+            **kwargs,
+    ):
+        super().__init__()
+        self.dropout = dropout
+        self.convs = nn.ModuleList()
+        self.pools = nn.ModuleList()
+        self.conv_name = conv
+
+        conv_dict = {
+            "MLP": [Linear, 1],
+            "GCNConv": [GCNConv, 1],
+            "GATConv": [GATv2Conv, 1],
+            "GINConv": [GINConv, 1], 
+            "EdgeConv": [EdgeConv, 2]
+        }
+        if self.conv_name not in conv_dict:
+            raise ValueError(f"Not support conv={conv}.")
+        
+        def create_block(in_dims, out_dims):
+            return nn.Sequential(
+                Linear(in_dims, out_dims),
+                # BatchNorm1d(out_dims),
+                ReLU(),
+                Dropout(self.dropout)
+            )
+        
+        input_emb_dim = dim_features
+        for out_emb_dim in [dim_hidden, dim_hidden]:
+            conv_class, alpha = conv_dict[self.conv_name]
+            if self.conv_name in ["GINConv", "EdgeConv"]:
+                block = create_block(alpha * input_emb_dim, out_emb_dim)
+                subnet = conv_class(block, **kwargs)
+                self.convs.append(subnet)
+            elif self.conv_name in ["GCNConv", "GATConv"]:
+                subnet = conv_class(alpha * input_emb_dim, out_emb_dim)
+                self.convs.append(subnet)
+            else:
+                subnet = create_block(alpha * input_emb_dim, out_emb_dim)
+                self.convs.append(subnet)
+            self.pools.append(TopKPooling(out_emb_dim, ratio=pool_ratio))    
+            input_emb_dim = out_emb_dim
+
+    def forward(self, feature, edge_index, batch):
+        for l in range(2):
+            if self.conv_name in ["MLP"]:
+                feature = self.convs[l](feature)
+            else:
+                feature = self.convs[l](feature, edge_index)
+            feature, edge_index, _, batch, _, _ = self.pools[l](feature, edge_index, batch=batch)
+        return feature, edge_index, batch
+    
 class OmicsIntegrationArch(nn.Module):
     """define importance score architecture
     """
@@ -347,6 +408,7 @@ class SurvivalGraphArch(nn.Module):
             dim_target,
             layers=None,
             dropout=0.0,
+            pool_ratio=0.1,
             conv="GINConv",
             keys=["radiomics", "pathomics"],
             aggregation="SISIR",
@@ -356,6 +418,7 @@ class SurvivalGraphArch(nn.Module):
         if layers is None:
             layers = [6, 6]
         self.dropout = dropout
+        self.pool_ratio = pool_ratio
         self.embedding_dims = layers
         self.keys = keys
         self.aggregation = aggregation
@@ -412,7 +475,20 @@ class SurvivalGraphArch(nn.Module):
             #     }
             # )
             # self.Aggregation = SumAggregation()
-            # out_emb_dim = self.embedding_dims[-1]
+            out_emb_dim = self.embedding_dims[1]
+            self.downsample_nn_dict = nn.ModuleDict(
+                {
+                    k: DownsampleArch(
+                        dim_features=input_emb_dim,
+                        dim_hidden=out_emb_dim,
+                        dropout=self.dropout,
+                        pool_ratio=self.pool_ratio,
+                        conv=self.conv_name
+                    )
+                    for k in self.keys
+                }
+            )
+            input_emb_dim = out_emb_dim
             self.score_nn = ImportanceScoreArch(
                 dim_features=input_emb_dim,
                 dim_target=2 * input_emb_dim,
@@ -454,21 +530,22 @@ class SurvivalGraphArch(nn.Module):
             batch_dict = data.batch_dict
             enc_list = [x_dict[k] for k in self.keys]
             feature_dict = {k : self.enc_branches[k](enc) for k, enc in zip(self.keys, enc_list)}
-            feature = torch.concat(list(feature_dict.values()), dim=0)
-            edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
-            # check = [[len(f), e.max().item()] for f, e in zip(feature_list, edge_index_list)]
-            # print("Number of nodes and edge index: ", check)
-            edge_index = [e.clone() for e in edge_index_list]
-            ins = [0]
-            index_shift = 0
-            for i in range(1, len(self.keys)): 
-                index_shift += len(feature_dict[self.keys[i-1]])
-                edge_index[i] += index_shift
-                ins.append(index_shift)
-            ins.append(len(feature))
-            edge_index = torch.concat(edge_index, dim=1)
-            batch_list = [batch_dict[k] for k in self.keys]
-            batch = torch.concat(batch_list, dim=0)
+            # # graph concatenation
+            # feature = torch.concat(list(feature_dict.values()), dim=0)
+            # edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
+            # # check = [[len(f), e.max().item()] for f, e in zip(feature_list, edge_index_list)]
+            # # print("Number of nodes and edge index: ", check)
+            # edge_index = [e.clone() for e in edge_index_list]
+            # ins = [0]
+            # index_shift = 0
+            # for i in range(1, len(self.keys)): 
+            #     index_shift += len(feature_dict[self.keys[i-1]])
+            #     edge_index[i] += index_shift
+            #     ins.append(index_shift)
+            # ins.append(len(feature))
+            # edge_index = torch.concat(edge_index, dim=1)
+            # batch_list = [batch_dict[k] for k in self.keys]
+            # batch = torch.concat(batch_list, dim=0)
         else:
             enc_list = [data.x]
             feature, edge_index, batch = data.x, data.edge_index, data.batch
@@ -485,6 +562,31 @@ class SurvivalGraphArch(nn.Module):
             VIparas = None
             KAparas = None
         elif self.aggregation == "SISIR":
+            # graph downsample
+            feature_list, edge_index_list, batch_list = [], [], []
+            for k in self.keys:
+                feature, edge_index, batch = self.downsample_nn_dict[k](
+                    feature = feature_dict[k], 
+                    edge_index = edge_index_dict[k], 
+                    batch = batch_dict[k]
+                )
+                feature_list.append(feature)
+                edge_index_list.append(edge_index)
+                batch_list.append(batch)
+
+            # graph concatenation
+            feature = torch.concat(feature_list, dim=0)
+            edge_index = [e.clone() for e in edge_index_list]
+            ins = [0]
+            index_shift = 0
+            for i in range(1, len(self.keys)): 
+                index_shift += len(feature_list[i - 1])
+                edge_index[i] += index_shift
+                ins.append(index_shift)
+            ins.append(len(feature))
+            edge_index = torch.concat(edge_index, dim=1)
+            batch = torch.concat(batch_list, dim=0)
+
             # feature alignment by knowledge amalgamation
             # (feature, ht), (ft_, ft) = self.integration_nn(enc_list, edge_index_list, feature, edge_index)
             # KAparas = [feature, ht, ft_, ft]
@@ -498,7 +600,6 @@ class SurvivalGraphArch(nn.Module):
             #     gate_dict.update({k: gate})
             # VIparas = None
             
-
             # encoder
             encode = self.score_nn(feature, edge_index)
             # encode = self.gate_nn(feature)
@@ -750,7 +851,11 @@ class VILoss(nn.Module):
         beta = 2*self.beta0 + self.lambda0*(loc - self.mu0)**2 + self.lambda0*torch.exp(logvar)
         mu_upsilon = (alpha / beta).clone().detach()
         loss_kl = 0.5*torch.mean(self.lambda0*mu_upsilon*((loc - self.mu0)**2 + torch.exp(logvar)) - logvar)
-        loss_ae = sum([F.mse_loss(enc, dec) for enc, dec in zip(enc_list, dec_list)])
+        loss_ae = 0.0
+        for enc, dec in zip(enc_list, dec_list):
+            subset = torch.randperm(len(enc))[:len(dec)]
+            enc = enc[subset]
+            loss_ae += F.mse_loss(enc, dec)
         print(loss_ae.item(), loss_kl.item())
         return loss_ae + self.tau_kl * loss_kl
     
