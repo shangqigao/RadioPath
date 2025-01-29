@@ -61,7 +61,8 @@ class SurvivalGraphDataset(Dataset):
                 num_nodes = len(graph_dict["x"])
                 if num_nodes > self.max_num_nodes:
                     num_sampled = int(num_nodes*self.sampling_rate)
-                    subset = torch.randperm(num_nodes)[:num_sampled]
+                    start = torch.randperm(num_nodes - num_sampled)[0]
+                    subset = torch.arange(start, start + num_sampled)
                     edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=True)
                     graph_dict["edge_index"] = edge_index
                     graph_dict["x"] = graph_dict["x"][subset]
@@ -85,7 +86,8 @@ class SurvivalGraphDataset(Dataset):
                     num_nodes = len(subgraph_dict["x"])
                     if num_nodes > self.max_num_nodes:
                         num_sampled = int(num_nodes*self.sampling_rate)
-                        subset = torch.randperm(num_nodes)[:num_sampled]
+                        start = torch.randperm(num_nodes - num_sampled)[0]
+                        subset = torch.arange(start, start + num_sampled)
                         edge_index, _ = subgraph(subset, subgraph_dict["edge_index"], relabel_nodes=True)
                         subgraph_dict["edge_index"] = edge_index
                         subgraph_dict["x"] = subgraph_dict["x"][subset]
@@ -475,12 +477,12 @@ class SurvivalGraphArch(nn.Module):
             #     }
             # )
             # self.Aggregation = SumAggregation()
-            out_emb_dim = self.embedding_dims[1]
+            hid_emb_dim = self.embedding_dims[1]
             self.downsample_nn_dict = nn.ModuleDict(
                 {
                     k: DownsampleArch(
                         dim_features=input_emb_dim,
-                        dim_hidden=out_emb_dim,
+                        dim_hidden=hid_emb_dim,
                         dropout=self.dropout,
                         pool_ratio=self.pool_ratio,
                         conv=self.conv_name
@@ -488,7 +490,7 @@ class SurvivalGraphArch(nn.Module):
                     for k in self.keys
                 }
             )
-            input_emb_dim = out_emb_dim
+            input_emb_dim = hid_emb_dim
             self.score_nn = ImportanceScoreArch(
                 dim_features=input_emb_dim,
                 dim_target=2 * input_emb_dim,
@@ -496,9 +498,10 @@ class SurvivalGraphArch(nn.Module):
                 dropout=self.dropout,
                 conv=self.conv_name
             )
+            hid_emb_dim = self.embedding_dims[0]
             self.inverse_score_nn = ImportanceScoreArch(
                 dim_features=input_emb_dim,
-                dim_target=input_emb_dim,
+                dim_target=hid_emb_dim,
                 layers=self.embedding_dims[::-1],
                 dropout=self.dropout,
                 conv=self.conv_name
@@ -517,7 +520,6 @@ class SurvivalGraphArch(nn.Module):
         self.load_state_dict(state_dict)
 
     def sampling(self, data):
-        assert data.size(-1) == 2
         loc, logvar = torch.chunk(data, chunks=2, dim=-1)
         logvar = torch.clamp(logvar, min=-20, max=20)
         gauss = torch.distributions.Normal(loc, torch.exp(0.5*logvar))
@@ -526,7 +528,7 @@ class SurvivalGraphArch(nn.Module):
     def forward(self, data):
         if len(self.keys) > 1:
             x_dict = data.x_dict
-            edge_index_dict = data.edge_index_dict
+            edge_index_dict = {k: data.edge_index_dict[k, "to", k] for k in self.keys}
             batch_dict = data.batch_dict
             enc_list = [x_dict[k] for k in self.keys]
             feature_dict = {k : self.enc_branches[k](enc) for k, enc in zip(self.keys, enc_list)}
@@ -586,6 +588,7 @@ class SurvivalGraphArch(nn.Module):
             ins.append(len(feature))
             edge_index = torch.concat(edge_index, dim=1)
             batch = torch.concat(batch_list, dim=0)
+            batch_dict = {k: b for k, b in zip(self.keys, batch_list)}
 
             # feature alignment by knowledge amalgamation
             # (feature, ht), (ft_, ft) = self.integration_nn(enc_list, edge_index_list, feature, edge_index)
@@ -606,13 +609,13 @@ class SurvivalGraphArch(nn.Module):
             # reparameterization
             gate, VIparas = self.sampling(encode)
 
-            feature_dict = {k: feature[ins[i]:ins[i+1]] for k, i in enumerate(self.keys)}
-            gate_dict = {k: gate[ins[i]:ins[i+1]] for k, i in enumerate(self.keys)}
+            feature_dict = {k: feature[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
+            gate_dict = {k: gate[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
             # decoder
             decode = self.inverse_score_nn(gate, edge_index)
 
             if len(self.keys) > 1:
-                dec_list = [self.dec_branches[k](decode[ins[i]:ins[i+1], ...]) for k, i in enumerate(self.keys)]
+                dec_list = [self.dec_branches[k](decode[ins[i]:ins[i+1], ...]) for i, k in enumerate(self.keys)]
             else:
                 dec_list = [decode]
             VIparas.append(enc_list)
@@ -929,7 +932,7 @@ class CFLoss(nn.Module):
         return mmd_loss + self.beta*mse_loss
     
 class CoxSurvLoss(nn.Module):
-    def __init__(self, tau_vi=1, tau_ka=1e-2):
+    def __init__(self, tau_vi=1e-3, tau_ka=1e-2):
         super(CoxSurvLoss, self).__init__()
         self.tau_vi = tau_vi
         self.tau_ka = tau_ka
