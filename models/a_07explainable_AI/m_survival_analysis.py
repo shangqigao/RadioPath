@@ -715,7 +715,7 @@ def coxnet(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs):
     warnings.simplefilter("ignore", FitFailedWarning)
     coxnet_pipe.fit(tr_X, tr_y)
     estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
-    cv = KFold(n_splits=10, shuffle=True, random_state=0)
+    cv = KFold(n_splits=5, shuffle=True, random_state=0)
     model = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
     lower, upper = np.percentile(tr_y["duration"], [10, 90])
     tr_times = np.arange(lower, upper + 1)
@@ -985,9 +985,10 @@ def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
 
     non_zero_coefs = best_coefs.query("coefficient != 0")
     coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+    top10 = coef_order[:10]
 
     _, ax = plt.subplots(figsize=(8, 6))
-    non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
+    non_zero_coefs.loc[top10].plot.barh(ax=ax, legend=False)
     ax.set_xlabel("coefficient")
     ax.grid(True)
     plt.subplots_adjust(left=0.3)
