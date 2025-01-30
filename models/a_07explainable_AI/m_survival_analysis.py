@@ -44,6 +44,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, FeatureAgglomeration
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegression as PlattScaling
+from sklearn.utils import resample
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
@@ -1139,7 +1140,8 @@ def survival(
         radiomics_aggregation=False,
         pathomics_aggregation=False,
         model="CoxPH",
-        scorer="cindex"
+        scorer="cindex",
+        n_bootstraps=100
         ):
     splits = joblib.load(split_path)
     predict_results = {}
@@ -1274,7 +1276,7 @@ def survival(
         tr_X = tr_X[selected_names]
         te_X = te_X[selected_names]
 
-        # survival prediction
+        # model selection
         if model == "Coxnet":
             predictor = coxnet(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs)
         elif model == "RSF":
@@ -1287,6 +1289,19 @@ def survival(
             predictor = ipcridge(split_idx, tr_X, tr_y, scorer, n_jobs)
         elif model == "FastSVM":
             predictor = fastsvm(split_idx, tr_X, tr_y, scorer, n_jobs, rank_ratio=1)
+
+        # bootstrapping
+        stable_coefs = np.zeros(len(selected_names))
+        for _ in range(n_bootstraps):
+            tr_x_s, tr_y_s = resample(tr_X, tr_y)
+            predictor.fit(tr_x_s, tr_y_s)
+            stable_coefs += (predictor.coef_ != 0).astype(int)
+        stable_coefs = stable_coefs / n_bootstraps
+        final_coefs = np.where(stable_coefs > 0.8)[0]
+        stable_names = [selected_names[i] for i in final_coefs.tolist()]
+        tr_X = tr_X[stable_names]
+        te_X = te_X[stable_names]
+        predictor.fit(tr_X, tr_y)
 
         times, events = tr_y["duration"], tr_y["event"]
         time_min = times[events].min()
