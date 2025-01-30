@@ -699,7 +699,7 @@ def cox_regression(
     print("CV mean", np.array(list(predict_results.values())).mean())
     return
 
-def coxnet(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs):
+def coxnet(split_idx, tr_X, tr_y, scorer, n_jobs, l1_ratio=0.9):
     # COX regreession
     print("Selecting the best regularization parameter...")
     cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.1)
@@ -1166,13 +1166,13 @@ def survival(
         split_path,
         radiomics_keys=None,
         pathomics_keys=None,
-        l1_ratio=1.0, 
         used="all", 
         n_jobs=32,
         radiomics_aggregation=False,
         pathomics_aggregation=False,
         model="CoxPH",
         scorer="cindex",
+        feature_selection=True,
         n_bootstraps=100
         ):
     splits = joblib.load(split_path)
@@ -1281,36 +1281,39 @@ def survival(
         print(te_X.head())
 
         # feature selection
-        univariate_results = []
-        for name in list(tr_X.columns):
-            cph = CoxPHFitter()
-            df = pd.DataFrame(
-                {
-                    "duration": tr_y["duration"], 
-                    "event": tr_y["event"],
-                    name: tr_X[name] 
-                }
-            )
-            cph.fit(df, "duration", "event")
-            summary = cph.summary
-            univariate_results.append({
-                'name': name,
-                'coef': summary['coef'].values[0],
-                'HR': summary['exp(coef)'].values[0],
-                'p_value': summary['p'].values[0],
-                'CI_low': summary['exp(coef) lower 95%'].values[0],
-                'CI_high': summary['exp(coef) upper 95%'].values[0]
-            })
-        results_df = pd.DataFrame(univariate_results)
-        results_df.sort_values(by='p_value', inplace=True)
-        selected_names = results_df[results_df['p_value'] < 0.1]['name'].tolist()
-        print(f"Selected features: {selected_names}")
-        tr_X = tr_X[selected_names]
-        te_X = te_X[selected_names]
+        if feature_selection:
+            print("Selecting univariate feature...")
+            univariate_results = []
+            for name in list(tr_X.columns):
+                cph = CoxPHFitter()
+                df = pd.DataFrame(
+                    {
+                        "duration": tr_y["duration"], 
+                        "event": tr_y["event"],
+                        name: tr_X[name] 
+                    }
+                )
+                cph.fit(df, "duration", "event")
+                summary = cph.summary
+                univariate_results.append({
+                    'name': name,
+                    'coef': summary['coef'].values[0],
+                    'HR': summary['exp(coef)'].values[0],
+                    'p_value': summary['p'].values[0],
+                    'CI_low': summary['exp(coef) lower 95%'].values[0],
+                    'CI_high': summary['exp(coef) upper 95%'].values[0]
+                })
+            results_df = pd.DataFrame(univariate_results)
+            results_df.sort_values(by='p_value', inplace=True)
+            selected_names = results_df[results_df['p_value'] < 0.1]['name'].tolist()
+            print(f"Selected features: {len(selected_names)}")
+            tr_X = tr_X[selected_names]
+            te_X = te_X[selected_names]
 
         # model selection
+        print("Selecting survival model...")
         if model == "Coxnet":
-            predictor = coxnet(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs)
+            predictor = coxnet(split_idx, tr_X, tr_y, scorer, n_jobs)
         elif model == "RSF":
             predictor = rsf(split_idx, tr_X, tr_y, scorer, n_jobs)
         elif model == "CoxPH":
@@ -1324,6 +1327,7 @@ def survival(
 
         # bootstrapping
         if n_bootstraps > 0:
+            print("Bootstrapping...")
             stable_coefs = np.zeros(len(selected_names))
             for _ in range(n_bootstraps):
                 tr_x_s, tr_y_s = resample(tr_X, tr_y)
@@ -2191,15 +2195,15 @@ if __name__ == "__main__":
     # survival analysis from the splits
     survival(
         split_path=split_path,
-        l1_ratio=0.9,
         used=["radiomics", "pathomics", "radiopathomics"][2],
         n_jobs=8,
         radiomics_aggregation=radiomics_aggregation,
         pathomics_aggregation=pathomics_aggregation,
         radiomics_keys=None, #radiomic_propereties,
         pathomics_keys=None, #["TUM", "NORM", "DEB"],
-        model=["RSF", "CoxPH", "Coxnet", "GradientBoost", "IPCRidge", "FastSVM"][1],
-        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0],
+        model=["RSF", "CoxPH", "Coxnet", "GradientBoost", "IPCRidge", "FastSVM"][0],
+        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
+        feature_selection=True,
         n_bootstraps=0
     )
 
