@@ -782,20 +782,28 @@ def coxnet(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs):
 
 def rsf(split_idx, tr_X, tr_y, scorer, n_jobs):
     # choosing parameters by cross validation
-    cv = KFold(n_splits=10, shuffle=True, random_state=0)
-    model = RandomSurvivalForest(max_depth=2, random_state=1)
-    lower, upper = np.percentile(tr_y["duration"], [10, 90])
+    cv = KFold(n_splits=5, shuffle=True, random_state=0)
+    lower, upper = np.percentile(tr_y["duration"], [20, 80])
     tr_times = np.arange(lower, upper + 1)
-    score_name = "C-Index"
-    if scorer == "cindex-ipcw":
+    model = RandomSurvivalForest(max_depth=2, random_state=1)
+    if scorer == "cindex":
+        score_name = "C-Index"
+        param_grid={"model__max_depth": np.arange(1, 20, dtype=int)}
+    elif scorer == "cindex-ipcw":
         score_name = "C-Index-IPCW"
         model = as_concordance_index_ipcw_scorer(model, tau=upper)
+        param_grid={"model__estimator__max_depth": np.arange(1, 20, dtype=int)}
     elif scorer == "auc":
         score_name = "AUC"
         model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+        param_grid={"model__estimator__max_depth": np.arange(1, 20, dtype=int)}
     elif scorer == "ibs":
         score_name = "IBS"
         model = as_integrated_brier_score_scorer(model, times=tr_times)
+        param_grid={"model__estimator__max_depth": np.arange(1, 20, dtype=int)}
+    else:
+        raise NotImplementedError
+
     pipe = Pipeline(
         [
             ("scale", StandardScaler()),
@@ -804,7 +812,7 @@ def rsf(split_idx, tr_X, tr_y, scorer, n_jobs):
     )
     gcv = GridSearchCV(
         pipe,
-        param_grid={"model__max_depth": np.arange(1, 10, dtype=int)},
+        param_grid=param_grid,
         cv=cv,
         error_score=0.5,
         n_jobs=n_jobs,
@@ -812,7 +820,10 @@ def rsf(split_idx, tr_X, tr_y, scorer, n_jobs):
 
     # plot cross validation results
     cv_results = pd.DataFrame(gcv.cv_results_)
-    depths = cv_results.param_model__max_depth
+    if scorer == "cindex":
+        depths = cv_results.param_model__max_depth
+    else:
+        depths = cv_results.param_model__estimator__max_depth
     mean = cv_results.mean_test_score
     std = cv_results.std_test_score
     fig, ax = plt.subplots(figsize=(9, 6))
@@ -821,7 +832,10 @@ def rsf(split_idx, tr_X, tr_y, scorer, n_jobs):
     ax.set_xscale("linear")
     ax.set_ylabel(score_name)
     ax.set_xlabel("max depth")
-    ax.axvline(gcv.best_params_["model__max_depth"], c="C1")
+    if scorer == "cindex":
+        ax.axvline(gcv.best_params_["model__max_depth"], c="C1")
+    else:
+        ax.axvline(gcv.best_params_["model__estimator__max_depth"], c="C1")
     ax.axhline(0.5, color="grey", linestyle="--")
     ax.grid(True)
     plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
@@ -834,20 +848,28 @@ def rsf(split_idx, tr_X, tr_y, scorer, n_jobs):
 
 def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
     # choosing parameters by cross validation
-    cv = KFold(n_splits=10, shuffle=True, random_state=0)
-    model = CoxPHSurvivalAnalysis(alpha=1e-2)
-    lower, upper = np.percentile(tr_y["duration"], [10, 90])
+    cv = KFold(n_splits=5, shuffle=True, random_state=0)
+    lower, upper = np.percentile(tr_y["duration"], [20, 80])
     tr_times = np.arange(lower, upper + 1)
-    score_name = "C-Index"
-    if scorer == "cindex-ipcw":
+    model = CoxPHSurvivalAnalysis(alpha=1e-2)
+    if scorer == "cindex":
+        score_name = "C-Index"
+        param_grid={"model__alpha": [1e-2, 1e-1, 1, 1e1, 1e2, 1e3, 1e4]}
+    elif scorer == "cindex-ipcw":
         score_name = "C-Index-IPCW"
         model = as_concordance_index_ipcw_scorer(model, tau=upper)
+        param_grid={"model__estimator__alpha": [1e-2, 1e-1, 1, 10, 100]}
     elif scorer == "auc":
         score_name = "AUC"
         model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+        param_grid={"model__estimator__alpha": [1e-2, 1e-1, 1, 10, 100]}
     elif scorer == "ibs":
         score_name = "IBS"
         model = as_integrated_brier_score_scorer(model, times=tr_times)
+        param_grid={"model__estimator__alpha": [1e-2, 1e-1, 1, 10, 100]}
+    else:
+        raise NotImplementedError
+
     pipe = Pipeline(
         [
             ("scale", StandardScaler()),
@@ -856,7 +878,7 @@ def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
     )
     gcv = GridSearchCV(
         pipe,
-        param_grid={"model__alpha": np.arange(1e-4, 1e-1, (1e-1 - 1e-4) / 50)},
+        param_grid=param_grid,
         cv=cv,
         error_score=0.5,
         n_jobs=n_jobs,
@@ -864,7 +886,10 @@ def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
 
     # plot cross validation results
     cv_results = pd.DataFrame(gcv.cv_results_)
-    alphas = cv_results.param_model__alpha
+    if scorer == "cindex":
+        alphas = cv_results.param_model__alpha
+    else:
+        alphas = cv_results.param_model__estimator__alpha
     mean = cv_results.mean_test_score
     std = cv_results.std_test_score
     fig, ax = plt.subplots(figsize=(9, 6))
@@ -872,15 +897,21 @@ def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
     ax.fill_between(alphas, mean - std, mean + std, alpha=0.15)
     ax.set_xscale("log")
     ax.set_ylabel(score_name)
-    ax.set_xlabel("max depth")
-    ax.axvline(gcv.best_params_["model__alpha"], c="C1")
+    ax.set_xlabel("alpha")
+    if scorer == "cindex":
+        ax.axvline(gcv.best_params_["model__alpha"], c="C1")
+    else:
+        ax.axvline(gcv.best_params_["model__estimator__alpha"], c="C1")
     ax.axhline(0.5, color="grey", linestyle="--")
     ax.grid(True)
     plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
 
     # Visualize coefficients of the best estimator
     best_model = gcv.best_estimator_.named_steps["model"]
-    best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+    if scorer == "cindex":
+        best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+    else:
+        best_coefs = pd.DataFrame(best_model.estimator_.coef_, index=tr_X.columns, columns=["coefficient"])
 
     non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
     print(f"Number of non-zero coefficients: {non_zero}")
@@ -1025,19 +1056,15 @@ def survival(
         elif model == "CoxPH":
             predictor = coxph(split_idx, tr_X, tr_y, scorer, n_jobs)
 
-        times, events = tr_y["duration"], tr_y["event"]
-        time_min = times[events].min()
-        time_max = times[events].max()
-        times = np.arange(int(time_min), int(time_max), 7)
-        mask = times > time_min and times < time_max
-        te_X = te_X[mask]
-        te_y = te_y[mask]
         risk_scores = predictor.predict(te_X)
-        C_index = concordance_index_censored(te_y["event"], te_y["duration"], risk_scores)
-        C_index_ipcw = concordance_index_ipcw(tr_y, te_y, risk_scores)
+        C_index = concordance_index_censored(te_y["event"], te_y["duration"], risk_scores)[0]
+        C_index_ipcw = concordance_index_ipcw(tr_y, te_y, risk_scores)[0]
+
+        lower, upper = np.percentile(te_y["duration"], [10, 90])
+        times = np.arange(lower, upper + 1, 7)
         auc, mean_auc = cumulative_dynamic_auc(tr_y, te_y, risk_scores, times)
         survs = predictor.predict_survival_function(te_X)
-        preds = np.asarray([fn(t) for t in times] for fn in survs)
+        preds = np.asarray([[fn(t) for t in times] for fn in survs])
         IBS = integrated_brier_score(tr_y, te_y, preds, times)
         scores_dict = {
             "C-index": C_index,
@@ -1056,7 +1083,9 @@ def survival(
         print(f"Updating regression results on fold {split_idx}")
         predict_results.update({f"Fold {split_idx}": scores_dict})
     print(predict_results)
-    print("CV mean", np.array(list(predict_results.values())).mean())
+    for k in scores_dict.keys():
+        arr = np.array([v[k] for v in predict_results.values()])
+        print(f"CV {k} mean+std", arr.mean(), arr.std())
     return
 
 def coxnet_plus(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs):
@@ -1752,7 +1781,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
-    parser.add_argument('--radiomics_mode', default="SegVol", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
+    parser.add_argument('--radiomics_mode', default="pyradiomics", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
     parser.add_argument('--radiomics_dim', default=768, choices=[107, 768, 768], type=int)
     args = parser.parse_args()
 
@@ -1794,7 +1823,7 @@ if __name__ == "__main__":
 
     # use radiomics and pathomics
     class_name = ["kidney_and_mass", "mass", "tumour"][2]
-    radiomics_aggregation = True # false if load image-level features else true
+    radiomics_aggregation = False # false if load image-level features else true
     if radiomics_aggregation:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.json"))
     else:
@@ -1889,8 +1918,8 @@ if __name__ == "__main__":
         pathomics_aggregation=pathomics_aggregation,
         radiomics_keys=None, #radiomic_propereties,
         pathomics_keys=None, #["TUM", "NORM", "DEB"],
-        model=["RSF", "CoxPH", "Coxnet"],
-        scorer=["cindex", "cindex-ipcw", "auc", "ibs"]
+        model=["RSF", "CoxPH", "Coxnet"][1],
+        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0]
     )
 
     # survival_plus(
@@ -1928,21 +1957,21 @@ if __name__ == "__main__":
     #     joblib.dump(node_scaler, scaler_path)
 
     # training
-    omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
-    omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
-    split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
-    scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_paths,
-        num_node_features=omics_dims,
-        model_dir=save_model_dir,
-        conv="GCNConv",
-        n_works=8,
-        batch_size=32,
-        BayesGNN=False,
-        omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "SISIR"][1],
-        sampling_rate=0.1
-    )
+    # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
+    # omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
+    # split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
+    # scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     model_dir=save_model_dir,
+    #     conv="GCNConv",
+    #     n_works=8,
+    #     batch_size=32,
+    #     BayesGNN=False,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "SISIR"][1],
+    #     sampling_rate=0.1
+    # )
