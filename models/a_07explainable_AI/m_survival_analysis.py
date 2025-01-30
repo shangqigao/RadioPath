@@ -38,7 +38,7 @@ from sksurv.metrics import (
 from sklearn import set_config
 from sklearn.exceptions import FitFailedWarning
 from sklearn.model_selection import GridSearchCV, KFold
-from sklearn.feature_selection import SelectKBest, SequentialFeatureSelector
+from sklearn.feature_selection import SelectKBest, SequentialFeatureSelector, VarianceThreshold
 from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans, FeatureAgglomeration
@@ -1282,6 +1282,14 @@ def survival(
 
         # feature selection
         if feature_selection:
+            print("Selecting features...")
+            pipe = make_pipeline(StandardScaler(), VarianceThreshold(threshold=0.01))
+            pipe.fit(tr_X)
+            selected_names = pipe.get_feature_names_out(tr_X).tolist()
+            num_removed = len(tr_X.columns) - len(selected_names)
+            print(f"Removing {num_removed} low-variance features...")
+            tr_X = tr_X[selected_names]
+            te_X = te_X[selected_names]
             print("Selecting univariate feature...")
             univariate_results = []
             for name in list(tr_X.columns):
