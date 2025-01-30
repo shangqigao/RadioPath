@@ -20,9 +20,11 @@ from torch_geometric.loader import DataLoader
 from tiatoolbox import logger
 from tiatoolbox.utils.misc import save_as_json
 
+from lifelines import CoxPHFitter
 from sksurv.nonparametric import kaplan_meier_estimator
-from sksurv.linear_model import CoxPHSurvivalAnalysis, CoxnetSurvivalAnalysis
-from sksurv.ensemble import RandomSurvivalForest
+from sksurv.linear_model import CoxPHSurvivalAnalysis, CoxnetSurvivalAnalysis, IPCRidge
+from sksurv.ensemble import RandomSurvivalForest, GradientBoostingSurvivalAnalysis
+from sksurv.svm import FastSurvivalSVM, FastKernelSurvivalSVM
 from sksurv.preprocessing import OneHotEncoder
 from sksurv.metrics import (
     concordance_index_censored, 
@@ -832,6 +834,70 @@ def rsf(split_idx, tr_X, tr_y, scorer, n_jobs):
 
     return pipe
 
+def gradientboosting(split_idx, tr_X, tr_y, scorer, n_jobs, loss="coxph"):
+    # choosing parameters by cross validation
+    cv = KFold(n_splits=5, shuffle=True, random_state=0)
+    model = GradientBoostingSurvivalAnalysis(loss, n_estimators=100, random_state=1)
+    lower, upper = np.percentile(tr_y["duration"], [20, 80])
+    tr_times = np.arange(lower, upper + 1)
+    if scorer == "cindex":
+        score_name = "C-Index"
+        param_grid={"model__n_estimators": np.arange(1, 101, 2, dtype=int)}
+    elif scorer == "cindex-ipcw":
+        score_name = "C-Index-IPCW"
+        model = as_concordance_index_ipcw_scorer(model, tau=upper)
+        param_grid={"model__estimator__n_estimators": np.arange(1, 101, 2, dtype=int)}
+    elif scorer == "auc":
+        score_name = "AUC"
+        model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+        param_grid={"model__estimator__n_estimators": np.arange(1, 101, 2, dtype=int)}
+    elif scorer == "ibs":
+        score_name = "IBS"
+        model = as_integrated_brier_score_scorer(model, times=tr_times)
+        param_grid={"model__estimator__n_estimators": np.arange(1, 101, 2, dtype=int)}
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("model", model),
+        ]
+    )
+    gcv = GridSearchCV(
+        pipe,
+        param_grid=param_grid,
+        cv=cv,
+        error_score=0.5,
+        n_jobs=n_jobs,
+    ).fit(tr_X, tr_y)
+
+    # plot cross validation results
+    cv_results = pd.DataFrame(gcv.cv_results_)
+    if scorer == "cindex":
+        depths = cv_results.param_model__n_estimators
+    else:
+        depths = cv_results.param_model__estimator__n_estimators
+    mean = cv_results.mean_test_score
+    std = cv_results.std_test_score
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(depths, mean)
+    ax.fill_between(depths, mean - std, mean + std, alpha=0.15)
+    ax.set_xscale("linear")
+    ax.set_ylabel(score_name)
+    ax.set_xlabel("num estimators")
+    if scorer == "cindex":
+        ax.axvline(gcv.best_params_["model__n_estimators"], c="C1")
+    else:
+        ax.axvline(gcv.best_params_["model__estimator__n_estimators"], c="C1")
+    ax.axhline(0.5, color="grey", linestyle="--")
+    ax.grid(True)
+    plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
+
+    # perform prediction using the best params
+    pipe.set_params(**gcv.best_params_)
+    pipe.fit(tr_X, tr_y)
+
+    return pipe
+
+
 def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
     # choosing parameters by cross validation
     cv = KFold(n_splits=10, shuffle=True, random_state=0)
@@ -890,6 +956,168 @@ def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
 
     _, ax = plt.subplots(figsize=(8, 6))
     non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
+    ax.set_xlabel("coefficient")
+    ax.grid(True)
+    plt.subplots_adjust(left=0.3)
+    plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
+
+    # perform prediction using the best params
+    pipe.set_params(**gcv.best_params_)
+    pipe.fit(tr_X, tr_y)
+
+    return pipe
+
+def ipcridge(split_idx, tr_X, tr_y, scorer, n_jobs):
+    # choosing parameters by cross validation
+    cv = KFold(n_splits=5, shuffle=True, random_state=0)
+    model = IPCRidge(alpha=1, random_state=1)
+    lower, upper = np.percentile(tr_y["duration"], [20, 80])
+    tr_times = np.arange(lower, upper + 1)
+    if scorer == "cindex":
+        score_name = "C-Index"
+        param_grid={"model__alpha": 2.0 ** np.arange(-12, 13, 2)}
+    if scorer == "cindex-ipcw":
+        score_name = "C-Index-IPCW"
+        model = as_concordance_index_ipcw_scorer(model, tau=upper)
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+    elif scorer == "auc":
+        score_name = "AUC"
+        model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+    elif scorer == "ibs":
+        score_name = "IBS"
+        model = as_integrated_brier_score_scorer(model, times=tr_times)
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("model", model),
+        ]
+    )
+    gcv = GridSearchCV(
+        pipe,
+        param_grid=param_grid,
+        cv=cv,
+        error_score=0.5,
+        n_jobs=n_jobs,
+    ).fit(tr_X, tr_y)
+
+    # plot cross validation results
+    cv_results = pd.DataFrame(gcv.cv_results_)
+    if scorer == "cindex":
+        alphas = cv_results.param_model__alpha
+    else:
+        alphas = cv_results.param_model__estimator__alpha
+    mean = cv_results.mean_test_score
+    std = cv_results.std_test_score
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(alphas, mean)
+    ax.fill_between(alphas, mean - std, mean + std, alpha=0.15)
+    ax.set_xscale("log")
+    ax.set_ylabel(score_name)
+    ax.set_xlabel("alpha")
+    if scorer == "cindex":
+        ax.axvline(gcv.best_params_["model__alpha"], c="C1")
+    else:
+        ax.axvline(gcv.best_params_["model__estimator__alpha"], c="C1")
+    ax.axhline(0.5, color="grey", linestyle="--")
+    ax.grid(True)
+    plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
+
+    # Visualize coefficients of the best estimator
+    best_model = gcv.best_estimator_.named_steps["model"]
+    best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+
+    non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
+    print(f"Number of non-zero coefficients: {non_zero}")
+
+    non_zero_coefs = best_coefs.query("coefficient != 0")
+    coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+    top10 = coef_order[:10]
+
+    _, ax = plt.subplots(figsize=(8, 6))
+    non_zero_coefs.loc[top10].plot.barh(ax=ax, legend=False)
+    ax.set_xlabel("coefficient")
+    ax.grid(True)
+    plt.subplots_adjust(left=0.3)
+    plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
+
+    # perform prediction using the best params
+    pipe.set_params(**gcv.best_params_)
+    pipe.fit(tr_X, tr_y)
+
+    return pipe
+
+def fastsvm(split_idx, tr_X, tr_y, scorer, n_jobs, rank_ratio=1):
+    # choosing parameters by cross validation
+    cv = KFold(n_splits=5, shuffle=True, random_state=0)
+    model = FastSurvivalSVM(alpha=1, rank_ratio=rank_ratio)
+    lower, upper = np.percentile(tr_y["duration"], [20, 80])
+    tr_times = np.arange(lower, upper + 1)
+    if scorer == "cindex":
+        score_name = "C-Index"
+        param_grid={"model__alpha": 2.0 ** np.arange(-12, 13, 2)}
+    if scorer == "cindex-ipcw":
+        score_name = "C-Index-IPCW"
+        model = as_concordance_index_ipcw_scorer(model, tau=upper)
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+    elif scorer == "auc":
+        score_name = "AUC"
+        model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+    elif scorer == "ibs":
+        score_name = "IBS"
+        model = as_integrated_brier_score_scorer(model, times=tr_times)
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("model", model),
+        ]
+    )
+    gcv = GridSearchCV(
+        pipe,
+        param_grid=param_grid,
+        cv=cv,
+        error_score=0.5,
+        n_jobs=n_jobs,
+    ).fit(tr_X, tr_y)
+
+    # plot cross validation results
+    cv_results = pd.DataFrame(gcv.cv_results_)
+    if scorer == "cindex":
+        alphas = cv_results.param_model__alpha
+    else:
+        alphas = cv_results.param_model__estimator__alpha
+    mean = cv_results.mean_test_score
+    std = cv_results.std_test_score
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(alphas, mean)
+    ax.fill_between(alphas, mean - std, mean + std, alpha=0.15)
+    ax.set_xscale("log")
+    ax.set_ylabel(score_name)
+    ax.set_xlabel("alpha")
+    if scorer == "cindex":
+        ax.axvline(gcv.best_params_["model__alpha"], c="C1")
+    else:
+        ax.axvline(gcv.best_params_["model__estimator__alpha"], c="C1")
+    ax.axhline(0.5, color="grey", linestyle="--")
+    ax.grid(True)
+    plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
+
+    # Visualize coefficients of the best estimator
+    best_model = gcv.best_estimator_.named_steps["model"]
+    best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+
+    non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
+    print(f"Number of non-zero coefficients: {non_zero}")
+
+    non_zero_coefs = best_coefs.query("coefficient != 0")
+    coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+    top10 = coef_order[:10]
+
+    _, ax = plt.subplots(figsize=(8, 6))
+    non_zero_coefs.loc[top10].plot.barh(ax=ax, legend=False)
     ax.set_xlabel("coefficient")
     ax.grid(True)
     plt.subplots_adjust(left=0.3)
@@ -1018,12 +1246,47 @@ def survival(
         print("Selected testing omics:", te_X.shape)
         print(te_X.head())
 
+        # feature selection
+        univariate_results = []
+        for name in list(tr_X.columns):
+            cph = CoxPHFitter()
+            df = pd.DataFrame(
+                {
+                    "duration": tr_y["duration"], 
+                    "event": tr_y["event"],
+                    name: tr_X[name] 
+                }
+            )
+            cph.fit(df, "duration", "event")
+            summary = cph.summary
+            univariate_results.append({
+                'name': name,
+                'coef': summary['coef'].values[0],
+                'HR': summary['exp(coef)'].values[0],
+                'p_value': summary['p'].values[0],
+                'CI_low': summary['exp(coef) lower 95%'].values[0],
+                'CI_high': summary['exp(coef) upper 95%'].values[0]
+            })
+        results_df = pd.DataFrame(univariate_results)
+        results_df.sort_values(by='p_value', inplace=True)
+        selected_names = results_df[results_df['p_value'] < 0.1]['name'].tolist()
+        print(f"Selected features: {selected_names}")
+        tr_X = tr_X[selected_names]
+        te_X = te_X[selected_names]
+
+        # survival prediction
         if model == "Coxnet":
             predictor = coxnet(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs)
         elif model == "RSF":
             predictor = rsf(split_idx, tr_X, tr_y, scorer, n_jobs)
         elif model == "CoxPH":
             predictor = coxph(split_idx, tr_X, tr_y, scorer, n_jobs)
+        elif model == "GradientBoost":
+            predictor = gradientboosting(split_idx, tr_X, tr_y, scorer, n_jobs, loss="coxph")
+        elif model == "IPCRidge":
+            predictor = ipcridge(split_idx, tr_X, tr_y, scorer, n_jobs)
+        elif model == "FastSVM":
+            predictor = fastsvm(split_idx, tr_X, tr_y, scorer, n_jobs, rank_ratio=1)
 
         times, events = tr_y["duration"], tr_y["event"]
         time_min = times[events].min()
