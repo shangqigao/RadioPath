@@ -1323,17 +1323,18 @@ def survival(
             predictor = fastsvm(split_idx, tr_X, tr_y, scorer, n_jobs, rank_ratio=1)
 
         # bootstrapping
-        stable_coefs = np.zeros(len(selected_names))
-        for _ in range(n_bootstraps):
-            tr_x_s, tr_y_s = resample(tr_X, tr_y)
-            predictor.fit(tr_x_s, tr_y_s)
-            stable_coefs += (predictor.coef_ != 0).astype(int)
-        stable_coefs = stable_coefs / n_bootstraps
-        final_coefs = np.where(stable_coefs > 0.8)[0]
-        stable_names = [selected_names[i] for i in final_coefs.tolist()]
-        tr_X = tr_X[stable_names]
-        te_X = te_X[stable_names]
-        predictor.fit(tr_X, tr_y)
+        if n_bootstraps > 0:
+            stable_coefs = np.zeros(len(selected_names))
+            for _ in range(n_bootstraps):
+                tr_x_s, tr_y_s = resample(tr_X, tr_y)
+                predictor.fit(tr_x_s, tr_y_s)
+                stable_coefs += (predictor.coef_ != 0).astype(int)
+            stable_coefs = stable_coefs / n_bootstraps
+            final_coefs = np.where(stable_coefs > 0.8)[0]
+            stable_names = [selected_names[i] for i in final_coefs.tolist()]
+            tr_X = tr_X[stable_names]
+            te_X = te_X[stable_names]
+            predictor.fit(tr_X, tr_y)
 
         risk_scores = predictor.predict(te_X)
         C_index = concordance_index_censored(te_y["event"], te_y["duration"], risk_scores)[0]
@@ -2197,8 +2198,9 @@ if __name__ == "__main__":
         pathomics_aggregation=pathomics_aggregation,
         radiomics_keys=None, #radiomic_propereties,
         pathomics_keys=None, #["TUM", "NORM", "DEB"],
-        model=["RSF", "CoxPH", "Coxnet"][1],
-        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0]
+        model=["RSF", "CoxPH", "Coxnet", "GradientBoost", "IPCRidge", "FastSVM"][1],
+        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0],
+        n_bootstraps=0
     )
 
     # survival_plus(
