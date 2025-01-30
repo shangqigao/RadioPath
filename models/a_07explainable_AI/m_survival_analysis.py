@@ -22,9 +22,17 @@ from tiatoolbox.utils.misc import save_as_json
 
 from sksurv.nonparametric import kaplan_meier_estimator
 from sksurv.linear_model import CoxPHSurvivalAnalysis, CoxnetSurvivalAnalysis
+from sksurv.ensemble import RandomSurvivalForest
 from sksurv.preprocessing import OneHotEncoder
-from sksurv.metrics import concordance_index_censored
-
+from sksurv.metrics import (
+    concordance_index_censored, 
+    concordance_index_ipcw,
+    integrated_brier_score, 
+    cumulative_dynamic_auc,
+    as_concordance_index_ipcw_scorer,
+    as_cumulative_dynamic_auc_scorer,
+    as_integrated_brier_score_scorer
+)
 from sklearn import set_config
 from sklearn.exceptions import FitFailedWarning
 from sklearn.model_selection import GridSearchCV, KFold
@@ -688,7 +696,212 @@ def cox_regression(
     print("CV mean", np.array(list(predict_results.values())).mean())
     return
 
-def cox_regression_plus(
+def coxnet(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs):
+    # COX regreession
+    print("Selecting the best regularization parameter...")
+    cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.1)
+    cox_elastic_net.fit(tr_X, tr_y)
+    coefficients = pd.DataFrame(cox_elastic_net.coef_, index=tr_X.columns, columns=np.round(cox_elastic_net.alphas_, 5))
+    
+    plot_coefficients(coefficients, n_highlight=5)
+
+    # choosing penalty strength by cross validation
+    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.1, max_iter=1000)
+    coxnet_pipe = make_pipeline(StandardScaler(), cox)
+    warnings.simplefilter("ignore", UserWarning)
+    warnings.simplefilter("ignore", FitFailedWarning)
+    coxnet_pipe.fit(tr_X, tr_y)
+    estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
+    cv = KFold(n_splits=10, shuffle=True, random_state=0)
+    model = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
+    lower, upper = np.percentile(tr_y["duration"], [10, 90])
+    tr_times = np.arange(lower, upper + 1)
+    score_name = "C-Index"
+    if scorer == "cindex-ipcw":
+        score_name = "C-Index-IPCW"
+        model = as_concordance_index_ipcw_scorer(model, tau=upper)
+    elif scorer == "auc":
+        score_name = "AUC"
+        model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+    elif scorer == "ibs":
+        score_name = "IBS"
+        model = as_integrated_brier_score_scorer(model, times=tr_times)
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("model", model),
+        ]
+    )
+    gcv = GridSearchCV(
+        pipe,
+        param_grid={"model__alphas": [[v] for v in estimated_alphas]},
+        cv=cv,
+        error_score=0.5,
+        n_jobs=n_jobs,
+    ).fit(tr_X, tr_y)
+
+    # plot cross validation results
+    cv_results = pd.DataFrame(gcv.cv_results_)
+    alphas = cv_results.param_model__alphas.map(lambda x: x[0])
+    mean = cv_results.mean_test_score
+    std = cv_results.std_test_score
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(alphas, mean)
+    ax.fill_between(alphas, mean - std, mean + std, alpha=0.15)
+    ax.set_xscale("log")
+    ax.set_ylabel(score_name)
+    ax.set_xlabel("alpha")
+    ax.axvline(gcv.best_params_["model__alphas"][0], c="C1")
+    ax.axhline(0.5, color="grey", linestyle="--")
+    ax.grid(True)
+    plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
+
+    # Visualize coefficients of the best estimator
+    best_model = gcv.best_estimator_.named_steps["model"]
+    best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+
+    non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
+    print(f"Number of non-zero coefficients: {non_zero}")
+
+    non_zero_coefs = best_coefs.query("coefficient != 0")
+    coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+
+    _, ax = plt.subplots(figsize=(8, 6))
+    non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
+    ax.set_xlabel("coefficient")
+    ax.grid(True)
+    plt.subplots_adjust(left=0.3)
+    plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
+
+    # perform prediction using the best params
+    pipe = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True))
+    pipe.set_params(**gcv.best_params_)
+    pipe.fit(tr_X, tr_y)
+
+    return pipe
+
+def rsf(split_idx, tr_X, tr_y, scorer, n_jobs):
+    # choosing parameters by cross validation
+    cv = KFold(n_splits=10, shuffle=True, random_state=0)
+    model = RandomSurvivalForest(max_depth=2, random_state=1)
+    lower, upper = np.percentile(tr_y["duration"], [10, 90])
+    tr_times = np.arange(lower, upper + 1)
+    score_name = "C-Index"
+    if scorer == "cindex-ipcw":
+        score_name = "C-Index-IPCW"
+        model = as_concordance_index_ipcw_scorer(model, tau=upper)
+    elif scorer == "auc":
+        score_name = "AUC"
+        model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+    elif scorer == "ibs":
+        score_name = "IBS"
+        model = as_integrated_brier_score_scorer(model, times=tr_times)
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("model", model),
+        ]
+    )
+    gcv = GridSearchCV(
+        pipe,
+        param_grid={"model__max_depth": np.arange(1, 10, dtype=int)},
+        cv=cv,
+        error_score=0.5,
+        n_jobs=n_jobs,
+    ).fit(tr_X, tr_y)
+
+    # plot cross validation results
+    cv_results = pd.DataFrame(gcv.cv_results_)
+    depths = cv_results.param_model__max_depth
+    mean = cv_results.mean_test_score
+    std = cv_results.std_test_score
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(depths, mean)
+    ax.fill_between(depths, mean - std, mean + std, alpha=0.15)
+    ax.set_xscale("linear")
+    ax.set_ylabel(score_name)
+    ax.set_xlabel("max depth")
+    ax.axvline(gcv.best_params_["model__max_depth"], c="C1")
+    ax.axhline(0.5, color="grey", linestyle="--")
+    ax.grid(True)
+    plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
+
+    # perform prediction using the best params
+    pipe.set_params(**gcv.best_params_)
+    pipe.fit(tr_X, tr_y)
+
+    return pipe
+
+def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
+    # choosing parameters by cross validation
+    cv = KFold(n_splits=10, shuffle=True, random_state=0)
+    model = CoxPHSurvivalAnalysis(alpha=1e-2)
+    lower, upper = np.percentile(tr_y["duration"], [10, 90])
+    tr_times = np.arange(lower, upper + 1)
+    score_name = "C-Index"
+    if scorer == "cindex-ipcw":
+        score_name = "C-Index-IPCW"
+        model = as_concordance_index_ipcw_scorer(model, tau=upper)
+    elif scorer == "auc":
+        score_name = "AUC"
+        model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+    elif scorer == "ibs":
+        score_name = "IBS"
+        model = as_integrated_brier_score_scorer(model, times=tr_times)
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("model", model),
+        ]
+    )
+    gcv = GridSearchCV(
+        pipe,
+        param_grid={"model__alpha": np.arange(1e-4, 1e-1, (1e-1 - 1e-4) / 50)},
+        cv=cv,
+        error_score=0.5,
+        n_jobs=n_jobs,
+    ).fit(tr_X, tr_y)
+
+    # plot cross validation results
+    cv_results = pd.DataFrame(gcv.cv_results_)
+    alphas = cv_results.param_model__alpha
+    mean = cv_results.mean_test_score
+    std = cv_results.std_test_score
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.plot(alphas, mean)
+    ax.fill_between(alphas, mean - std, mean + std, alpha=0.15)
+    ax.set_xscale("log")
+    ax.set_ylabel(score_name)
+    ax.set_xlabel("max depth")
+    ax.axvline(gcv.best_params_["model__alpha"], c="C1")
+    ax.axhline(0.5, color="grey", linestyle="--")
+    ax.grid(True)
+    plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
+
+    # Visualize coefficients of the best estimator
+    best_model = gcv.best_estimator_.named_steps["model"]
+    best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+
+    non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
+    print(f"Number of non-zero coefficients: {non_zero}")
+
+    non_zero_coefs = best_coefs.query("coefficient != 0")
+    coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+
+    _, ax = plt.subplots(figsize=(8, 6))
+    non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
+    ax.set_xlabel("coefficient")
+    ax.grid(True)
+    plt.subplots_adjust(left=0.3)
+    plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
+
+    # perform prediction using the best params
+    pipe.set_params(**gcv.best_params_)
+    pipe.fit(tr_X, tr_y)
+
+    return pipe
+
+def survival(
         split_path,
         radiomics_keys=None,
         pathomics_keys=None,
@@ -697,8 +910,309 @@ def cox_regression_plus(
         n_jobs=32,
         radiomics_aggregation=False,
         pathomics_aggregation=False,
-        alpha_min=0.01,
-        model="CoxPH"
+        model="CoxPH",
+        scorer="cindex"
+        ):
+    splits = joblib.load(split_path)
+    predict_results = {}
+    for split_idx, split in enumerate(splits):
+        print(f"Performing cross-validation on fold {split_idx}...")
+        data_tr, data_va, data_te = split["train"], split["valid"], split["test"]
+        data_tr = data_tr + data_va
+
+        tr_y = np.array([p[1] for p in data_tr])
+        tr_y = pd.DataFrame({'event': tr_y[:, 1].astype(bool), 'duration': tr_y[:, 0]})
+        tr_y = tr_y.to_records(index=False)
+        te_y = np.array([p[1] for p in data_te])
+        te_y = pd.DataFrame({'event': te_y[:, 1].astype(bool), 'duration': te_y[:, 0]})
+        te_y = te_y.to_records(index=False)
+
+        # prepare radiomics
+        radiomics_tr_paths = [p[0]["radiomics"] for p in data_tr]
+        if radiomics_aggregation:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(prepare_graph_radiomics)(idx, graph_path)
+                for idx, graph_path in enumerate(radiomics_tr_paths)
+            )
+        else:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(load_radiomic_properties)(idx, graph_path, radiomics_keys)
+                for idx, graph_path in enumerate(radiomics_tr_paths)
+            )
+        radiomics_dict = {}
+        for d in dict_list: radiomics_dict.update(d)
+        radiomics_tr_X = [radiomics_dict[f"{i}"] for i in range(len(radiomics_tr_paths))]
+        radiomics_tr_X = pd.DataFrame(radiomics_tr_X)
+        print("Selected training radiomics:", radiomics_tr_X.shape)
+        print(radiomics_tr_X.head())
+
+        radiomics_te_paths = [p[0]["radiomics"] for p in data_te]
+        if radiomics_aggregation:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(prepare_graph_radiomics)(idx, graph_path)
+                for idx, graph_path in enumerate(radiomics_te_paths)
+            )
+        else:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(load_radiomic_properties)(idx, graph_path, radiomics_keys)
+                for idx, graph_path in enumerate(radiomics_te_paths)
+            )
+        radiomics_dict = {}
+        for d in dict_list: radiomics_dict.update(d)
+        radiomics_te_X = [radiomics_dict[f"{i}"] for i in range(len(radiomics_te_paths))]
+        radiomics_te_X = pd.DataFrame(radiomics_te_X)
+        print("Selected testing radiomics:", radiomics_te_X.shape)
+        print(radiomics_te_X.head())
+
+
+        # Prepare pathomics
+        pathomics_tr_paths = [p[0]["pathomics"] for p in data_tr]
+        if pathomics_aggregation:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(prepare_graph_pathomics)(idx, graph_path, pathomics_keys)
+                for idx, graph_path in enumerate(pathomics_tr_paths)
+            )
+        else:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(load_wsi_level_features)(idx, graph_path)
+                for idx, graph_path in enumerate(pathomics_tr_paths)
+            )
+        pathomics_dict = {}
+        for d in dict_list: pathomics_dict.update(d)
+        pathomics_tr_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_tr_paths))]
+        pathomics_tr_X = pd.DataFrame(pathomics_tr_X)
+        print("Selected training pathomics:", pathomics_tr_X.shape)
+        print(pathomics_tr_X.head())
+
+        pathomics_te_paths = [p[0]["pathomics"] for p in data_te]
+        if pathomics_aggregation:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(prepare_graph_pathomics)(idx, graph_path, pathomics_keys)
+                for idx, graph_path in enumerate(pathomics_te_paths)
+            )
+        else:
+            dict_list = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(load_wsi_level_features)(idx, graph_path)
+                for idx, graph_path in enumerate(pathomics_te_paths)
+            )
+        pathomics_dict = {}
+        for d in dict_list: pathomics_dict.update(d)
+        pathomics_te_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_te_paths))]
+        pathomics_te_X = pd.DataFrame(pathomics_te_X)
+        print("Selected testing pathomics:", pathomics_te_X.shape)
+        print(pathomics_te_X.head())
+
+        # Concatenate multi-omics if required
+        if used == "radiopathomics":
+            tr_X = pd.concat([radiomics_tr_X, pathomics_tr_X], axis=1)
+            te_X = pd.concat([radiomics_te_X, pathomics_te_X], axis=1)
+        elif used == "pathomics":
+            tr_X, te_X = pathomics_tr_X, pathomics_te_X
+        elif used == "radiomics":
+            tr_X, te_X = radiomics_tr_X, radiomics_te_X
+        else:
+            raise NotImplementedError
+        # df_prop = df_prop.apply(zscore)
+        print("Selected training omics:", tr_X.shape)
+        print(tr_X.head())
+        print("Selected testing omics:", te_X.shape)
+        print(te_X.head())
+
+        if model == "Coxnet":
+            predictor = coxnet(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs)
+        elif model == "RSF":
+            predictor = rsf(split_idx, tr_X, tr_y, scorer, n_jobs)
+        elif model == "CoxPH":
+            predictor = coxph(split_idx, tr_X, tr_y, scorer, n_jobs)
+
+        times, events = tr_y["duration"], tr_y["event"]
+        time_min = times[events].min()
+        time_max = times[events].max()
+        times = np.arange(int(time_min), int(time_max), 7)
+        mask = times > time_min and times < time_max
+        te_X = te_X[mask]
+        te_y = te_y[mask]
+        risk_scores = predictor.predict(te_X)
+        C_index = concordance_index_censored(te_y["event"], te_y["duration"], risk_scores)
+        C_index_ipcw = concordance_index_ipcw(tr_y, te_y, risk_scores)
+        auc, mean_auc = cumulative_dynamic_auc(tr_y, te_y, risk_scores, times)
+        survs = predictor.predict_survival_function(te_X)
+        preds = np.asarray([fn(t) for t in times] for fn in survs)
+        IBS = integrated_brier_score(tr_y, te_y, preds, times)
+        scores_dict = {
+            "C-index": C_index,
+            "C-index-IPCW": C_index_ipcw,
+            "Mean AUC": mean_auc,
+            "IBS": IBS
+        }
+
+        plt.plot(times, auc, marker="o")
+        plt.axhline(mean_auc, linestyle="--")
+        plt.xlabel("days from enrollment")
+        plt.ylabel("time-dependent AUC")
+        plt.grid(True)
+        plt.savefig(f"a_07explainable_AI/AUC_fold{split_idx}.jpg") 
+
+        print(f"Updating regression results on fold {split_idx}")
+        predict_results.update({f"Fold {split_idx}": scores_dict})
+    print(predict_results)
+    print("CV mean", np.array(list(predict_results.values())).mean())
+    return
+
+def coxnet_plus(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs):
+    model = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.1, max_iter=1000)
+    lower, upper = np.percentile(tr_y["duration"], [10, 90])
+    tr_times = np.arange(lower, upper + 1)
+    if scorer == "cindex-ipcw":
+        model = as_concordance_index_ipcw_scorer(model, tau=upper)
+    elif scorer == "auc":
+        model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+    elif scorer == "ibs":
+        model = as_integrated_brier_score_scorer(model, times=tr_times)
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("select", SequentialFeatureSelector(
+                model, 
+                n_features_to_select="auto", 
+                direction="forward",
+                tol=0.01,
+                n_jobs=n_jobs
+                )
+            ),
+            ("model", model),
+        ]
+    ).fit(tr_X, tr_y)
+    
+    _, transformer, _ = (s[1] for s in pipe.steps)
+    selected_names = np.array(tr_X.columns)[transformer.get_support()]
+    tr_X = tr_X[selected_names]
+    te_X = te_X[selected_names]
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("model", model),
+        ]
+    ).fit(tr_X, tr_y)
+    _, final_estimator = (s[1] for s in pipe.steps)
+
+    # Visualize coefficients of the best estimator
+    best_coefs = pd.DataFrame(final_estimator.coef_, index=selected_names, columns=["coefficient"])
+    non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
+    print(f"Number of non-zero coefficients: {non_zero}")
+    non_zero_coefs = best_coefs.query("coefficient != 0")
+    coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+    _, ax = plt.subplots(figsize=(8, 6))
+    non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
+    ax.set_xlabel("coefficient")
+    ax.grid(True)
+    plt.subplots_adjust(left=0.3)
+    plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
+
+    return pipe, selected_names
+
+def rsf_plus(tr_X, tr_y, scorer, n_jobs):
+    model = RandomSurvivalForest(max_depth=4, random_state=1)
+    lower, upper = np.percentile(tr_y["duration"], [10, 90])
+    tr_times = np.arange(lower, upper + 1)
+    if scorer == "cindex-ipcw":
+        model = as_concordance_index_ipcw_scorer(model, tau=upper)
+    elif scorer == "auc":
+        model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+    elif scorer == "ibs":
+        model = as_integrated_brier_score_scorer(model, times=tr_times)
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("select", SequentialFeatureSelector(
+                model, 
+                n_features_to_select="auto", 
+                direction="forward",
+                tol=0.01,
+                n_jobs=n_jobs
+                )
+            ),
+            ("model", model),
+        ]
+    ).fit(tr_X, tr_y)
+    
+    _, transformer, _ = (s[1] for s in pipe.steps)
+    selected_names = np.array(tr_X.columns)[transformer.get_support()]
+    tr_X = tr_X[selected_names]
+    te_X = te_X[selected_names]
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("model", model),
+        ]
+    ).fit(tr_X, tr_y)
+
+    return pipe, selected_names
+
+def coxph_plus(split_idx, tr_X, tr_y, scorer, n_jobs):
+    model = CoxPHSurvivalAnalysis(alpha=1e-2)
+    lower, upper = np.percentile(tr_y["duration"], [10, 90])
+    tr_times = np.arange(lower, upper + 1)
+    if scorer == "cindex-ipcw":
+        model = as_concordance_index_ipcw_scorer(model, tau=upper)
+    elif scorer == "auc":
+        model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+    elif scorer == "ibs":
+        model = as_integrated_brier_score_scorer(model, times=tr_times)
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("select", SequentialFeatureSelector(
+                model, 
+                n_features_to_select="auto", 
+                direction="forward",
+                tol=0.01,
+                n_jobs=n_jobs
+                )
+            ),
+            ("model", model),
+        ]
+    ).fit(tr_X, tr_y)
+    
+    _, transformer, _ = (s[1] for s in pipe.steps)
+    selected_names = np.array(tr_X.columns)[transformer.get_support()]
+    tr_X = tr_X[selected_names]
+    te_X = te_X[selected_names]
+    pipe = Pipeline(
+        [
+            ("scale", StandardScaler()),
+            ("model", model),
+        ]
+    ).fit(tr_X, tr_y)
+    _, final_estimator = (s[1] for s in pipe.steps)
+
+    # Visualize coefficients of the best estimator
+    best_coefs = pd.DataFrame(final_estimator.coef_, index=selected_names, columns=["coefficient"])
+    non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
+    print(f"Number of non-zero coefficients: {non_zero}")
+    non_zero_coefs = best_coefs.query("coefficient != 0")
+    coef_order = non_zero_coefs.abs().sort_values("coefficient").index
+    _, ax = plt.subplots(figsize=(8, 6))
+    non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
+    ax.set_xlabel("coefficient")
+    ax.grid(True)
+    plt.subplots_adjust(left=0.3)
+    plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
+
+    return pipe, selected_names
+
+
+def survival_plus(
+        split_path,
+        radiomics_keys=None,
+        pathomics_keys=None,
+        l1_ratio=1.0, 
+        used="all", 
+        n_jobs=32,
+        radiomics_aggregation=False,
+        pathomics_aggregation=False,
+        model="CoxPH",
+        scorer="cindex"
         ):
     splits = joblib.load(split_path)
     predict_results = {}
@@ -805,126 +1319,43 @@ def cox_regression_plus(
         print("Original testing omics:", te_X.shape)
         print(te_X.head())
 
-        # feature and parameteer selection by cross validation
-        def _fit_and_score_features(X, y):
-            n_features = X.shape[1]
-            scores = np.empty(n_features)
-            m = CoxPHSurvivalAnalysis()
-            for j in range(n_features):
-                Xj = X[:, j : j + 1]
-                m.fit(Xj, y)
-                scores[j] = m.score(Xj, y)
-            return scores
-        
-        print("Selecting the best settings...")
         if model == "Coxnet":
-            cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min)
-            cox_elastic_net.fit(tr_X, tr_y)
-            coefficients = pd.DataFrame(cox_elastic_net.coef_, index=tr_X.columns, columns=np.round(cox_elastic_net.alphas_, 5))  
-            plot_coefficients(coefficients, n_highlight=5)
-
-            cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=alpha_min, max_iter=1000)
-            coxnet_pipe = make_pipeline(StandardScaler(), cox)
-            warnings.simplefilter("ignore", UserWarning)
-            warnings.simplefilter("ignore", FitFailedWarning)
-            coxnet_pipe.fit(tr_X, tr_y)
-            estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
-            cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
+            predictor, selected = coxnet_plus(split_idx, tr_X, tr_y, l1_ratio, scorer, n_jobs)
+        elif model == "RSF":
+            predictor, selected = rsf_plus(tr_X, tr_y, scorer, n_jobs)
         elif model == "CoxPH":
-            cox = CoxPHSurvivalAnalysis(alpha=1e-2)
-        else:
-            raise NotImplementedError
-        n_clusters = 64 if used == "radiomics" else 128
-        step = 1 if used == "radiomics" else 2
-        pipe = Pipeline(
-            [
-                ("scale", StandardScaler()),
-                # ("ward", FeatureAgglomeration(n_clusters=n_clusters)),
-                # ("select", SelectKBest(_fit_and_score_features, k=3)),
-                ("select", SequentialFeatureSelector(
-                    cox, 
-                    n_features_to_select="auto", 
-                    direction="forward",
-                    tol=0.001,
-                    n_jobs=n_jobs
-                    )
-                ),
-                ("model", cox),
-            ]
-        ).fit(tr_X, tr_y)
-        # if model == "Coxnet":
-        #     param_grid = {
-        #         # "ward__n_clusters": np.arange(64, 128 + 1, 8), 
-        #         "select__k": np.arange(2, n_clusters + 1, step),
-        #         "model__alphas": [[v] for v in estimated_alphas]
-        #     }
-        # elif model == "CoxPH":
-        #     param_grid = {
-        #         # "ward__n_clusters": [2, 4, 8, 16], 
-        #         # "select__k": np.arange(2, n_clusters + 1, step)
-        #         "select__n_features_to_select": np.arange(2, n_clusters + 1, step)
-        #     }
-    
-        # cv = KFold(n_splits=10, random_state=1, shuffle=True)
-        # gcv = GridSearchCV(
-        #     pipe, 
-        #     param_grid, 
-        #     return_train_score=True, 
-        #     cv=cv, 
-        #     n_jobs=n_jobs,
-        #     error_score=0.5
-        # )
-        # gcv.fit(tr_X, tr_y)
+            predictor, selected = coxph_plus(split_idx, tr_X, tr_y, scorer, n_jobs)
 
-        # pipe.set_params(**gcv.best_params_)
-        _, transformer, _ = (s[1] for s in pipe.steps)
-        selected_names = np.array(tr_X.columns)[transformer.get_support()]
-        tr_X = tr_X[selected_names]
-        te_X = te_X[selected_names]
-        pipe = Pipeline(
-            [
-                ("scale", StandardScaler()),
-                ("model", cox),
-            ]
-        ).fit(tr_X, tr_y)
-        _, final_estimator = (s[1] for s in pipe.steps)
+        times, events = tr_y["duration"], tr_y["event"]
+        time_min = times[events].min()
+        time_max = times[events].max()
+        times = np.arange(int(time_min), int(time_max), 7)
+        mask = times > time_min and times < time_max
+        te_X = te_X[selected][mask]
+        te_y = te_y[mask]
+        risk_scores = predictor.predict(te_X)
+        C_index = concordance_index_censored(te_y["event"], te_y["duration"], risk_scores)
+        C_index_ipcw = concordance_index_ipcw(tr_y, te_y, risk_scores)
+        auc, mean_auc = cumulative_dynamic_auc(tr_y, te_y, risk_scores, times)
+        survs = predictor.predict_survival_function(te_X)
+        preds = np.asarray([fn(t) for t in times] for fn in survs)
+        IBS = integrated_brier_score(tr_y, te_y, preds, times)
+        scores_dict = {
+            "C-index": C_index,
+            "C-index-IPCW": C_index_ipcw,
+            "Mean AUC": mean_auc,
+            "IBS": IBS
+        }
 
-        # plot cross validation results
-        # cv_results = pd.DataFrame(gcv.cv_results_)
-        # # ks = cv_results.param_select__k
-        # # best_k = gcv.best_params_["select__k"]
-        # ks = cv_results.param_select__n_features_to_select
-        # best_k = gcv.best_params_["select__n_features_to_select"]
-        # mean = cv_results.mean_test_score
-        # std = cv_results.std_test_score
-        # fig, ax = plt.subplots(figsize=(9, 6))
-        # ax.plot(ks, mean)
-        # ax.fill_between(ks, mean - std, mean + std, alpha=0.15)
-        # ax.set_xscale("linear")
-        # ax.set_ylabel("concordance index")
-        # ax.set_xlabel("Num of features")
-        # ax.axvline(best_k, c="C1")
-        # ax.axhline(0.5, color="grey", linestyle="--")
-        # ax.grid(True)
-        # plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
-
-        # Visualize coefficients of the best estimator
-        # selected_names = np.array(warder.get_feature_names_out())[transformer.get_support()]
-        # selected_names = np.array(tr_X.columns)[transformer.get_support()]
-        best_coefs = pd.DataFrame(final_estimator.coef_, index=selected_names, columns=["coefficient"])
-        non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
-        print(f"Number of non-zero coefficients: {non_zero}")
-        non_zero_coefs = best_coefs.query("coefficient != 0")
-        coef_order = non_zero_coefs.abs().sort_values("coefficient").index
-        _, ax = plt.subplots(figsize=(8, 6))
-        non_zero_coefs.loc[coef_order].plot.barh(ax=ax, legend=False)
-        ax.set_xlabel("coefficient")
-        ax.grid(True)
-        plt.subplots_adjust(left=0.3)
-        plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
+        plt.plot(times, auc, marker="o")
+        plt.axhline(mean_auc, linestyle="--")
+        plt.xlabel("days from enrollment")
+        plt.ylabel("time-dependent AUC")
+        plt.grid(True)
+        plt.savefig(f"a_07explainable_AI/AUC_fold{split_idx}.jpg") 
 
         print(f"Updating regression results on fold {split_idx}")
-        predict_results.update({f"Fold {split_idx}": pipe.score(te_X, te_y)})
+        predict_results.update({f"Fold {split_idx}": scores_dict})
     print(predict_results)
     print("CV mean", np.array(list(predict_results.values())).mean())
     return
@@ -1223,82 +1654,90 @@ def inference(
         scaler_path,
         num_node_features,
         pretrained_dir,
+        save_dir,
         n_works=32,
-        batch_size=32,
-        BayesGNN=False
+        BayesGNN=False,
+        conv="GCNConv",
+        omic_keys=["radiomics", "pathomics"],
+        aggregation="SISIR",
 ):
     """survival prediction
     """
     splits = joblib.load(split_path)
-    node_scaler = joblib.load(scaler_path)
+    node_scalers = [joblib.load(scaler_path[k]) for k in omic_keys] 
+    transform_dict = {k: s.transform for k, s in zip(omic_keys, node_scalers)}
     
     loader_kwargs = {
-        "num_workers": n_works,
-        "batch_size": batch_size,
+        "num_workers": n_works, 
+        "batch_size": 1,
     }
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [16, 16, 8],
-        "dropout": 0.5,
-        "conv": "GATConv"
+        "layers": [128, 128, 64], # [16, 16, 8]
+        "dropout": {"ABMIL": 0.5, "SISIR": 0.0}[aggregation],
+        "conv": conv,
+        "keys": omic_keys,
+        "aggregation": aggregation
     }
-    pretrained_dir = pretrained_dir / f"Survival_Prediction_{arch_kwargs['conv']}"
+    if BayesGNN:
+        pretrained_dir = pretrained_dir / f"Bayes_Survival_Prediction_{conv}_{aggregation}"
+    else:
+        pretrained_dir = pretrained_dir / f"Survival_Prediction_{conv}_{aggregation}"
+
     cum_stats = []
     for split_idx, split in enumerate(splits):
         new_split = {"infer": [v[0] for v in split["test"]]}
 
-        stat_files = recur_find_ext(f"{pretrained_dir}/{split_idx:02d}/", [".json"])
-        stat_files = [v for v in stat_files if ".old.json" not in v]
-        assert len(stat_files) == 1
-        chkpts, _ = select_checkpoints(
-            stat_files[0],
-            top_k=1,
-            metric="infer-valid-A-auroc",
-        )
+        chkpts = pretrained_dir / f"0{split_idx}/best_model.weights.pth",
+        print(str(chkpts))
         # Perform ensembling by averaging probabilities
         # across checkpoint predictions
 
-        cum_results = []
-        for i, chkpt_info in enumerate(chkpts):
-            chkpt_results = run_once(
-                new_split,
-                num_epochs=1,
-                save_dir=None,
-                pretrained=chkpt_info,
-                arch_kwargs=arch_kwargs,
-                loader_kwargs=loader_kwargs,
-                preproc_func=node_scaler.transform,
-            )
-            chkpt_results = list(zip(*chkpt_results))
-            chkpt_results = np.array(chkpt_results).squeeze()
-            cum_results.append(chkpt_results)
-        cum_results = np.array(cum_results)
-        cum_results = np.squeeze(cum_results)
-
-        prob = cum_results
-        if len(cum_results.shape) == 2:
-            prob = np.mean(cum_results, axis=0)
+        outputs = run_once(
+            new_split,
+            num_epochs=1,
+            on_gpu=False,
+            save_dir=None,
+            arch_kwargs=arch_kwargs,
+            loader_kwargs=loader_kwargs,
+            preproc_func=transform_dict,
+            pretrained=chkpts,
+            BayesGNN=BayesGNN,
+            data_types=omic_keys
+        )
+        logits, features = list(zip(*outputs))
+        graph_paths = [d["pathomics"] for d in new_split["infer"]]
+        mkdir(save_dir)
+        for i, path in enumerate(graph_paths):
+            name = pathlib.Path(path).stem
+            save_path = f"{save_dir}/{name}_{aggregation}.npy"
+            np.save(save_path, features[i])
+        
 
         # * Calculate split statistics
-        true = np.array([v[1] for v in split["test"]])
-        event_status = true[:, 1] > 0
-        event_time = true[:, 0]
-        cindex = concordance_index_censored(event_status, event_time, prob)[0]
+        logits = np.array(logits).squeeze()
+        hazard = np.exp(logits)
+        pred_true = np.array([v[1]["label"] for v in split["test"]])
+
+        pred_true = np.array(pred_true).squeeze()
+        event_status = pred_true[:, 1] > 0
+        event_time = pred_true[:, 0]
+        cindex = concordance_index_censored(event_status, event_time, hazard)[0]
 
         cum_stats.append(
             {
                 "C-Index": np.array(cindex)
             }
         )
-        print(f"Fold-{split_idx}:", cum_stats[-1])
+        # print(f"Fold-{split_idx}:", cum_stats[-1])
     cindex_list = [stat["C-Index"] for stat in cum_stats]
     avg_stat = {
         "C-Index mean": np.stack(cindex_list, axis=0).mean(axis=0),
         "C-Index std": np.stack(cindex_list, axis=0).std(axis=0),
     }
     print(f"Avg:", avg_stat)
-    return cum_stats
+    return avg_stat
 
 if __name__ == "__main__":
     ## argument parser
@@ -1440,8 +1879,21 @@ if __name__ == "__main__":
     # num_test = len(splits[0]["test"])
     # logging.info(f"Number of testing samples: {num_test}.")
 
-    # cox regression from the splits
-    # cox_regression(
+    # survival analysis from the splits
+    survival(
+        split_path=split_path,
+        l1_ratio=0.9,
+        used=["radiomics", "pathomics", "radiopathomics"][2],
+        n_jobs=8,
+        radiomics_aggregation=radiomics_aggregation,
+        pathomics_aggregation=pathomics_aggregation,
+        radiomics_keys=None, #radiomic_propereties,
+        pathomics_keys=None, #["TUM", "NORM", "DEB"],
+        model=["RSF", "CoxPH", "Coxnet"],
+        scorer=["cindex", "cindex-ipcw", "auc", "ibs"]
+    )
+
+    # survival_plus(
     #     split_path=split_path,
     #     l1_ratio=0.9,
     #     used=["radiomics", "pathomics", "radiopathomics"][2],
@@ -1450,20 +1902,8 @@ if __name__ == "__main__":
     #     pathomics_aggregation=pathomics_aggregation,
     #     radiomics_keys=None, #radiomic_propereties,
     #     pathomics_keys=None, #["TUM", "NORM", "DEB"],
-    #     alpha_min=0.1
-    # )
-
-    # cox_regression_plus(
-    #     split_path=split_path,
-    #     l1_ratio=0.9,
-    #     used=["radiomics", "pathomics", "radiopathomics"][0],
-    #     n_jobs=8,
-    #     radiomics_aggregation=radiomics_aggregation,
-    #     pathomics_aggregation=pathomics_aggregation,
-    #     radiomics_keys=None, #adiomic_propereties,
-    #     pathomics_keys=None, #["TUM", "NORM", "DEB"],
-    #     alpha_min=1e-4,
-    #     model="CoxPH"
+    #     model=["RSF", "CoxPH", "Coxnet"],
+    #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"]
     # )
 
     # compute mean and std on training data for normalization 

@@ -627,7 +627,7 @@ class SurvivalGraphArch(nn.Module):
             )
         feature = torch.concat(feature_list, dim=-1)
         output = self.classifier(feature)
-        return output, VIparas, KAparas
+        return output, VIparas, KAparas, feature
     
     @staticmethod
     def train_batch(model, batch_data, on_gpu, loss, optimizer, kl=None):
@@ -636,7 +636,7 @@ class SurvivalGraphArch(nn.Module):
 
         model.train()
         optimizer.zero_grad()
-        wsi_outputs, VIparas, KAparas = model(wsi_graphs)
+        wsi_outputs, VIparas, KAparas, _ = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze()
         if hasattr(wsi_graphs, "y_dict"):
             wsi_labels = wsi_graphs.y_dict[model.keys[0]].squeeze()
@@ -660,7 +660,7 @@ class SurvivalGraphArch(nn.Module):
 
         model.eval()
         with torch.inference_mode():
-            wsi_outputs, _, _ = model(wsi_graphs)
+            wsi_outputs, _, _, features = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
         wsi_labels = None
         if hasattr(wsi_graphs, "y_dict"):
@@ -672,7 +672,7 @@ class SurvivalGraphArch(nn.Module):
         if wsi_labels is not None:
             return [wsi_outputs, wsi_labels]
         else:
-            return [wsi_outputs]
+            return [wsi_outputs, features]
 
 class SurvivalBayesGraphArch(nn.Module):
     """define Graph architecture for survival analysis

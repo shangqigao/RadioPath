@@ -1068,7 +1068,7 @@ def inference(
             pretrained_dir / f"0{split_idx}/epoch=049.weights.pth",
             pretrained_dir / f"0{split_idx}/epoch=049.aux.dat"
         ]
-        print(str(chkpt))
+        print(str(chkpts))
         # Perform ensembling by averaging probabilities
         # across checkpoint predictions
         outputs = run_once(
