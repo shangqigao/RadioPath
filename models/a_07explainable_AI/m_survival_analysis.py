@@ -716,19 +716,24 @@ def coxnet(split_idx, tr_X, tr_y, scorer, n_jobs, l1_ratio=0.9):
     coxnet_pipe.fit(tr_X, tr_y)
     estimated_alphas = coxnet_pipe.named_steps["coxnetsurvivalanalysis"].alphas_
     cv = KFold(n_splits=5, shuffle=True, random_state=0)
-    model = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
-    lower, upper = np.percentile(tr_y["duration"], [10, 90])
+    lower, upper = np.percentile(tr_y["duration"], [20, 80])
     tr_times = np.arange(lower, upper + 1)
-    score_name = "C-Index"
-    if scorer == "cindex-ipcw":
+    model = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
+    if scorer == "cindex":
+        score_name = "C-Index"
+        param_grid={"model__alphas": [[v] for v in estimated_alphas]}
+    elif scorer == "cindex-ipcw":
         score_name = "C-Index-IPCW"
         model = as_concordance_index_ipcw_scorer(model, tau=upper)
+        param_grid={"model__estimator__alphas": [[v] for v in estimated_alphas]}
     elif scorer == "auc":
         score_name = "AUC"
         model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
+        param_grid={"model__estimator__alphas": [[v] for v in estimated_alphas]}
     elif scorer == "ibs":
         score_name = "IBS"
         model = as_integrated_brier_score_scorer(model, times=tr_times)
+        param_grid={"model__estimator__alphas": [[v] for v in estimated_alphas]}
     pipe = Pipeline(
         [
             ("scale", StandardScaler()),
@@ -737,7 +742,7 @@ def coxnet(split_idx, tr_X, tr_y, scorer, n_jobs, l1_ratio=0.9):
     )
     gcv = GridSearchCV(
         pipe,
-        param_grid={"model__alphas": [[v] for v in estimated_alphas]},
+        param_grid=param_grid,
         cv=cv,
         error_score=0.5,
         n_jobs=n_jobs,
@@ -745,7 +750,10 @@ def coxnet(split_idx, tr_X, tr_y, scorer, n_jobs, l1_ratio=0.9):
 
     # plot cross validation results
     cv_results = pd.DataFrame(gcv.cv_results_)
-    alphas = cv_results.param_model__alphas.map(lambda x: x[0])
+    if scorer == "cindex":
+        alphas = cv_results.param_model__alphas.map(lambda x: x[0])
+    else:
+        alphas = cv_results.param_model__estimator__alphas.map(lambda x: x[0])
     mean = cv_results.mean_test_score
     std = cv_results.std_test_score
     fig, ax = plt.subplots(figsize=(9, 6))
@@ -754,14 +762,20 @@ def coxnet(split_idx, tr_X, tr_y, scorer, n_jobs, l1_ratio=0.9):
     ax.set_xscale("log")
     ax.set_ylabel(score_name)
     ax.set_xlabel("alpha")
-    ax.axvline(gcv.best_params_["model__alphas"][0], c="C1")
+    if scorer == "cindex":
+        ax.axvline(gcv.best_params_["model__alphas"][0], c="C1")
+    else:
+        ax.axvline(gcv.best_params_["model__estimator__alphas"][0], c="C1")
     ax.axhline(0.5, color="grey", linestyle="--")
     ax.grid(True)
     plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
 
     # Visualize coefficients of the best estimator
     best_model = gcv.best_estimator_.named_steps["model"]
-    best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+    if scorer == "cindex":
+        best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+    else:
+        best_coefs = pd.DataFrame(best_model.estimator_.coef_, index=tr_X.columns, columns=["coefficient"])
 
     non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
     print(f"Number of non-zero coefficients: {non_zero}")
@@ -921,19 +935,19 @@ def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
     model = CoxPHSurvivalAnalysis(alpha=1e-2)
     if scorer == "cindex":
         score_name = "C-Index"
-        param_grid={"model__alpha": [1e-2, 1e-1, 1, 1e1, 1e2, 1e3, 1e4]}
+        param_grid={"model__alpha": 10.0 ** np.arange(-2, 5)}
     elif scorer == "cindex-ipcw":
         score_name = "C-Index-IPCW"
         model = as_concordance_index_ipcw_scorer(model, tau=upper)
-        param_grid={"model__estimator__alpha": [1e-2, 1e-1, 1, 10, 100]}
+        param_grid={"model__estimator__alpha": 10.0 ** np.arange(-2, 5)}
     elif scorer == "auc":
         score_name = "AUC"
         model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
-        param_grid={"model__estimator__alpha": [1e-2, 1e-1, 1, 10, 100]}
+        param_grid={"model__estimator__alpha": 10.0 ** np.arange(-2, 5)}
     elif scorer == "ibs":
         score_name = "IBS"
         model = as_integrated_brier_score_scorer(model, times=tr_times)
-        param_grid={"model__estimator__alpha": [1e-2, 1e-1, 1, 10, 100]}
+        param_grid={"model__estimator__alpha": 10.0 ** np.arange(-2, 5)}
     else:
         raise NotImplementedError
 
@@ -1283,9 +1297,16 @@ def survival(
         # feature selection
         if feature_selection:
             print("Selecting features...")
-            pipe = make_pipeline(StandardScaler(), VarianceThreshold(threshold=0.01))
-            pipe.fit(tr_X)
-            selected_names = pipe.get_feature_names_out(tr_X).tolist()
+            # print(tr_X['wavelet-HHL_glcm_ClusterProminence'][tr_y["event"]].mean())
+            # print(tr_X['wavelet-HHL_glcm_ClusterProminence'][tr_y["event"]].var())
+            # print(tr_X['wavelet-HHL_glcm_ClusterProminence'][~tr_y["event"]].var())
+            selector = VarianceThreshold(threshold=1e-4)
+            selector.fit(tr_X[tr_y["event"]])
+            selected_names = selector.get_feature_names_out().tolist()
+            # selector = VarianceThreshold(threshold=1e4)
+            # selector.fit(tr_X[~tr_y["event"]])
+            # removed_names = selector.get_feature_names_out().tolist()
+            # selected_names = [n for n in selected_names if n not in removed_names]
             num_removed = len(tr_X.columns) - len(selected_names)
             print(f"Removing {num_removed} low-variance features...")
             tr_X = tr_X[selected_names]
@@ -1313,7 +1334,7 @@ def survival(
                 })
             results_df = pd.DataFrame(univariate_results)
             results_df.sort_values(by='p_value', inplace=True)
-            selected_names = results_df[results_df['p_value'] < 0.1]['name'].tolist()
+            selected_names = results_df[results_df['p_value'] < 0.2]['name'].tolist()
             print(f"Selected features: {len(selected_names)}")
             tr_X = tr_X[selected_names]
             te_X = te_X[selected_names]
@@ -1340,7 +1361,10 @@ def survival(
             for _ in range(n_bootstraps):
                 tr_x_s, tr_y_s = resample(tr_X, tr_y)
                 predictor.fit(tr_x_s, tr_y_s)
-                stable_coefs += (predictor.coef_ != 0).astype(int)
+                if scorer == "cindex":
+                    stable_coefs += (predictor.named_steps["model"].coef_ != 0).astype(int)
+                else:
+                    stable_coefs += (predictor.named_steps["model"].estimator_.coef_ != 0).astype(int)
             stable_coefs = stable_coefs / n_bootstraps
             final_coefs = np.where(stable_coefs > 0.8)[0]
             stable_names = [selected_names[i] for i in final_coefs.tolist()]
@@ -2209,7 +2233,7 @@ if __name__ == "__main__":
         pathomics_aggregation=pathomics_aggregation,
         radiomics_keys=None, #radiomic_propereties,
         pathomics_keys=None, #["TUM", "NORM", "DEB"],
-        model=["RSF", "CoxPH", "Coxnet", "GradientBoost", "IPCRidge", "FastSVM"][0],
+        model=["RSF", "CoxPH", "Coxnet", "GradientBoost", "IPCRidge", "FastSVM"][1],
         scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
         feature_selection=True,
         n_bootstraps=0
