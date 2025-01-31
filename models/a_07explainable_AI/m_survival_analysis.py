@@ -45,6 +45,7 @@ from sklearn.cluster import KMeans, FeatureAgglomeration
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegression as PlattScaling
 from sklearn.utils import resample
+from statsmodels.stats.multitest import multipletests
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
@@ -1333,8 +1334,11 @@ def survival(
                     'CI_high': summary['exp(coef) upper 95%'].values[0]
                 })
             results_df = pd.DataFrame(univariate_results)
-            results_df.sort_values(by='p_value', inplace=True)
-            selected_names = results_df[results_df['p_value'] < 0.2]['name'].tolist()
+            reject, pvals_fdr, _, _ = multipletests(
+                results_df['p_value'], alpha=0.2, method='fdr_bh'
+            )
+            results_df['p_fdr'] = pvals_fdr
+            selected_names = results_df[reject]['name'].tolist()
             print(f"Selected features: {len(selected_names)}")
             tr_X = tr_X[selected_names]
             te_X = te_X[selected_names]
