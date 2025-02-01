@@ -8,6 +8,7 @@ import logging
 import warnings
 import joblib
 import copy
+import json
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -700,17 +701,17 @@ def cox_regression(
     print("CV mean", np.array(list(predict_results.values())).mean())
     return
 
-def coxnet(split_idx, tr_X, tr_y, scorer, n_jobs, l1_ratio=0.9):
+def coxnet(split_idx, tr_X, tr_y, scorer, n_jobs, l1_ratio=0.9, min_ratio=0.1):
     # COX regreession
     print("Selecting the best regularization parameter...")
-    cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.1)
+    cox_elastic_net = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=min_ratio)
     cox_elastic_net.fit(tr_X, tr_y)
     coefficients = pd.DataFrame(cox_elastic_net.coef_, index=tr_X.columns, columns=np.round(cox_elastic_net.alphas_, 5))
     
     plot_coefficients(coefficients, n_highlight=5)
 
     # choosing penalty strength by cross validation
-    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=0.1, max_iter=1000)
+    cox = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, alpha_min_ratio=min_ratio, max_iter=10000)
     coxnet_pipe = make_pipeline(StandardScaler(), cox)
     warnings.simplefilter("ignore", UserWarning)
     warnings.simplefilter("ignore", FitFailedWarning)
@@ -719,7 +720,7 @@ def coxnet(split_idx, tr_X, tr_y, scorer, n_jobs, l1_ratio=0.9):
     cv = KFold(n_splits=5, shuffle=True, random_state=0)
     lower, upper = np.percentile(tr_y["duration"], [20, 80])
     tr_times = np.arange(lower, upper + 1)
-    model = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=1000)
+    model = CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, max_iter=10000, fit_baseline_model=True)
     if scorer == "cindex":
         score_name = "C-Index"
         param_grid={"model__alphas": [[v] for v in estimated_alphas]}
@@ -792,7 +793,6 @@ def coxnet(split_idx, tr_X, tr_y, scorer, n_jobs, l1_ratio=0.9):
     plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
 
     # perform prediction using the best params
-    pipe = make_pipeline(StandardScaler(), CoxnetSurvivalAnalysis(l1_ratio=l1_ratio, fit_baseline_model=True))
     pipe.set_params(**gcv.best_params_)
     pipe.fit(tr_X, tr_y)
 
@@ -867,7 +867,7 @@ def rsf(split_idx, tr_X, tr_y, scorer, n_jobs):
 def gradientboosting(split_idx, tr_X, tr_y, scorer, n_jobs, loss="coxph"):
     # choosing parameters by cross validation
     cv = KFold(n_splits=5, shuffle=True, random_state=0)
-    model = GradientBoostingSurvivalAnalysis(loss, n_estimators=100, random_state=1)
+    model = GradientBoostingSurvivalAnalysis(loss=loss, n_estimators=100, random_state=1)
     lower, upper = np.percentile(tr_y["duration"], [20, 80])
     tr_times = np.arange(lower, upper + 1)
     if scorer == "cindex":
@@ -1023,19 +1023,19 @@ def ipcridge(split_idx, tr_X, tr_y, scorer, n_jobs):
     tr_times = np.arange(lower, upper + 1)
     if scorer == "cindex":
         score_name = "C-Index"
-        param_grid={"model__alpha": 2.0 ** np.arange(-12, 13, 2)}
+        param_grid={"model__alpha": 2.0 ** np.arange(0, 26, 2)}
     if scorer == "cindex-ipcw":
         score_name = "C-Index-IPCW"
         model = as_concordance_index_ipcw_scorer(model, tau=upper)
-        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(0, 26, 2)}
     elif scorer == "auc":
         score_name = "AUC"
         model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
-        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(0, 26, 2)}
     elif scorer == "ibs":
         score_name = "IBS"
         model = as_integrated_brier_score_scorer(model, times=tr_times)
-        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(0, 26, 2)}
     pipe = Pipeline(
         [
             ("scale", StandardScaler()),
@@ -1074,7 +1074,10 @@ def ipcridge(split_idx, tr_X, tr_y, scorer, n_jobs):
 
     # Visualize coefficients of the best estimator
     best_model = gcv.best_estimator_.named_steps["model"]
-    best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+    if scorer == "cindex":
+        best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+    else:
+        best_coefs = pd.DataFrame(best_model.estimator_.coef_, index=tr_X.columns, columns=["coefficient"])
 
     non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
     print(f"Number of non-zero coefficients: {non_zero}")
@@ -1104,19 +1107,19 @@ def fastsvm(split_idx, tr_X, tr_y, scorer, n_jobs, rank_ratio=1):
     tr_times = np.arange(lower, upper + 1)
     if scorer == "cindex":
         score_name = "C-Index"
-        param_grid={"model__alpha": 2.0 ** np.arange(-12, 13, 2)}
+        param_grid={"model__alpha": 2.0 ** np.arange(-26, 0, 2)}
     if scorer == "cindex-ipcw":
         score_name = "C-Index-IPCW"
         model = as_concordance_index_ipcw_scorer(model, tau=upper)
-        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-26, 0, 2)}
     elif scorer == "auc":
         score_name = "AUC"
         model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
-        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-26, 0, 2)}
     elif scorer == "ibs":
         score_name = "IBS"
         model = as_integrated_brier_score_scorer(model, times=tr_times)
-        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-12, 13, 2)}
+        param_grid={"model__estimator__alpha": 2.0 ** np.arange(-26, 0, 2)}
     pipe = Pipeline(
         [
             ("scale", StandardScaler()),
@@ -1155,7 +1158,10 @@ def fastsvm(split_idx, tr_X, tr_y, scorer, n_jobs, rank_ratio=1):
 
     # Visualize coefficients of the best estimator
     best_model = gcv.best_estimator_.named_steps["model"]
-    best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+    if scorer == "cindex":
+        best_coefs = pd.DataFrame(best_model.coef_, index=tr_X.columns, columns=["coefficient"])
+    else:
+        best_coefs = pd.DataFrame(best_model.estimator_.coef_, index=tr_X.columns, columns=["coefficient"])
 
     non_zero = np.sum(best_coefs.iloc[:, 0] != 0)
     print(f"Number of non-zero coefficients: {non_zero}")
@@ -1334,11 +1340,7 @@ def survival(
                     'CI_high': summary['exp(coef) upper 95%'].values[0]
                 })
             results_df = pd.DataFrame(univariate_results)
-            reject, pvals_fdr, _, _ = multipletests(
-                results_df['p_value'], alpha=0.2, method='fdr_bh'
-            )
-            results_df['p_fdr'] = pvals_fdr
-            selected_names = results_df[reject]['name'].tolist()
+            selected_names = results_df[results_df['p_value'] < 0.2]['name'].tolist()
             print(f"Selected features: {len(selected_names)}")
             tr_X = tr_X[selected_names]
             te_X = te_X[selected_names]
@@ -1352,7 +1354,7 @@ def survival(
         elif model == "CoxPH":
             predictor = coxph(split_idx, tr_X, tr_y, scorer, n_jobs)
         elif model == "GradientBoost":
-            predictor = gradientboosting(split_idx, tr_X, tr_y, scorer, n_jobs, loss="coxph")
+            predictor = gradientboosting(split_idx, tr_X, tr_y, scorer, n_jobs)
         elif model == "IPCRidge":
             predictor = ipcridge(split_idx, tr_X, tr_y, scorer, n_jobs)
         elif model == "FastSVM":
@@ -1383,9 +1385,12 @@ def survival(
         lower, upper = np.percentile(te_y["duration"], [10, 90])
         times = np.arange(lower, upper + 1, 7)
         auc, mean_auc = cumulative_dynamic_auc(tr_y, te_y, risk_scores, times)
-        survs = predictor.predict_survival_function(te_X)
-        preds = np.asarray([[fn(t) for t in times] for fn in survs])
-        IBS = integrated_brier_score(tr_y, te_y, preds, times)
+        if hasattr(predictor, "predict_survival_function"):
+            survs = predictor.predict_survival_function(te_X)
+            preds = np.asarray([[fn(t) for t in times] for fn in survs])
+            IBS = integrated_brier_score(tr_y, te_y, preds, times)
+        else:
+            IBS = 0
         scores_dict = {
             "C-index": C_index,
             "C-index-IPCW": C_index_ipcw,
@@ -1393,11 +1398,13 @@ def survival(
             "IBS": IBS
         }
 
-        plt.plot(times, auc, marker="o")
-        plt.axhline(mean_auc, linestyle="--")
-        plt.xlabel("days from enrollment")
-        plt.ylabel("time-dependent AUC")
-        plt.grid(True)
+        fig, ax = plt.subplots(figsize=(9, 6))
+        ax.plot(times, auc)
+        ax.set_xscale("linear")
+        ax.set_ylabel("time-dependent AUC")
+        ax.set_xlabel("days from enrollment")
+        ax.axhline(mean_auc, linestyle="--")
+        ax.grid(True)
         plt.savefig(f"a_07explainable_AI/AUC_fold{split_idx}.jpg") 
 
         print(f"Updating regression results on fold {split_idx}")
@@ -2101,7 +2108,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
-    parser.add_argument('--radiomics_mode', default="pyradiomics", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
+    parser.add_argument('--radiomics_mode', default="SegVol", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
     parser.add_argument('--radiomics_dim', default=768, choices=[107, 768, 768], type=int)
     args = parser.parse_args()
 
@@ -2143,14 +2150,26 @@ if __name__ == "__main__":
 
     # use radiomics and pathomics
     class_name = ["kidney_and_mass", "mass", "tumour"][2]
-    radiomics_aggregation = False # false if load image-level features else true
+    radiomics_aggregation = True # false if load image-level features else true
     if radiomics_aggregation:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.json"))
     else:
         if args.radiomics_mode == "pyradiomics":
             radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.{args.radiomics_mode}.json"))
+        elif args.radiomics_mode == "SegVol":
+            radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.aggr.mean.npy"))
         elif args.radiomics_mode == "M3D-CLIP":
             radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}_radiomics.npy"))
+
+    # aggregating radiomics
+    # for i, graph_path in enumerate(radiomics_paths):
+    #     print(f"processing [{i+1}/{len(radiomics_paths)}]")
+    #     feat_dict = prepare_graph_radiomics(i, graph_path, mode="mean")[f"{i}"]
+    #     feature = np.array(list(feat_dict.values()))
+    #     save_path = pathlib.Path(f"{graph_path}".replace(".json", ".aggr.mean.npy"))
+    #     np.save(save_path, feature)
+
+    # matching radiomics and pathomics
     matched_pathomics_indices, matched_radiomics_indices = matched_pathomics_radiomics(
         save_pathomics_paths=pathomics_paths,
         save_radiomics_paths=radiomics_paths,
@@ -2174,11 +2193,11 @@ if __name__ == "__main__":
     # ]
     # radiomic_propereties = [
     #     "shape",
-    #     "firstorder",
+    #     # "firstorder",
     #     "glcm",
     #     "gldm",
-    #     "glrlm",
-    #     "glszm",
+    #     # "glrlm",
+    #     # "glszm",
     #     "ngtdm",
     # ]
     # integrated = ["all", "pathomics", "radiomics", "deep_pathomics", "radiopathomics", "radioDeepPathomics", "pathoDeepPathomics"]
@@ -2197,51 +2216,51 @@ if __name__ == "__main__":
     # )
 
     # split data set
-    # num_folds = 5
-    # test_ratio = 0.2
-    # train_ratio = 0.8 * 0.8
-    # valid_ratio = 0.8 * 0.2
-    # data_types = ["radiomics", "pathomics"]
-    # # stages=["Stage I", "Stage II"]
-    # df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    # y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
-    # matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
-    # kr, kp = data_types[0], data_types[1]
-    # matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
-    # splits = generate_data_split(
-    #     x=matched_graph_paths,
-    #     y=y,
-    #     train=train_ratio,
-    #     valid=valid_ratio,
-    #     test=test_ratio,
-    #     num_folds=num_folds
-    # )
-    # mkdir(save_model_dir)
+    num_folds = 5
+    test_ratio = 0.2
+    train_ratio = 0.8 * 0.8
+    valid_ratio = 0.8 * 0.2
+    data_types = ["radiomics", "pathomics"]
+    # stages=["Stage I", "Stage II"]
+    df, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    y = df[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
+    matched_radiomics_paths = [matched_radiomics_paths[i] for i in matched_i]
+    kr, kp = data_types[0], data_types[1]
+    matched_graph_paths = [{kr : r, kp : p} for r, p in zip(matched_radiomics_paths, matched_pathomics_paths)]
+    splits = generate_data_split(
+        x=matched_graph_paths,
+        y=y,
+        train=train_ratio,
+        valid=valid_ratio,
+        test=test_ratio,
+        num_folds=num_folds
+    )
+    mkdir(save_model_dir)
     split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
-    # joblib.dump(splits, split_path)
-    # splits = joblib.load(split_path)
-    # num_train = len(splits[0]["train"])
-    # logging.info(f"Number of training samples: {num_train}.")
-    # num_valid = len(splits[0]["valid"])
-    # logging.info(f"Number of validating samples: {num_valid}.")
-    # num_test = len(splits[0]["test"])
-    # logging.info(f"Number of testing samples: {num_test}.")
+    joblib.dump(splits, split_path)
+    splits = joblib.load(split_path)
+    num_train = len(splits[0]["train"])
+    logging.info(f"Number of training samples: {num_train}.")
+    num_valid = len(splits[0]["valid"])
+    logging.info(f"Number of validating samples: {num_valid}.")
+    num_test = len(splits[0]["test"])
+    logging.info(f"Number of testing samples: {num_test}.")
 
     # survival analysis from the splits
-    survival(
-        split_path=split_path,
-        used=["radiomics", "pathomics", "radiopathomics"][2],
-        n_jobs=8,
-        radiomics_aggregation=radiomics_aggregation,
-        pathomics_aggregation=pathomics_aggregation,
-        radiomics_keys=None, #radiomic_propereties,
-        pathomics_keys=None, #["TUM", "NORM", "DEB"],
-        model=["RSF", "CoxPH", "Coxnet", "GradientBoost", "IPCRidge", "FastSVM"][1],
-        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
-        feature_selection=True,
-        n_bootstraps=0
-    )
+    # survival(
+    #     split_path=split_path,
+    #     used=["radiomics", "pathomics", "radiopathomics"][0],
+    #     n_jobs=8,
+    #     radiomics_aggregation=radiomics_aggregation,
+    #     pathomics_aggregation=pathomics_aggregation,
+    #     radiomics_keys=None, #radiomic_propereties,
+    #     pathomics_keys=None, #["TUM", "NORM", "DEB"],
+    #     model=["RSF", "CoxPH", "Coxnet", "GradientBoost", "FastSVM"][4],
+    #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
+    #     feature_selection=True,
+    #     n_bootstraps=0
+    # )
 
     # survival_plus(
     #     split_path=split_path,
@@ -2278,21 +2297,21 @@ if __name__ == "__main__":
     #     joblib.dump(node_scaler, scaler_path)
 
     # training
-    # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
-    # omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
-    # split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
-    # scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    # training(
-    #     num_epochs=args.epochs,
-    #     split_path=split_path,
-    #     scaler_path=scaler_paths,
-    #     num_node_features=omics_dims,
-    #     model_dir=save_model_dir,
-    #     conv="GCNConv",
-    #     n_works=8,
-    #     batch_size=32,
-    #     BayesGNN=False,
-    #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "SISIR"][1],
-    #     sampling_rate=0.1
-    # )
+    omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
+    omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
+    split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
+    scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
+    training(
+        num_epochs=args.epochs,
+        split_path=split_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        model_dir=save_model_dir,
+        conv="GCNConv",
+        n_works=8,
+        batch_size=32,
+        BayesGNN=False,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "SISIR"][1],
+        sampling_rate=0.1
+    )
