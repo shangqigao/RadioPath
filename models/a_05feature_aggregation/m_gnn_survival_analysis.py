@@ -46,14 +46,12 @@ class SurvivalGraphDataset(Dataset):
             with pathlib.Path(graph_path[key]).open() as fptr:
                 graph_dict = json.load(fptr)
             graph_dict = {k: np.array(v) for k, v in graph_dict.items() if k != "cluster_points"}
-            if key == "radiomics": 
-                graph_dict["edge_index"] = graph_dict["edge_index"].T
+            if key == "radiomics": graph_dict["edge_index"] = graph_dict["edge_index"].T
 
             if self.preproc is not None:
                 graph_dict["x"] = self.preproc[key](graph_dict["x"])
 
             graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items()}
-            graph_dict["edge_index"] = graph_dict["edge_index"].type(torch.int64)
             if any(v in self.mode for v in ["train", "valid"]):
                 graph_dict.update({"y": label})
 
@@ -66,6 +64,9 @@ class SurvivalGraphDataset(Dataset):
                     edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=True)
                     graph_dict["edge_index"] = edge_index
                     graph_dict["x"] = graph_dict["x"][subset]
+
+            graph_dict = {k: v.type(torch.float32) for k, v in graph_dict.items()}
+            graph_dict["edge_index"] = graph_dict["edge_index"].type(torch.int64)
             graph = Data(**graph_dict)
         else:
             graph_dict = {}
@@ -448,6 +449,7 @@ class SurvivalGraphArch(nn.Module):
             input_emb_dim = dim_features[keys[0]]
             out_emb_dim = self.embedding_dims[0]
             self.head = create_block(input_emb_dim, out_emb_dim)
+            self.tail = create_block(out_emb_dim, input_emb_dim)
             input_emb_dim = out_emb_dim
         else:
             raise NotImplementedError
@@ -490,14 +492,17 @@ class SurvivalGraphArch(nn.Module):
                     for k in self.keys
                 }
             )
+            out_emb_dim = hid_emb_dim
             input_emb_dim = hid_emb_dim
+            hid_emb_dim = self.embedding_dims[-1]
             self.score_nn = ImportanceScoreArch(
                 dim_features=input_emb_dim,
-                dim_target=2 * input_emb_dim,
+                dim_target=2 * hid_emb_dim,
                 layers=self.embedding_dims[1:],
                 dropout=self.dropout,
                 conv=self.conv_name
             )
+            input_emb_dim = hid_emb_dim
             hid_emb_dim = self.embedding_dims[0]
             self.inverse_score_nn = ImportanceScoreArch(
                 dim_features=input_emb_dim,
@@ -531,7 +536,7 @@ class SurvivalGraphArch(nn.Module):
             edge_index_dict = {k: data.edge_index_dict[k, "to", k] for k in self.keys}
             batch_dict = data.batch_dict
             enc_list = [x_dict[k] for k in self.keys]
-            feature_dict = {k : self.enc_branches[k](enc) for k, enc in zip(self.keys, enc_list)}
+            feature_dict = {k : self.enc_branches[k](e) for k, e in zip(self.keys, enc_list)}
             # # graph concatenation
             # feature = torch.concat(list(feature_dict.values()), dim=0)
             # edge_index_list = [edge_index_dict[k, "to", k] for k in self.keys]
@@ -549,10 +554,11 @@ class SurvivalGraphArch(nn.Module):
             # batch_list = [batch_dict[k] for k in self.keys]
             # batch = torch.concat(batch_list, dim=0)
         else:
-            enc_list = [data.x]
             feature, edge_index, batch = data.x, data.edge_index, data.batch
+            enc_list = [data.x]
             feature = self.head(feature)
             feature_dict = {self.keys[0]: feature}
+            edge_index_dict = {self.keys[0]: edge_index}
             batch_dict = {self.keys[0]: batch}
 
         if self.aggregation == "ABMIL":
@@ -575,7 +581,7 @@ class SurvivalGraphArch(nn.Module):
                 feature_list.append(feature)
                 edge_index_list.append(edge_index)
                 batch_list.append(batch)
-
+            
             # graph concatenation
             feature = torch.concat(feature_list, dim=0)
             edge_index = [e.clone() for e in edge_index_list]
@@ -617,7 +623,7 @@ class SurvivalGraphArch(nn.Module):
             if len(self.keys) > 1:
                 dec_list = [self.dec_branches[k](decode[ins[i]:ins[i+1], ...]) for i, k in enumerate(self.keys)]
             else:
-                dec_list = [decode]
+                dec_list = [self.tail(decode)]
             VIparas.append(enc_list)
             VIparas.append(dec_list)
         feature_list = []
@@ -841,7 +847,7 @@ class ScalarMovingAverage:
 class VILoss(nn.Module):
     """ variational inference loss
     """
-    def __init__(self, mu0=0, lambda0=1, alpha0=2, beta0=1e-8, tau_kl=1.0):
+    def __init__(self, mu0=0, lambda0=1, alpha0=2, beta0=1e-8, tau_kl=0.1):
         super(VILoss, self).__init__()
         self.mu0 = mu0
         self.lambda0 = lambda0
@@ -932,7 +938,7 @@ class CFLoss(nn.Module):
         return mmd_loss + self.beta*mse_loss
     
 class CoxSurvLoss(nn.Module):
-    def __init__(self, tau_vi=1e-3, tau_ka=1e-2):
+    def __init__(self, tau_vi=1e-2, tau_ka=1e-2):
         super(CoxSurvLoss, self).__init__()
         self.tau_vi = tau_vi
         self.tau_ka = tau_ka

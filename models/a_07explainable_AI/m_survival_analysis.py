@@ -867,24 +867,27 @@ def rsf(split_idx, tr_X, tr_y, scorer, n_jobs):
 def gradientboosting(split_idx, tr_X, tr_y, scorer, n_jobs, loss="coxph"):
     # choosing parameters by cross validation
     cv = KFold(n_splits=5, shuffle=True, random_state=0)
-    model = GradientBoostingSurvivalAnalysis(loss=loss, n_estimators=100, random_state=1)
+    model = GradientBoostingSurvivalAnalysis(loss=loss, max_depth=2, random_state=1)
     lower, upper = np.percentile(tr_y["duration"], [20, 80])
     tr_times = np.arange(lower, upper + 1)
     if scorer == "cindex":
         score_name = "C-Index"
-        param_grid={"model__n_estimators": np.arange(1, 101, 2, dtype=int)}
+        param_grid={"model__max_depth": np.arange(1, 20, dtype=int)}
     elif scorer == "cindex-ipcw":
         score_name = "C-Index-IPCW"
         model = as_concordance_index_ipcw_scorer(model, tau=upper)
-        param_grid={"model__estimator__n_estimators": np.arange(1, 101, 2, dtype=int)}
+        param_grid={"model__estimator__max_depth": np.arange(1, 20, dtype=int)}
     elif scorer == "auc":
         score_name = "AUC"
         model = as_cumulative_dynamic_auc_scorer(model, times=tr_times)
-        param_grid={"model__estimator__n_estimators": np.arange(1, 101, 2, dtype=int)}
+        param_grid={"model__estimator__max_depth": np.arange(1, 20, dtype=int)}
     elif scorer == "ibs":
         score_name = "IBS"
         model = as_integrated_brier_score_scorer(model, times=tr_times)
-        param_grid={"model__estimator__n_estimators": np.arange(1, 101, 2, dtype=int)}
+        param_grid={"model__estimator__max_depth": np.arange(1, 20, dtype=int)}
+    else:
+        raise NotImplementedError
+
     pipe = Pipeline(
         [
             ("scale", StandardScaler()),
@@ -902,9 +905,9 @@ def gradientboosting(split_idx, tr_X, tr_y, scorer, n_jobs, loss="coxph"):
     # plot cross validation results
     cv_results = pd.DataFrame(gcv.cv_results_)
     if scorer == "cindex":
-        depths = cv_results.param_model__n_estimators
+        depths = cv_results.param_model__max_depth
     else:
-        depths = cv_results.param_model__estimator__n_estimators
+        depths = cv_results.param_model__estimator__max_depth
     mean = cv_results.mean_test_score
     std = cv_results.std_test_score
     fig, ax = plt.subplots(figsize=(9, 6))
@@ -912,11 +915,11 @@ def gradientboosting(split_idx, tr_X, tr_y, scorer, n_jobs, loss="coxph"):
     ax.fill_between(depths, mean - std, mean + std, alpha=0.15)
     ax.set_xscale("linear")
     ax.set_ylabel(score_name)
-    ax.set_xlabel("num estimators")
+    ax.set_xlabel("max depth")
     if scorer == "cindex":
-        ax.axvline(gcv.best_params_["model__n_estimators"], c="C1")
+        ax.axvline(gcv.best_params_["model__max_depth"], c="C1")
     else:
-        ax.axvline(gcv.best_params_["model__estimator__n_estimators"], c="C1")
+        ax.axvline(gcv.best_params_["model__estimator__max_depth"], c="C1")
     ax.axhline(0.5, color="grey", linestyle="--")
     ax.grid(True)
     plt.savefig(f"a_07explainable_AI/cross_validation_fold{split_idx}.jpg")
@@ -1966,16 +1969,17 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [128, 128, 64], # [16, 16, 8]
+        "layers": [256, 64, 64], # [16, 16, 8]
         "dropout": {"ABMIL": 0.5, "SISIR": 0.0}[aggregation],
         "conv": conv,
         "keys": omic_keys,
         "aggregation": aggregation
     }
+    omics_name = "_".join(omic_keys)
     if BayesGNN:
-        model_dir = model_dir / f"Bayes_Survival_Prediction_{conv}_{aggregation}"
+        model_dir = model_dir / f"{omics_name}_Bayes_Survival_Prediction_{conv}_{aggregation}"
     else:
-        model_dir = model_dir / f"Survival_Prediction_{conv}_{aggregation}"
+        model_dir = model_dir / f"{omics_name}_Survival_Prediction_{conv}_{aggregation}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": {"ABMIL": 1.0e-5, "SISIR": 0.0}[aggregation],
@@ -2105,7 +2109,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_radiomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/radiomics", type=str)
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
-    parser.add_argument('--epochs', default=20, type=int)
+    parser.add_argument('--epochs', default=50, type=int)
     parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--radiomics_mode', default="SegVol", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
@@ -2250,13 +2254,13 @@ if __name__ == "__main__":
     # survival analysis from the splits
     # survival(
     #     split_path=split_path,
-    #     used=["radiomics", "pathomics", "radiopathomics"][0],
+    #     used=["radiomics", "pathomics", "radiopathomics"][2],
     #     n_jobs=8,
     #     radiomics_aggregation=radiomics_aggregation,
     #     pathomics_aggregation=pathomics_aggregation,
     #     radiomics_keys=None, #radiomic_propereties,
     #     pathomics_keys=None, #["TUM", "NORM", "DEB"],
-    #     model=["RSF", "CoxPH", "Coxnet", "GradientBoost", "FastSVM"][4],
+    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][3],
     #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
     #     feature_selection=True,
     #     n_bootstraps=0
@@ -2297,8 +2301,10 @@ if __name__ == "__main__":
     #     joblib.dump(node_scaler, scaler_path)
 
     # training
-    omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
-    omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
+    # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
+    # omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
+    omics_modes = {"radiomics": args.radiomics_mode}
+    omics_dims = {"radiomics": args.radiomics_dim}
     split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
     scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
     training(
