@@ -289,7 +289,7 @@ class DownsampleArch(nn.Module):
         def create_block(in_dims, out_dims):
             return nn.Sequential(
                 Linear(in_dims, out_dims),
-                # BatchNorm1d(out_dims),
+                BatchNorm1d(out_dims),
                 ReLU(),
                 Dropout(self.dropout)
             )
@@ -311,13 +311,15 @@ class DownsampleArch(nn.Module):
             input_emb_dim = out_emb_dim
 
     def forward(self, feature, edge_index, batch):
+        perm_list = []
         for l in range(2):
             if self.conv_name in ["MLP"]:
                 feature = self.convs[l](feature)
             else:
                 feature = self.convs[l](feature, edge_index)
-            feature, edge_index, _, batch, _, _ = self.pools[l](feature, edge_index, batch=batch)
-        return feature, edge_index, batch
+            feature, edge_index, _, batch, perm, score = self.pools[l](feature, edge_index, batch=batch)
+            perm_list.append(perm)
+        return feature, edge_index, batch, perm_list, score
     
 class OmicsIntegrationArch(nn.Module):
     """define importance score architecture
@@ -443,13 +445,13 @@ class SurvivalGraphArch(nn.Module):
         if len(keys) > 1:
             out_emb_dim = self.embedding_dims[0]
             self.enc_branches = nn.ModuleDict({k: create_block(dim_features[k], out_emb_dim) for k in keys})
-            self.dec_branches = nn.ModuleDict({k: create_block(out_emb_dim, dim_features[k]) for k in keys})
+            self.dec_branches = nn.ModuleDict({k: Linear(out_emb_dim, dim_features[k]) for k in keys})
             input_emb_dim = out_emb_dim
         elif len(keys) == 1:
             input_emb_dim = dim_features[keys[0]]
             out_emb_dim = self.embedding_dims[0]
             self.head = create_block(input_emb_dim, out_emb_dim)
-            self.tail = create_block(out_emb_dim, input_emb_dim)
+            self.tail = Linear(out_emb_dim, input_emb_dim)
             input_emb_dim = out_emb_dim
         else:
             raise NotImplementedError
@@ -485,7 +487,7 @@ class SurvivalGraphArch(nn.Module):
                     k: DownsampleArch(
                         dim_features=input_emb_dim,
                         dim_hidden=hid_emb_dim,
-                        dropout=self.dropout,
+                        dropout=0.0,
                         pool_ratio=self.pool_ratio,
                         conv=self.conv_name
                     )
@@ -494,24 +496,29 @@ class SurvivalGraphArch(nn.Module):
             )
             out_emb_dim = hid_emb_dim
             input_emb_dim = hid_emb_dim
-            hid_emb_dim = self.embedding_dims[-1]
-            self.score_nn = ImportanceScoreArch(
-                dim_features=input_emb_dim,
-                dim_target=2 * hid_emb_dim,
-                layers=self.embedding_dims[1:],
-                dropout=self.dropout,
-                conv=self.conv_name
+            self.gate_nn = Attn_Net_Gated(
+                L=input_emb_dim, 
+                D=64, 
+                dropout=0.25, 
+                n_classes=2
             )
-            input_emb_dim = hid_emb_dim
+            # self.score_nn = ImportanceScoreArch(
+            #     dim_features=input_emb_dim,
+            #     dim_target=2 * hid_emb_dim,
+            #     layers=self.embedding_dims[1:],
+            #     dropout=self.dropout,
+            #     conv=self.conv_name
+            # )
             hid_emb_dim = self.embedding_dims[0]
             self.inverse_score_nn = ImportanceScoreArch(
                 dim_features=input_emb_dim,
                 dim_target=hid_emb_dim,
-                layers=self.embedding_dims[::-1],
-                dropout=self.dropout,
+                layers=self.embedding_dims[1:],
+                dropout=0.0,
                 conv=self.conv_name
             )
-            self.Aggregation = MeanAggregation()
+            # self.Aggregation = MeanAggregation()
+            self.Aggregation = SumAggregation()
         else:
             raise NotImplementedError
         self.classifier = Linear(len(self.keys)*out_emb_dim, dim_target)
@@ -527,8 +534,10 @@ class SurvivalGraphArch(nn.Module):
     def sampling(self, data):
         loc, logvar = torch.chunk(data, chunks=2, dim=-1)
         logvar = torch.clamp(logvar, min=-20, max=20)
+        loc = loc / 1e2
+        logvar = logvar - 8
         gauss = torch.distributions.Normal(loc, torch.exp(0.5*logvar))
-        return gauss.sample(), [loc, logvar]
+        return gauss.sample(), loc, logvar
 
     def forward(self, data):
         if len(self.keys) > 1:
@@ -570,10 +579,11 @@ class SurvivalGraphArch(nn.Module):
             VIparas = None
             KAparas = None
         elif self.aggregation == "SISIR":
-            # graph downsample
+            # encoder
             feature_list, edge_index_list, batch_list = [], [], []
+            perm_dict, score_list = {}, []
             for k in self.keys:
-                feature, edge_index, batch = self.downsample_nn_dict[k](
+                feature, edge_index, batch, perm_list, score = self.downsample_nn_dict[k](
                     feature = feature_dict[k], 
                     edge_index = edge_index_dict[k], 
                     batch = batch_dict[k]
@@ -581,6 +591,8 @@ class SurvivalGraphArch(nn.Module):
                 feature_list.append(feature)
                 edge_index_list.append(edge_index)
                 batch_list.append(batch)
+                perm_dict.update({k: perm_list})
+                score_list.append(score)
             
             # graph concatenation
             feature = torch.concat(feature_list, dim=0)
@@ -595,6 +607,7 @@ class SurvivalGraphArch(nn.Module):
             edge_index = torch.concat(edge_index, dim=1)
             batch = torch.concat(batch_list, dim=0)
             batch_dict = {k: b for k, b in zip(self.keys, batch_list)}
+            score = torch.concat(score_list, dim=0)
 
             # feature alignment by knowledge amalgamation
             # (feature, ht), (ft_, ft) = self.integration_nn(enc_list, edge_index_list, feature, edge_index)
@@ -610,21 +623,32 @@ class SurvivalGraphArch(nn.Module):
             # VIparas = None
             
             # encoder
-            encode = self.score_nn(feature, edge_index)
-            # encode = self.gate_nn(feature)
+            # encode = self.score_nn(feature, edge_index)
+            # gate = softmax(self.gate_nn(feature), index=batch, dim=-2)
+            # VIparas = None
             # reparameterization
-            gate, VIparas = self.sampling(encode)
+            sample, loc, logvar = self.sampling(self.gate_nn(feature))
+            VIparas = [loc, logvar]
 
             feature_dict = {k: feature[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
-            gate_dict = {k: gate[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
-            # decoder
-            decode = self.inverse_score_nn(gate, edge_index)
+            feature_dict = {k: v.clone().detach() for k, v in feature_dict.items()}
+            gate_dict = {k: loc[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
+            # # decoder
+            decode = self.inverse_score_nn(feature, edge_index)
 
             if len(self.keys) > 1:
                 dec_list = [self.dec_branches[k](decode[ins[i]:ins[i+1], ...]) for i, k in enumerate(self.keys)]
             else:
                 dec_list = [self.tail(decode)]
-            VIparas.append(enc_list)
+
+            # get references of downsampled graphs
+            ds_enc_list = []
+            for i, k in enumerate(self.keys):
+                enc = enc_list[i]
+                perm_list = perm_dict[k]
+                for p in perm_list: enc = enc[p]
+                ds_enc_list.append(enc)
+            VIparas.append(ds_enc_list)
             VIparas.append(dec_list)
         feature_list = []
         for k in self.keys:
@@ -668,6 +692,7 @@ class SurvivalGraphArch(nn.Module):
         with torch.inference_mode():
             wsi_outputs, _, _, features = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
+        features = features.cpu().numpy()
         wsi_labels = None
         if hasattr(wsi_graphs, "y_dict"):
             if wsi_graphs.y_dict is not None:
@@ -847,13 +872,13 @@ class ScalarMovingAverage:
 class VILoss(nn.Module):
     """ variational inference loss
     """
-    def __init__(self, mu0=0, lambda0=1, alpha0=2, beta0=1e-8, tau_kl=0.1):
+    def __init__(self, mu0=0, lambda0=1, alpha0=2, beta0=1e-4, tau_ae=1):
         super(VILoss, self).__init__()
         self.mu0 = mu0
         self.lambda0 = lambda0
         self.alpha0 = alpha0
         self.beta0 = beta0
-        self.tau_kl = tau_kl
+        self.tau_ae = tau_ae
 
     def forward(self, loc, logvar, enc_list, dec_list):
         alpha = 2*self.alpha0 + 1
@@ -862,11 +887,11 @@ class VILoss(nn.Module):
         loss_kl = 0.5*torch.mean(self.lambda0*mu_upsilon*((loc - self.mu0)**2 + torch.exp(logvar)) - logvar)
         loss_ae = 0.0
         for enc, dec in zip(enc_list, dec_list):
-            subset = torch.randperm(len(enc))[:len(dec)]
-            enc = enc[subset]
+            # subset = torch.randperm(len(enc))[:len(dec)]
+            # enc = enc[subset]
             loss_ae += F.mse_loss(enc, dec)
-        print(loss_ae.item(), loss_kl.item())
-        return loss_ae + self.tau_kl * loss_kl
+        print(loss_ae.item(), loss_kl.item(), beta.max().item())
+        return self.tau_ae * loss_ae + loss_kl
     
 def calc_mmd(f1, f2, sigmas, normalized=False):
     if len(f1.shape) != 2:
@@ -938,7 +963,7 @@ class CFLoss(nn.Module):
         return mmd_loss + self.beta*mse_loss
     
 class CoxSurvLoss(nn.Module):
-    def __init__(self, tau_vi=1e-2, tau_ka=1e-2):
+    def __init__(self, tau_vi=1, tau_ka=1e-2):
         super(CoxSurvLoss, self).__init__()
         self.tau_vi = tau_vi
         self.tau_ka = tau_ka

@@ -35,6 +35,9 @@ from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegression as PlattScaling
 from sklearn.metrics import roc_auc_score as auroc_scorer
 from sklearn.metrics import balanced_accuracy_score as acc_scorer
+from sklearn.metrics import average_precision_score as ap_scorer
+from sklearn.metrics import f1_score as f1_scorer
+
 
 from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir, reset_logging, recur_find_ext, select_checkpoints
 
@@ -855,13 +858,13 @@ def run_once(
                     concept_logit, concept_true = output[2], output[3]
                     concept_logit = np.array(concept_logit).squeeze()
                     concept_true = np.array(concept_true).squeeze().astype(np.int8)
-                    if "valid-A" in loader_name:
-                        for i in range(concept_logit.shape[1]):
-                            scaler = PlattScaling(solver="liblinear", multi_class="ovr")
-                            logit = concept_logit[:, i:i+1]
-                            true = concept_true[:, i]
-                            scaler.fit(logit, true)
-                            model.aux_model[f"scaler{i+1}"] = scaler
+                    # if "valid-A" in loader_name:
+                    #     for i in range(concept_logit.shape[1]):
+                    #         scaler = PlattScaling(solver="liblinear", multi_class="ovr")
+                    #         logit = concept_logit[:, i:i+1]
+                    #         true = concept_true[:, i]
+                    #         scaler.fit(logit, true)
+                    #         model.aux_model[f"scaler{i+1}"] = scaler
 
                     if len(model.aux_model) == 0:
                         concept_prob = 1 / (1 + np.exp(-concept_logit))
@@ -984,7 +987,7 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"{CL}_Bayes_Survival_Prediction_{conv}_{aggregation}_{HP}"
     else:
-        model_dir = model_dir / f"{CL}_Survival_Prediction_{conv}_{aggregation}_{HP}"
+        model_dir = model_dir / f"30{CL}_Survival_Prediction_{conv}_{aggregation}_{HP}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
@@ -1051,8 +1054,9 @@ def inference(
         "keys": omic_keys,
         "aggregation": aggregation
     }
-    pretrained_dir = pretrained_dir / f"CL_weighted_Survival_Prediction_GATConv_CBM_"
+    pretrained_dir = pretrained_dir / f"39CL_unweighted_Survival_Prediction_GATConv_CBM_"
     cum_stats = []
+    cum_prob, cum_label, cum_true = [], [], []
     for split_idx, split in enumerate(splits[:3]):
         new_split = {"infer": [v[0] for v in split["test"]]}
 
@@ -1065,8 +1069,8 @@ def inference(
         #     metric="infer-valid-A-auroc",
         # )
         chkpts = [
-            pretrained_dir / f"0{split_idx}/epoch=049.weights.pth",
-            pretrained_dir / f"0{split_idx}/epoch=049.aux.dat"
+            pretrained_dir / f"0{split_idx}/epoch=019.weights.pth",
+            pretrained_dir / f"0{split_idx}/epoch=019.aux.dat"
         ]
         print(str(chkpts))
         # Perform ensembling by averaging probabilities
@@ -1082,7 +1086,7 @@ def inference(
             pretrained=chkpts,
             BayesGNN=BayesGNN,
             data_types=omic_keys,
-            concept_weight=concept_weight,
+            concept_weight=None,
             use_histopath=use_histopath
         )
         pred_logit, concept_logit, _ = list(zip(*outputs))
@@ -1091,15 +1095,19 @@ def inference(
 
         model = ConceptGraphArch(**arch_kwargs)
         model.load(*chkpts)
-        concept_prob = []
-        for i in range(concept_logit.shape[1]):
-            scaler = model.aux_model[f"scaler{i+1}"]
-            logit = concept_logit[:, i:i+1]
-            prob = scaler.predict_proba(logit)[:, 1:2]
-            concept_prob.append(prob)
-        concept_prob = np.concatenate(concept_prob, axis=1)
-        # concept_prob = 1 / (1 + np.exp(-concept_logit))
+        if len(model.aux_model) == 0:
+            concept_prob = 1 / (1 + np.exp(-concept_logit))
+        else:
+            concept_prob = []
+            for i in range(concept_logit.shape[1]):
+                scaler = model.aux_model[f"scaler{i+1}"]
+                logit = concept_logit[:, i:i+1]
+                prob = scaler.predict_proba(logit)[:, 1:2]
+                concept_prob.append(prob)
+            concept_prob = np.concatenate(concept_prob, axis=1)
+        cum_prob.append(concept_prob)
         concept_label = (concept_prob > 0.5).astype(np.int8)
+        cum_label.append(concept_label)
 
         # * Calculate split statistics
         pred_true = np.array([v[1]["label"] for v in split["test"]])
@@ -1111,6 +1119,7 @@ def inference(
         cindex = concordance_index_censored(event_status, event_time, hazard)[0]
 
         concept_true = np.array(concept_true).squeeze().astype(np.int8)
+        cum_true.append(concept_true)
         acc_list = []
         for i in range(concept_true.shape[1]):
             acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
@@ -1130,6 +1139,13 @@ def inference(
         "ACC mean": np.stack(acc_list, axis=0).mean(axis=0),
         "ACC std": np.stack(acc_list, axis=0).std(axis=0)
     }
+    prob = np.concatenate(cum_prob, axis=0)
+    label = np.concatenate(cum_label, axis=0)
+    true = np.concatenate(cum_true, axis=0)
+    acc_list, auc_list, ap_list, f1_list = [], [], [], []
+    for i in range(concept_true.shape[1]):
+        acc_list.append(acc_scorer(label[:, i], true[:, i]))
+        aur_list.append(auroc_scorer(true[:, i], concept_prob[:, i]))
     print(f"Avg:", avg_stat)
     return avg_stat
 
@@ -1238,46 +1254,46 @@ if __name__ == "__main__":
     matched_pathomics_paths = [pathomics_paths[i] for i in matched_i]
     # df_concepts = df_concepts[["Tumor type: clear cell", "Tumor type: papillary", "Tumor type: chromophobe"]]
     concepts = df_concepts.to_numpy(dtype=np.float32)
-    selected = np.array(concepts).sum(axis=0) > 50
-    concepts = concepts[:, selected].tolist()
-    concept_weight = len(concepts) / np.array(concepts).sum(axis=0)
-    args.num_concepts = len(concept_weight)
+    # selected = np.array(concepts).sum(axis=0) > 50
+    # concepts = concepts[:, selected].tolist()
+    # concept_weight = len(concepts) / np.array(concepts).sum(axis=0)
+    # args.num_concepts = len(concept_weight)
     concept_names = list(df_concepts.columns)
-    concept_names = [concept_names[i] for i, v in enumerate(selected.tolist()) if v]
+    # concept_names = [concept_names[i] for i, v in enumerate(selected.tolist()) if v]
 
     # split data set
-    # num_folds = 5
-    # test_ratio = 0.2
-    # train_ratio = 0.8 * 0.9
-    # valid_ratio = 0.8 * 0.1
-    # data_types = ["pathomics"]
-    # # stages=["Stage I", "Stage II"]
-    # df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    # labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
-    # concepts = [concepts[i] for i in matched_i]
-    # print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
-    # y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
-    # matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
-    # kp = data_types[0]
-    # matched_graph_paths = [{kp : p} for p in matched_pathomics_paths]
-    # splits = generate_data_split(
-    #     x=matched_graph_paths,
-    #     y=y,
-    #     train=train_ratio,
-    #     valid=valid_ratio,
-    #     test=test_ratio,
-    #     num_folds=num_folds
-    # )
-    # mkdir(save_model_dir)
+    num_folds = 5
+    test_ratio = 0.2
+    train_ratio = 0.8 * 0.9
+    valid_ratio = 0.8 * 0.1
+    data_types = ["pathomics"]
+    # stages=["Stage I", "Stage II"]
+    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
+    concepts = [concepts[i] for i in matched_i]
+    print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
+    y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
+    matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
+    kp = data_types[0]
+    matched_graph_paths = [{kp : p} for p in matched_pathomics_paths]
+    splits = generate_data_split(
+        x=matched_graph_paths,
+        y=y,
+        train=train_ratio,
+        valid=valid_ratio,
+        test=test_ratio,
+        num_folds=num_folds
+    )
+    mkdir(save_model_dir)
     split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
-    # joblib.dump(splits, split_path)
-    # splits = joblib.load(split_path)
-    # num_train = len(splits[0]["train"])
-    # logging.info(f"Number of training samples: {num_train}.")
-    # num_valid = len(splits[0]["valid"])
-    # logging.info(f"Number of validating samples: {num_valid}.")
-    # num_test = len(splits[0]["test"])
-    # logging.info(f"Number of testing samples: {num_test}.")
+    joblib.dump(splits, split_path)
+    splits = joblib.load(split_path)
+    num_train = len(splits[0]["train"])
+    logging.info(f"Number of training samples: {num_train}.")
+    num_valid = len(splits[0]["valid"])
+    logging.info(f"Number of validating samples: {num_valid}.")
+    num_test = len(splits[0]["test"])
+    logging.info(f"Number of testing samples: {num_test}.")
 
     # cox regression from the splits
     # cox_regression(
@@ -1317,23 +1333,23 @@ if __name__ == "__main__":
     omics_dims = {"pathomics": args.pathomics_dim}
     split_path = f"{save_model_dir}/concept_pathomics_{args.pathomics_mode}_splits.dat"
     scaler_paths = {k: f"{save_model_dir}/concept_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_paths,
-        num_node_features=omics_dims,
-        num_concepts=args.num_concepts,
-        model_dir=save_model_dir,
-        conv="GATConv",
-        n_works=8,
-        batch_size=32,
-        dropout=0.5,
-        BayesGNN=False,
-        omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "CBM"][0],
-        concept_weight=concept_weight,
-        use_histopath=False
-    )
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     num_concepts=args.num_concepts,
+    #     model_dir=save_model_dir,
+    #     conv="GATConv",
+    #     n_works=8,
+    #     batch_size=32,
+    #     dropout=0.5,
+    #     BayesGNN=False,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "CBM"][1],
+    #     concept_weight=concept_weight,
+    #     use_histopath=False
+    # )
 
     # visualize concept attention
     # splits = joblib.load(split_path)
@@ -1381,42 +1397,40 @@ if __name__ == "__main__":
     # )
 
     # inference and visualize metrics
-    # outputs = inference(
-    #     split_path=split_path,
-    #     scaler_path=scaler_paths,
-    #     num_node_features=omics_dims,
-    #     num_concepts=args.num_concepts,
-    #     pretrained_dir=save_model_dir,
-    #     conv="GATConv",
-    #     n_works=8,
-    #     batch_size=1,
-    #     dropout=0.5,
-    #     BayesGNN=False,
-    #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "CBM"][1],
-    #     use_histopath=False
-    # )
-    # concept_names = list(df_concepts.columns)
-    # concept_names = [concept_names[i] for i, v in enumerate(selected.tolist()) if v]
-    # counts = np.sum(np.array(concepts) == 1.0, axis=0)
-    # acc_mean = outputs["ACC mean"]
-    # acc_std = outputs["ACC std"]
-    # sorted_index = np.argsort(acc_mean).tolist()
-    # sorted_names = [concept_names[i] for i in sorted_index]
-    # sorted_counts = counts[sorted_index] / len(concepts)
-    # sorted_acc_mean = acc_mean[sorted_index]
-    # sorted_acc_std = acc_std[sorted_index]
-    # x = np.arange(len(concept_names)) + 1
-    # plt.figure(figsize=(20, 15))
-    # ax = plt.subplot(1,1,1)
-    # ax.plot(x, sorted_counts, color='green', marker='o', label="ratio of concept")
-    # ax.plot(x, sorted_acc_mean, color='blue', marker='^', label="ACC")
-    # ax.fill_between(x, sorted_acc_mean - sorted_acc_std, sorted_acc_mean + sorted_acc_std, alpha=0.2)
-    # ax.set_xticks(x)
-    # ax.set_xticklabels(sorted_names, rotation=45, ha='right')
-    # ax.legend()
-    # plt.subplots_adjust(bottom=0.3)
-    # plt.savefig("a_07explainable_AI/concept_acc_auroc.jpg")
+    outputs = inference(
+        split_path=split_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        num_concepts=args.num_concepts,
+        pretrained_dir=save_model_dir,
+        conv="GATConv",
+        n_works=8,
+        batch_size=1,
+        dropout=0.5,
+        BayesGNN=False,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "CBM"][1],
+        use_histopath=False
+    )
+    counts = np.sum(np.array(concepts) == 1.0, axis=0)
+    acc_mean = outputs["ACC mean"]
+    acc_std = outputs["ACC std"]
+    sorted_index = np.argsort(acc_mean).tolist()
+    sorted_names = [concept_names[i] for i in sorted_index]
+    sorted_counts = counts[sorted_index] / len(concepts)
+    sorted_acc_mean = acc_mean[sorted_index]
+    sorted_acc_std = acc_std[sorted_index]
+    x = np.arange(len(concept_names)) + 1
+    plt.figure(figsize=(20, 15))
+    ax = plt.subplot(1,1,1)
+    ax.plot(x, sorted_counts, color='green', marker='o', label="ratio of concept")
+    ax.plot(x, sorted_acc_mean, color='blue', marker='^', label="ACC")
+    ax.fill_between(x, sorted_acc_mean - sorted_acc_std, sorted_acc_mean + sorted_acc_std, alpha=0.2)
+    ax.set_xticks(x)
+    ax.set_xticklabels(sorted_names, rotation=45, ha='right')
+    ax.legend()
+    plt.subplots_adjust(bottom=0.3)
+    plt.savefig("a_07explainable_AI/concept_acc_auroc.jpg")
 
 
 
