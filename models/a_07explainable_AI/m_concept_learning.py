@@ -822,7 +822,6 @@ def run_once(
                     pbar.postfix[1]["EMA"] = ema.tracking_dict["loss"]
                 else:
                     output = model.infer_batch(model, batch_data, on_gpu)
-                    batch_size = loader_kwargs["batch_size"]
                     batch_size = output[0].shape[0]
                     # print(batch_size, [v.shape for v in output])
                     output = [np.split(v, batch_size, axis=0) for v in output]
@@ -1054,10 +1053,10 @@ def inference(
         "keys": omic_keys,
         "aggregation": aggregation
     }
-    pretrained_dir = pretrained_dir / f"39CL_unweighted_Survival_Prediction_GATConv_CBM_"
+    pretrained_dir = pretrained_dir / f"30CL_unweighted_Survival_Prediction_GATConv_CBM_"
     cum_stats = []
     cum_prob, cum_label, cum_true = [], [], []
-    for split_idx, split in enumerate(splits[:3]):
+    for split_idx, split in enumerate(splits):
         new_split = {"infer": [v[0] for v in split["test"]]}
 
         # stat_files = recur_find_ext(f"{pretrained_dir}/{split_idx:02d}/", [".json"])
@@ -1072,7 +1071,6 @@ def inference(
             pretrained_dir / f"0{split_idx}/epoch=019.weights.pth",
             pretrained_dir / f"0{split_idx}/epoch=019.aux.dat"
         ]
-        print(str(chkpts))
         # Perform ensembling by averaging probabilities
         # across checkpoint predictions
         outputs = run_once(
@@ -1089,7 +1087,7 @@ def inference(
             concept_weight=None,
             use_histopath=use_histopath
         )
-        pred_logit, concept_logit, _ = list(zip(*outputs))
+        pred_logit, concept_logit = list(zip(*outputs))
         hazard = np.exp(np.array(pred_logit).squeeze())
         concept_logit = np.array(concept_logit).squeeze()
 
@@ -1120,24 +1118,24 @@ def inference(
 
         concept_true = np.array(concept_true).squeeze().astype(np.int8)
         cum_true.append(concept_true)
-        acc_list = []
-        for i in range(concept_true.shape[1]):
-            acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
+        # acc_list = []
+        # for i in range(concept_true.shape[1]):
+        #     acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
 
         cum_stats.append(
             {
                 "C-Index": np.array(cindex),
-                "ACC": np.array(acc_list)
+                # "ACC": np.array(acc_list)
             }
         )
         # print(f"Fold-{split_idx}:", cum_stats[-1])
     cindex_list = [stat["C-Index"] for stat in cum_stats]
-    acc_list = [stat["ACC"] for stat in cum_stats]
+    # acc_list = [stat["ACC"] for stat in cum_stats]
     avg_stat = {
         "C-Index mean": np.stack(cindex_list, axis=0).mean(axis=0),
         "C-Index std": np.stack(cindex_list, axis=0).std(axis=0),
-        "ACC mean": np.stack(acc_list, axis=0).mean(axis=0),
-        "ACC std": np.stack(acc_list, axis=0).std(axis=0)
+        # "ACC mean": np.stack(acc_list, axis=0).mean(axis=0),
+        # "ACC std": np.stack(acc_list, axis=0).std(axis=0)
     }
     prob = np.concatenate(cum_prob, axis=0)
     label = np.concatenate(cum_label, axis=0)
@@ -1154,7 +1152,7 @@ def inference(
         "AUC": np.array(auc_list),
         "AP": np.array(ap_list)
     })
-    print(f"Avg:", avg_stat)
+    for k, v in avg_stat.items(): print(k, v.mean())
     return avg_stat
 
 def test(
@@ -1262,12 +1260,12 @@ if __name__ == "__main__":
     matched_pathomics_paths = [pathomics_paths[i] for i in matched_i]
     # df_concepts = df_concepts[["Tumor type: clear cell", "Tumor type: papillary", "Tumor type: chromophobe"]]
     concepts = df_concepts.to_numpy(dtype=np.float32)
-    # selected = np.array(concepts).sum(axis=0) > 50
-    # concepts = concepts[:, selected].tolist()
-    # concept_weight = len(concepts) / np.array(concepts).sum(axis=0)
-    # args.num_concepts = len(concept_weight)
+    selected = np.array(concepts).sum(axis=0) > 50
+    concepts = concepts[:, selected].tolist()
+    concept_weight = len(concepts) / np.array(concepts).sum(axis=0)
+    args.num_concepts = len(concept_weight)
     concept_names = list(df_concepts.columns)
-    # concept_names = [concept_names[i] for i, v in enumerate(selected.tolist()) if v]
+    concept_names = [concept_names[i] for i, v in enumerate(selected.tolist()) if v]
 
     # split data set
     num_folds = 5
@@ -1413,8 +1411,8 @@ if __name__ == "__main__":
         pretrained_dir=save_model_dir,
         conv="GATConv",
         n_works=8,
-        batch_size=32,
-        dropout=0.5,
+        batch_size=16,
+        dropout=0.0,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
         aggregation=["ABMIL", "CBM"][1],

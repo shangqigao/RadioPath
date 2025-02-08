@@ -2009,7 +2009,7 @@ def training(
     arch_kwargs = {
         "dim_features": num_node_features,
         "dim_target": 1,
-        "layers": [256, 64, 128],
+        "layers": [256, 128, 256],
         "dropout": 0.5,
         "pool_ratio": 0.2,
         "conv": conv,

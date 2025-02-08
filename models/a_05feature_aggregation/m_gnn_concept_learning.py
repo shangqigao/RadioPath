@@ -59,6 +59,7 @@ class ConceptGraphDataset(Dataset):
             graph_dict = {k: v.type(torch.float32) for k, v in graph_dict.items()}
             graph_dict.update({"edge_index": graph_dict["edge_index"].type(torch.int64)})
             graph = Data(**graph_dict)
+            del graph_dict
         else:
             graph_dict = {}
             for key in self.data_types:
@@ -409,7 +410,10 @@ class ConceptGraphArch(nn.Module):
             if wsi_labels is not None:
                 return [wsi_outputs, wsi_labels, concept_logits, concept_labels]
             else:
-                return [wsi_outputs, concept_logits, attention]
+                if wsi_outputs.shape[0] == 1:
+                    return [wsi_outputs, concept_logits, attention]
+                else:
+                    return [wsi_outputs, concept_logits]
         else:
             if wsi_labels is not None:
                 return [wsi_outputs, wsi_labels]
