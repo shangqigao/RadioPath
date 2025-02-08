@@ -1078,7 +1078,7 @@ def inference(
         outputs = run_once(
             new_split,
             num_epochs=1,
-            on_gpu=False,
+            on_gpu=True,
             save_dir=None,
             arch_kwargs=arch_kwargs,
             loader_kwargs=loader_kwargs,
@@ -1405,7 +1405,7 @@ if __name__ == "__main__":
         pretrained_dir=save_model_dir,
         conv="GATConv",
         n_works=8,
-        batch_size=1,
+        batch_size=32,
         dropout=0.5,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
