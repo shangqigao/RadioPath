@@ -1142,10 +1142,18 @@ def inference(
     prob = np.concatenate(cum_prob, axis=0)
     label = np.concatenate(cum_label, axis=0)
     true = np.concatenate(cum_true, axis=0)
-    acc_list, auc_list, ap_list, f1_list = [], [], [], []
+    acc_list, f1_list, auc_list, ap_list = [], [], [], []
     for i in range(concept_true.shape[1]):
-        acc_list.append(acc_scorer(label[:, i], true[:, i]))
-        aur_list.append(auroc_scorer(true[:, i], concept_prob[:, i]))
+        acc_list.append(acc_scorer(true[:, i], label[:, i]))
+        f1_list.append(f1_scorer(true[:, i], label[:, i]))
+        auc_list.append(auroc_scorer(true[:, i], prob[:, i]))
+        ap_list.append(ap_scorer(true[:, i], prob[:, i]))
+    avg_stat.update({
+        "ACC": np.array(acc_list),
+        "F1": np.array(f1_list),
+        "AUC": np.array(auc_list),
+        "AP": np.array(ap_list)
+    })
     print(f"Avg:", avg_stat)
     return avg_stat
 
@@ -1413,19 +1421,17 @@ if __name__ == "__main__":
         use_histopath=False
     )
     counts = np.sum(np.array(concepts) == 1.0, axis=0)
-    acc_mean = outputs["ACC mean"]
+    acc = outputs["ACC"]
     acc_std = outputs["ACC std"]
-    sorted_index = np.argsort(acc_mean).tolist()
+    sorted_index = np.argsort(acc).tolist()
     sorted_names = [concept_names[i] for i in sorted_index]
     sorted_counts = counts[sorted_index] / len(concepts)
-    sorted_acc_mean = acc_mean[sorted_index]
-    sorted_acc_std = acc_std[sorted_index]
+    sorted_acc = acc[sorted_index]
     x = np.arange(len(concept_names)) + 1
     plt.figure(figsize=(20, 15))
     ax = plt.subplot(1,1,1)
     ax.plot(x, sorted_counts, color='green', marker='o', label="ratio of concept")
-    ax.plot(x, sorted_acc_mean, color='blue', marker='^', label="ACC")
-    ax.fill_between(x, sorted_acc_mean - sorted_acc_std, sorted_acc_mean + sorted_acc_std, alpha=0.2)
+    ax.plot(x, sorted_acc, color='blue', marker='^', label="ACC")
     ax.set_xticks(x)
     ax.set_xticklabels(sorted_names, rotation=45, ha='right')
     ax.legend()
