@@ -1415,38 +1415,56 @@ if __name__ == "__main__":
     # )
 
     # inference and visualize metrics
-    outputs = inference(
-        split_path=split_path,
-        scaler_path=scaler_paths,
-        num_node_features=omics_dims,
-        num_concepts=args.num_concepts,
-        pretrained_dir=save_model_dir,
-        conv="GATConv",
-        n_works=2,
-        batch_size=2,
-        dropout=0.0,
-        BayesGNN=False,
-        omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "CBM"][1],
-        use_histopath=False
-    )
-    counts = np.sum(np.array(concepts) == 1.0, axis=0)
-    acc = outputs["ACC"]
+    # outputs = inference(
+    #     split_path=split_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     num_concepts=args.num_concepts,
+    #     pretrained_dir=save_model_dir,
+    #     conv="GATConv",
+    #     n_works=2,
+    #     batch_size=2,
+    #     dropout=0.0,
+    #     BayesGNN=False,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "CBM"][1],
+    #     use_histopath=False
+    # )
+    # counts = np.sum(np.array(concepts) == 1.0, axis=0)
+    # acc = outputs["ACC"]
+    # sorted_index = np.argsort(acc).tolist()
+    # sorted_names = [concept_names[i] for i in sorted_index]
+    # sorted_counts = counts[sorted_index] / len(concepts)
+    # sorted_acc = acc[sorted_index]
+    # x = np.arange(len(concept_names)) + 1
+    # plt.figure(figsize=(20, 15))
+    # ax = plt.subplot(1,1,1)
+    # ax.plot(x, sorted_counts, color='green', marker='o', label="ratio of concept")
+    # ax.plot(x, sorted_acc, color='blue', marker='^', label="ACC")
+    # ax.set_xticks(x)
+    # ax.set_xticklabels(sorted_names, rotation=45, ha='right')
+    # ax.legend()
+    # plt.subplots_adjust(bottom=0.3)
+    # plt.savefig("a_07explainable_AI/concept_acc_auroc.jpg")
+
+    # subtyping
+    pretrained_dir = save_model_dir / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    json_path = pretrained_dir / f"concept_classification_results.json"
+    outputs = load_json(json_path)
+    acc = np.array(outputs["ACC"])
     sorted_index = np.argsort(acc).tolist()
     sorted_names = [concept_names[i] for i in sorted_index]
-    sorted_counts = counts[sorted_index] / len(concepts)
-    sorted_acc = acc[sorted_index]
-    x = np.arange(len(concept_names)) + 1
-    plt.figure(figsize=(20, 15))
-    ax = plt.subplot(1,1,1)
-    ax.plot(x, sorted_counts, color='green', marker='o', label="ratio of concept")
-    ax.plot(x, sorted_acc, color='blue', marker='^', label="ACC")
-    ax.set_xticks(x)
-    ax.set_xticklabels(sorted_names, rotation=45, ha='right')
-    ax.legend()
-    plt.subplots_adjust(bottom=0.3)
-    plt.savefig("a_07explainable_AI/concept_acc_auroc.jpg")
-
+    sorted_acc = acc[sorted_index].tolist()
+    print("ACC", {k: v for k, v in zip(sorted_names[-3:], sorted_acc[-3:])})
+    f1 = np.array(outputs["F1"])
+    sorted_f1 = f1[sorted_index].tolist()
+    print("F1", {k: v for k, v in zip(sorted_names[-3:], sorted_f1[-3:])})
+    auc = np.array(outputs["AUC"])
+    sorted_auc = auc[sorted_index].tolist()
+    print("AUC", {k: v for k, v in zip(sorted_names[-3:], sorted_auc[-3:])})
+    ap = np.array(outputs["AP"])
+    sorted_ap = ap[sorted_index].tolist()
+    print("AP", {k: v for k, v in zip(sorted_names[-3:], sorted_ap[-3:])})
 
 
     

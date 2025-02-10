@@ -2365,10 +2365,10 @@ if __name__ == "__main__":
     # training
     # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
     # omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
-    omics_modes = {"radiomics": args.radiomics_mode}
-    omics_dims = {"radiomics": args.radiomics_dim}
-    # omics_modes = {"pathomics": args.pathomics_mode}
-    # omics_dims = {"pathomics": args.pathomics_dim}
+    # omics_modes = {"radiomics": args.radiomics_mode}
+    # omics_dims = {"radiomics": args.radiomics_dim}
+    omics_modes = {"pathomics": args.pathomics_mode}
+    omics_dims = {"pathomics": args.pathomics_dim}
     split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
     scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
     training(
