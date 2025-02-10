@@ -357,7 +357,7 @@ class ConceptGraphArch(nn.Module):
             # feature = self.concept_mlp(feature)
             concept_logit = feature
         output = self.classifier(feature)
-        return output, concept_logit, gate
+        return output, concept_logit, gate, feature
     
     @staticmethod
     def train_batch(model, batch_data, on_gpu, loss, optimizer):
@@ -366,7 +366,7 @@ class ConceptGraphArch(nn.Module):
 
         model.train()
         optimizer.zero_grad()
-        wsi_outputs, concept_logits, _ = model(wsi_graphs)
+        wsi_outputs, concept_logits, _, _ = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze()
         if hasattr(wsi_graphs, "y_dict"):
             wsi_labels = wsi_graphs.y_dict[model.keys[0]].squeeze()
@@ -392,9 +392,10 @@ class ConceptGraphArch(nn.Module):
 
         model.eval()
         with torch.inference_mode():
-            wsi_outputs, concept_logits, attention = model(wsi_graphs)
+            wsi_outputs, concept_logits, attention, feature = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
         attention = attention.cpu().numpy()
+        feature = feature.cpu().numpy()
         wsi_labels, concept_labels = None, None
         if hasattr(wsi_graphs, "y_dict"):
             if wsi_graphs.y_dict is not None:
@@ -416,7 +417,8 @@ class ConceptGraphArch(nn.Module):
             if wsi_labels is not None:
                 return [wsi_outputs, wsi_labels]
             else:
-                return [wsi_outputs, attention]
+                # return [wsi_outputs, feature, attention]
+                return [wsi_outputs, feature]
 
 class ScalarMovingAverage:
     """Class to calculate running average."""
