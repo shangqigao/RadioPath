@@ -8,6 +8,7 @@ import logging
 import warnings
 import joblib
 import copy
+import json
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -846,24 +847,17 @@ def run_once(
                 cindex = concordance_index_censored(event_status, event_time, hazard)[0]
                 logging_dict[f"{loader_name}-Cindex"] = cindex
 
-                if "valid-A" in loader_name and cindex > best_score: 
-                    best_score = cindex
-                    model.save(
-                        f"{save_dir}/best_model.weights.pth",
-                        f"{save_dir}/best_model.aux.dat",
-                        )
-
                 if arch_kwargs["aggregation"] == "CBM":
                     concept_logit, concept_true = output[2], output[3]
                     concept_logit = np.array(concept_logit).squeeze()
                     concept_true = np.array(concept_true).squeeze().astype(np.int8)
-                    # if "valid-A" in loader_name:
-                    #     for i in range(concept_logit.shape[1]):
-                    #         scaler = PlattScaling(solver="liblinear", multi_class="ovr")
-                    #         logit = concept_logit[:, i:i+1]
-                    #         true = concept_true[:, i]
-                    #         scaler.fit(logit, true)
-                    #         model.aux_model[f"scaler{i+1}"] = scaler
+                    if "valid-A" in loader_name:
+                        for i in range(concept_logit.shape[1]):
+                            scaler = PlattScaling(solver="liblinear")
+                            logit = concept_logit[:, i:i+1]
+                            true = concept_true[:, i]
+                            scaler.fit(logit, true)
+                            model.aux_model[f"scaler{i+1}"] = scaler
 
                     if len(model.aux_model) == 0:
                         concept_prob = 1 / (1 + np.exp(-concept_logit))
@@ -880,7 +874,7 @@ def run_once(
 
                     acc_list = []
                     for i in range(concept_true.shape[1]):
-                        acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
+                        acc_list.append(acc_scorer(concept_true[:, i], concept_label[:, i]))
                     acc_list = sorted(acc_list)
                     logging_dict[f"{loader_name}-top10_acc"] = sum(acc_list[-10:]) / 10
                     logging_dict[f"{loader_name}-mean_acc"] = sum(acc_list) / len(acc_list)
@@ -896,6 +890,15 @@ def run_once(
                     logging_dict[f"{loader_name}-top10_auroc"] = sum(auroc_list[-10:]) / 10
                     logging_dict[f"{loader_name}-mean_auroc"] = sum(auroc_list) / len(auroc_list)
                     logging_dict[f"{loader_name}-bottom10_auroc"] = sum(auroc_list[:10]) / 10
+
+                    # save best model based on a metric
+                    mean_auroc = sum(auroc_list) / len(auroc_list)
+                    if "valid-A" in loader_name and mean_auroc > best_score: 
+                        best_score = mean_auroc
+                        model.save(
+                            f"{save_dir}/best_model.weights.pth",
+                            f"{save_dir}/best_model.aux.dat",
+                            )
 
                 logging_dict[f"{loader_name}-raw-logit"] = logit
                 logging_dict[f"{loader_name}-raw-true"] = true
@@ -986,7 +989,7 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"{CL}_Bayes_Survival_Prediction_{conv}_{aggregation}_{HP}"
     else:
-        model_dir = model_dir / f"30{CL}_Survival_Prediction_{conv}_{aggregation}_{HP}"
+        model_dir = model_dir / f"30{CL}_calibrated_Survival_Prediction_{conv}_{aggregation}_{HP}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
@@ -1053,7 +1056,7 @@ def inference(
         "keys": omic_keys,
         "aggregation": aggregation
     }
-    pretrained_dir = pretrained_dir / f"30CL_unweighted_Survival_Prediction_GATConv_CBM_"
+    pretrained_dir = pretrained_dir / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
     cum_stats = []
     cum_prob, cum_label, cum_true = [], [], []
     for split_idx, split in enumerate(splits):
@@ -1118,14 +1121,14 @@ def inference(
 
         concept_true = np.array(concept_true).squeeze().astype(np.int8)
         cum_true.append(concept_true)
-        # acc_list = []
-        # for i in range(concept_true.shape[1]):
-        #     acc_list.append(acc_scorer(concept_label[:, i], concept_true[:, i]))
+        acc_list = []
+        for i in range(concept_true.shape[1]):
+            acc_list.append(acc_scorer(concept_true[:, i], concept_label[:, i]))
 
         cum_stats.append(
             {
                 "C-Index": np.array(cindex),
-                # "ACC": np.array(acc_list)
+                "ACC": np.array(acc_list)
             }
         )
         # print(f"Fold-{split_idx}:", cum_stats[-1])
@@ -1134,8 +1137,8 @@ def inference(
     avg_stat = {
         "C-Index mean": np.stack(cindex_list, axis=0).mean(axis=0),
         "C-Index std": np.stack(cindex_list, axis=0).std(axis=0),
-        # "ACC mean": np.stack(acc_list, axis=0).mean(axis=0),
-        # "ACC std": np.stack(acc_list, axis=0).std(axis=0)
+        "ACC mean": np.stack(acc_list, axis=0).mean(axis=0),
+        "ACC std": np.stack(acc_list, axis=0).std(axis=0)
     }
     prob = np.concatenate(cum_prob, axis=0)
     label = np.concatenate(cum_label, axis=0)
@@ -1152,7 +1155,16 @@ def inference(
         "AUC": np.array(auc_list),
         "AP": np.array(ap_list)
     })
-    for k, v in avg_stat.items(): print(k, v.mean())
+    for k, v in avg_stat.items(): 
+        print(k, v.mean())
+        top10 = np.sort(v, axis=None)[-10:]
+        print(f"{k} top10", top10.mean())
+
+    # save results
+    save_path = pretrained_dir / f"concept_classification_results.json"
+    with save_path.open("w") as handle:
+        new_dict = {k: v.tolist() for k, v in avg_stat.items()}
+        json.dump(new_dict, handle)
     return avg_stat
 
 def test(
@@ -1223,8 +1235,8 @@ if __name__ == "__main__":
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=20, type=int)
-    parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
-    parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
+    parser.add_argument('--pathomics_mode', default="chief", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--pathomics_dim', default=768, choices=[2048, 384, 1024, 512, 768], type=int)
     parser.add_argument('--num_concepts', default=39, type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
@@ -1352,8 +1364,8 @@ if __name__ == "__main__":
     #     dropout=0.5,
     #     BayesGNN=False,
     #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "CBM"][1],
-    #     concept_weight=concept_weight,
+    #     aggregation=["ABMIL", "CBM"][0],
+    #     concept_weight=None,
     #     use_histopath=False
     # )
 
@@ -1410,8 +1422,8 @@ if __name__ == "__main__":
         num_concepts=args.num_concepts,
         pretrained_dir=save_model_dir,
         conv="GATConv",
-        n_works=8,
-        batch_size=16,
+        n_works=2,
+        batch_size=2,
         dropout=0.0,
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
@@ -1420,7 +1432,6 @@ if __name__ == "__main__":
     )
     counts = np.sum(np.array(concepts) == 1.0, axis=0)
     acc = outputs["ACC"]
-    acc_std = outputs["ACC std"]
     sorted_index = np.argsort(acc).tolist()
     sorted_names = [concept_names[i] for i in sorted_index]
     sorted_counts = counts[sorted_index] / len(concepts)

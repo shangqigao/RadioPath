@@ -12,7 +12,8 @@ import torchbnn as bnn
 from torch.nn import BatchNorm1d, Linear, ReLU, Dropout
 from torch_geometric.data import Data, Dataset, HeteroData
 from torch_geometric.loader import NeighborLoader
-from torch_geometric.utils import subgraph, softmax
+from torch_geometric.utils import subgraph, softmax, scatter
+from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_geometric.nn import EdgeConv, GINConv, GCNConv, GATv2Conv
 from torch_geometric.nn import global_mean_pool, TopKPooling
 from torch_geometric.nn.aggr import SumAggregation, MeanAggregation, AttentionalAggregation
@@ -417,6 +418,10 @@ class SurvivalGraphArch(nn.Module):
             conv="GINConv",
             keys=["radiomics", "pathomics"],
             aggregation="SISIR",
+            mu0=0, 
+            lambda0=1, 
+            alpha0=2, 
+            beta0=1e-4,
             **kwargs,
     ):
         super().__init__()
@@ -427,6 +432,11 @@ class SurvivalGraphArch(nn.Module):
         self.embedding_dims = layers
         self.keys = keys
         self.aggregation = aggregation
+        self.mu0 = mu0
+        self.lambda0 = lambda0
+        self.alpha0 = alpha0
+        self.beta0 = beta0
+
         self.num_layers = len(self.embedding_dims)
         self.enc_convs = nn.ModuleList()
         self.enc_linears = nn.ModuleList()
@@ -509,6 +519,7 @@ class SurvivalGraphArch(nn.Module):
             #     dropout=self.dropout,
             #     conv=self.conv_name
             # )
+            input_emb_dim = 1
             hid_emb_dim = self.embedding_dims[0]
             self.inverse_score_nn = ImportanceScoreArch(
                 dim_features=input_emb_dim,
@@ -534,10 +545,13 @@ class SurvivalGraphArch(nn.Module):
     def sampling(self, data):
         loc, logvar = torch.chunk(data, chunks=2, dim=-1)
         logvar = torch.clamp(logvar, min=-20, max=20)
-        loc = loc / 1e2
-        logvar = logvar - 8
         gauss = torch.distributions.Normal(loc, torch.exp(0.5*logvar))
         return gauss.sample(), loc, logvar
+
+    def precision(self, loc, logvar):
+        alpha = 2*self.alpha0 + 1
+        beta = 2*self.beta0 + self.lambda0*(loc - self.mu0)**2 + self.lambda0*torch.exp(logvar)
+        return alpha, beta
 
     def forward(self, data):
         if len(self.keys) > 1:
@@ -630,11 +644,21 @@ class SurvivalGraphArch(nn.Module):
             sample, loc, logvar = self.sampling(self.gate_nn(feature))
             VIparas = [loc, logvar]
 
+            # caculate normalized inverse precision
+            alpha, beta = self.precision(loc, logvar)
+            inv_precision = beta / alpha
+            N = maybe_num_nodes(batch)
+            inv_precision_sum = scatter(inv_precision, index=batch, dim=-2, dim_size=N, reduce='sum')
+            inv_precision_sum = inv_precision_sum.index_select(-2, batch)
+            gate = inv_precision / inv_precision_sum
+            precision_list = [alpha / beta, self.lambda0, self.mu0]
+            VIparas.append(precision_list)
+            
             feature_dict = {k: feature[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
             feature_dict = {k: v.clone().detach() for k, v in feature_dict.items()}
-            gate_dict = {k: loc[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
+            gate_dict = {k: gate[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
             # # decoder
-            decode = self.inverse_score_nn(feature, edge_index)
+            decode = self.inverse_score_nn(sample, edge_index)
 
             if len(self.keys) > 1:
                 dec_list = [self.dec_branches[k](decode[ins[i]:ins[i+1], ...]) for i, k in enumerate(self.keys)]
@@ -872,25 +896,20 @@ class ScalarMovingAverage:
 class VILoss(nn.Module):
     """ variational inference loss
     """
-    def __init__(self, mu0=0, lambda0=1, alpha0=2, beta0=1e-4, tau_ae=1):
+    def __init__(self, tau_ae=1e-3):
         super(VILoss, self).__init__()
-        self.mu0 = mu0
-        self.lambda0 = lambda0
-        self.alpha0 = alpha0
-        self.beta0 = beta0
         self.tau_ae = tau_ae
 
-    def forward(self, loc, logvar, enc_list, dec_list):
-        alpha = 2*self.alpha0 + 1
-        beta = 2*self.beta0 + self.lambda0*(loc - self.mu0)**2 + self.lambda0*torch.exp(logvar)
-        mu_upsilon = (alpha / beta).clone().detach()
-        loss_kl = 0.5*torch.mean(self.lambda0*mu_upsilon*((loc - self.mu0)**2 + torch.exp(logvar)) - logvar)
+    def forward(self, loc, logvar, pre_list, enc_list, dec_list):
+        precision, lambda0, mu0 = pre_list
+        precision = precision.clone().detach()
+        loss_kl = 0.5*torch.mean(lambda0*precision*((loc - mu0)**2 + torch.exp(logvar)) - logvar)
         loss_ae = 0.0
         for enc, dec in zip(enc_list, dec_list):
             # subset = torch.randperm(len(enc))[:len(dec)]
             # enc = enc[subset]
             loss_ae += F.mse_loss(enc, dec)
-        print(loss_ae.item(), loss_kl.item(), beta.max().item())
+        print(loss_ae.item(), loss_kl.item(), precision.min().item(), precision.max().item())
         return self.tau_ae * loss_ae + loss_kl
     
 def calc_mmd(f1, f2, sigmas, normalized=False):
@@ -963,7 +982,7 @@ class CFLoss(nn.Module):
         return mmd_loss + self.beta*mse_loss
     
 class CoxSurvLoss(nn.Module):
-    def __init__(self, tau_vi=1e-4, tau_ka=1e-2):
+    def __init__(self, tau_vi=1e-2, tau_ka=1e-2):
         super(CoxSurvLoss, self).__init__()
         self.tau_vi = tau_vi
         self.tau_ka = tau_ka
