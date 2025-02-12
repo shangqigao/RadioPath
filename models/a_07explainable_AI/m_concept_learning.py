@@ -2066,5 +2066,76 @@ if __name__ == "__main__":
     # sorted_ap = ap[sorted_index].tolist()
     # print("AP", {k: v for k, v in zip(sorted_names[-3:], sorted_ap[-3:])})
 
+    # plot radar chart
+    import plotly.graph_objects as go
+
+    metric = "ACC"
+    save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models")
+    pretrained_dir = save_model_dir / "vit" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    json_path = pretrained_dir / f"concept_classification_results.json"
+    outputs = load_json(json_path)
+    acc = np.array(outputs[metric])
+    sorted_index = np.argsort(acc).tolist()
+    sorted_names = [concept_names[i] for i in sorted_index]
+    vit_sorted_acc = acc[sorted_index].tolist()
+
+    pretrained_dir = save_model_dir / "uni" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    json_path = pretrained_dir / f"concept_classification_results.json"
+    outputs = load_json(json_path)
+    acc = np.array(outputs[metric])
+    uni_sorted_acc = acc[sorted_index].tolist()
+
+    pretrained_dir = save_model_dir / "conch" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    json_path = pretrained_dir / f"concept_classification_results.json"
+    outputs = load_json(json_path)
+    acc = np.array(outputs[metric])
+    conch_sorted_acc = acc[sorted_index].tolist()
+
+    pretrained_dir = save_model_dir / "chief" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    json_path = pretrained_dir / f"concept_classification_results.json"
+    outputs = load_json(json_path)
+    acc = np.array(outputs[metric])
+    chief_sorted_acc = acc[sorted_index].tolist()
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatterpolar(
+        r=vit_sorted_acc,
+        theta=sorted_names,
+        fill='toself',
+        name='HIPT+CBM'
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=uni_sorted_acc,
+        theta=sorted_names,
+        fill='toself',
+        name='UNI+CBM'
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=conch_sorted_acc,
+        theta=sorted_names,
+        fill='toself',
+        name='CONCH+CBM'
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=chief_sorted_acc,
+        theta=sorted_names,
+        fill='toself',
+        name='CHIEF+CBM'
+    ))
+
+    fig.update_layout(
+    polar=dict(radialaxis=dict(visible=True, range=[0.2, 0.4, 0.6, 0.8, 1.0])),
+    angularaxis=dict(
+            tickmode='array',
+            tickvals=[0, 72, 144, 216, 288],  # Angular positions of the ticks
+            ticktext=sorted_names,  # Labels for the angular axis
+            tickangle=45  # Rotate the labels by 45 degrees
+    ),
+    showlegend=True
+    )
+
+    fig.write_image(f"a_07explainable_AI/concept_learning_radar_chart.jpg")
+
 
     
