@@ -1828,9 +1828,9 @@ if __name__ == "__main__":
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=20, type=int)
-    parser.add_argument('--pathomics_mode', default="vit", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
-    parser.add_argument('--pathomics_dim', default=384, choices=[2048, 384, 1024, 512, 768], type=int)
-    parser.add_argument('--pathomics_aggregated_mode', default="ABMIL", choices=["None", "ABMIL", "CBM"], type=str, 
+    parser.add_argument('--pathomics_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 512, 768], type=int)
+    parser.add_argument('--pathomics_aggregated_mode', default="CBM", choices=["None", "ABMIL", "CBM"], type=str, 
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
     parser.add_argument('--num_concepts', default=39, type=int)
