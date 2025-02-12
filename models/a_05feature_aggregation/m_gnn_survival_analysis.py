@@ -421,7 +421,7 @@ class SurvivalGraphArch(nn.Module):
             mu0=0, 
             lambda0=1, 
             alpha0=2, 
-            beta0=1e-4,
+            beta0=1e-2,
             **kwargs,
     ):
         super().__init__()
@@ -655,7 +655,7 @@ class SurvivalGraphArch(nn.Module):
             VIparas.append(precision_list)
             
             feature_dict = {k: feature[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
-            feature_dict = {k: v.clone().detach() for k, v in feature_dict.items()}
+            # feature_dict = {k: v.clone().detach() for k, v in feature_dict.items()}
             gate_dict = {k: gate[ins[i]:ins[i+1]] for i, k in enumerate(self.keys)}
             # # decoder
             decode = self.inverse_score_nn(sample, edge_index)
@@ -982,7 +982,7 @@ class CFLoss(nn.Module):
         return mmd_loss + self.beta*mse_loss
     
 class CoxSurvLoss(nn.Module):
-    def __init__(self, tau_vi=1e-3, tau_ka=1e-2):
+    def __init__(self, tau_vi=1, tau_ka=1e-2):
         super(CoxSurvLoss, self).__init__()
         self.tau_vi = tau_vi
         self.tau_ka = tau_ka

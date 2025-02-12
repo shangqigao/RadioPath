@@ -1077,11 +1077,11 @@ def survival(
         print("Selected training pathomics:", pathomics_tr_X.shape)
         print(pathomics_tr_X.head())
 
-        if pathomics_aggregated_mode in ["ABMIL", "SISIR"]:
+        if pathomics_aggregated_mode in ["ABMIL", "CBM"]:
             pathomics_te_paths = []
             for p in data_te:
                 te_path = pathlib.Path(p[0]["pathomics"])
-                te_dir = te_path.parents[0] / pathomics_aggregated_mode / f"0{split_idx}"
+                te_dir = te_path.parents[0] / f"CL_{pathomics_aggregated_mode}" / f"0{split_idx}"
                 te_name = te_path.name.replace(".json", ".npy")
                 pathomics_te_paths.append(te_dir / te_name)
         else:
@@ -1599,6 +1599,7 @@ def inference(
 ):
     """survival prediction
     """
+    # torch.multiprocessing.set_start_method('spawn', force=True)
     splits = joblib.load(split_path)
     node_scalers = [joblib.load(scaler_path[k]) for k in omic_keys] 
     transform_dict = {k: s.transform for k, s in zip(omic_keys, node_scalers)}
@@ -1606,6 +1607,8 @@ def inference(
     loader_kwargs = {
         "num_workers": n_works, 
         "batch_size": batch_size,
+        "persistent_workers": True,
+        "pin_memory": True,
     }
     if use_histopath: 
         num_node_features["pathomics"] = num_node_features["pathomics"] + 35
@@ -1619,10 +1622,11 @@ def inference(
         "keys": omic_keys,
         "aggregation": aggregation
     }
-    pretrained_dir = pretrained_dir / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    pretrained_dir = pretrained_dir / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_{aggregation}_"
     cum_stats = []
     cum_prob, cum_label, cum_true = [], [], []
     for split_idx, split in enumerate(splits):
+        # if split_idx < 2: continue
         tr_samples = splits[split_idx]["train"] + splits[split_idx]["valid"]
         if save_features:
             all_samples = tr_samples + splits[split_idx]["test"]
@@ -1659,16 +1663,16 @@ def inference(
             use_histopath=use_histopath
         )
         pred_logit, feature = list(zip(*outputs))
-        hazard = np.exp(np.array(pred_logit).squeeze())
+        risk_scores = np.exp(np.array(pred_logit).squeeze())
         if aggregation == "CBM":
             concept_logit = feature
         else:
-            concept_logit = np.random.normal(loc=0, scale=1, size=(feature.shape[0], 30))
+            concept_logit = np.random.normal(loc=0, scale=1, size=(len(risk_scores), 30))
         concept_logit = np.array(concept_logit).squeeze()
 
         # saving average features
         if save_features:
-            hazard = hazard[len(tr_samples):]
+            risk_scores = risk_scores[len(tr_samples):]
             concept_logit = concept_logit[len(tr_samples):]
             graph_paths = [d["pathomics"] for d in new_split["infer"]]
             save_dir = pathlib.Path(graph_paths[0]).parents[0] / f"CL_{aggregation}" / f"0{split_idx}"
@@ -1693,26 +1697,23 @@ def inference(
         cum_prob.append(concept_prob)
         concept_label = (concept_prob > 0.5).astype(np.int8)
         cum_label.append(concept_label)
-
-        # * Calculate split statistics
-        tr_pred_true = np.array([v[1]["label"] for v in tr_samples])
-        tr_pred_true = np.array(tr_pred_true).squeeze()
-        tr_event_time = tr_pred_true[:, 0]
-
-        te_pred_true = np.array([v[1]["label"] for v in split["test"]])
-        te_pred_true = np.array(te_pred_true).squeeze()
-        te_event_status = te_pred_true[:, 1] > 0
-        te_event_time = te_pred_true[:, 0]
-        C_index = concordance_index_censored(te_event_status, te_event_time, hazard)[0]
-        C_index_ipcw = concordance_index_ipcw(tr_event_time, te_event_time, hazard)[0]
-
-        lower, upper = np.percentile(te_event_time, [10, 90])
-        times = np.arange(lower, upper + 1, 7)
-        _, mean_auc = cumulative_dynamic_auc(tr_event_time, te_event_time, hazard, times)
-
         concept_true = np.array([v[1]["concept"] for v in split["test"]])
         concept_true = np.array(concept_true).squeeze().astype(np.int8)
         cum_true.append(concept_true)
+
+        # * Calculate split statistics
+        tr_y = np.array([v[1]["label"] for v in tr_samples])
+        tr_y = pd.DataFrame({'event': tr_y[:, 1].astype(bool), 'duration': tr_y[:, 0]})
+        tr_y = tr_y.to_records(index=False)
+
+        te_y = np.array([v[1]["label"] for v in split["test"]])
+        te_y = pd.DataFrame({'event': te_y[:, 1].astype(bool), 'duration': te_y[:, 0]})
+        te_y = te_y.to_records(index=False)
+        C_index = concordance_index_censored(te_y["event"], te_y["duration"], risk_scores)[0]
+        C_index_ipcw = concordance_index_ipcw(tr_y, te_y, risk_scores)[0]
+        lower, upper = np.percentile(te_y["duration"], [10, 90])
+        times = np.arange(lower, upper + 1, 7)
+        _, mean_auc = cumulative_dynamic_auc(tr_y, te_y, risk_scores, times)
 
         cum_stats.append(
             {
@@ -1827,9 +1828,9 @@ if __name__ == "__main__":
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=20, type=int)
-    parser.add_argument('--pathomics_mode', default="chief", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
-    parser.add_argument('--pathomics_dim', default=768, choices=[2048, 384, 1024, 512, 768], type=int)
-    parser.add_argument('--pathomics_aggregated_mode', default="CBM", choices=["None", "Mean", "ABMIL", "CBM"], type=str, 
+    parser.add_argument('--pathomics_mode', default="vit", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--pathomics_dim', default=384, choices=[2048, 384, 1024, 512, 768], type=int)
+    parser.add_argument('--pathomics_aggregated_mode', default="ABMIL", choices=["None", "ABMIL", "CBM"], type=str, 
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
     parser.add_argument('--num_concepts', default=39, type=int)
@@ -1908,18 +1909,6 @@ if __name__ == "__main__":
     num_test = len(splits[0]["test"])
     logging.info(f"Number of testing samples: {num_test}.")
 
-    # cox regression from the splits
-    # cox_regression(
-    #     split_path=split_path,
-    #     concepts=concept_names,
-    #     pathomics_keys=["TUM", "NORM", "DEB"],
-    #     l1_ratio=0.9,
-    #     used=["pathomics", "concepts"][0],
-    #     n_jobs=8,
-    #     pathomics_aggregation=True,
-    #     alpha_min=1e-2
-    # )
-
     # survival analysis
     survival(
         split_path=split_path,
@@ -1927,8 +1916,8 @@ if __name__ == "__main__":
         pathomics_keys=None,
         pathomics_aggregation=False,
         pathomics_aggregated_mode=args.pathomics_aggregated_mode,
-        used="all", 
-        n_jobs=32,
+        used=["concepts", "pathomics"][1], 
+        n_jobs=8,
         model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
         scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0],
         feature_selection=False,
@@ -2032,13 +2021,14 @@ if __name__ == "__main__":
     #     num_concepts=args.num_concepts,
     #     pretrained_dir=save_model_dir,
     #     conv="GATConv",
-    #     n_works=2,
-    #     batch_size=2,
+    #     n_works=32,
+    #     batch_size=32,
     #     dropout=0.0,
     #     BayesGNN=False,
     #     omic_keys=list(omics_modes.keys()),
     #     aggregation=["ABMIL", "CBM"][1],
-    #     use_histopath=False
+    #     use_histopath=False,
+    #     save_features=True
     # )
     # counts = np.sum(np.array(concepts) == 1.0, axis=0)
     # acc = outputs["ACC"]
