@@ -2011,7 +2011,7 @@ def training(
         "dim_target": 1,
         "layers": [256, 128, 256],
         "dropout": 0.5,
-        "pool_ratio": 0.2,
+        "pool_ratio": 0.1,
         "conv": conv,
         "keys": omic_keys,
         "aggregation": aggregation
@@ -2077,7 +2077,7 @@ def inference(
         "dim_target": 1,
         "layers": [256, 128, 256],
         "dropout": 0.5,
-        "pool_ratio": 0.2,
+        "pool_ratio": 0.5,
         "conv": conv,
         "keys": omic_keys,
         "aggregation": aggregation
@@ -2201,7 +2201,7 @@ if __name__ == "__main__":
     # plot_survival_curve(save_clinical_dir)
 
     # survival analysis
-    pathomics_aggregation = False # false if load wsi-level features else true
+    pathomics_aggregation = True # false if load wsi-level features else true
     pathomics_paths = [save_pathomics_dir / f"{p.stem}.json" for p in wsi_paths]
 
     # only use pathomics
@@ -2211,7 +2211,7 @@ if __name__ == "__main__":
 
     # use radiomics and pathomics
     class_name = ["kidney_and_mass", "mass", "tumour"][2]
-    radiomics_aggregation = False # false if load image-level features else true
+    radiomics_aggregation = True # false if load image-level features else true
     if radiomics_aggregation:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.json"))
     else:
@@ -2312,21 +2312,21 @@ if __name__ == "__main__":
     logging.info(f"Number of testing samples: {num_test}.")
 
     # survival analysis from the splits
-    survival(
-        split_path=split_path,
-        used=["radiomics", "pathomics", "radiopathomics"][0],
-        n_jobs=8,
-        radiomics_aggregation=radiomics_aggregation,
-        radiomics_aggregated_mode=args.radiomics_aggregated_mode,
-        pathomics_aggregation=pathomics_aggregation,
-        pathomics_aggregated_mode=args.pathomics_aggregated_mode,
-        radiomics_keys=None, #radiomic_propereties,
-        pathomics_keys=None, #["TUM", "NORM", "DEB"],
-        model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
-        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
-        feature_selection=False,
-        n_bootstraps=0
-    )
+    # survival(
+    #     split_path=split_path,
+    #     used=["radiomics", "pathomics", "radiopathomics"][1],
+    #     n_jobs=8,
+    #     radiomics_aggregation=radiomics_aggregation,
+    #     radiomics_aggregated_mode=args.radiomics_aggregated_mode,
+    #     pathomics_aggregation=pathomics_aggregation,
+    #     pathomics_aggregated_mode=args.pathomics_aggregated_mode,
+    #     radiomics_keys=None, #radiomic_propereties,
+    #     pathomics_keys=None, #["TUM", "NORM", "DEB"],
+    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][3],
+    #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
+    #     feature_selection=False,
+    #     n_bootstraps=0
+    # )
 
     # survival_plus(
     #     split_path=split_path,
@@ -2371,20 +2371,20 @@ if __name__ == "__main__":
     omics_dims = {"pathomics": args.pathomics_dim}
     split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
     scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    # training(
-    #     num_epochs=args.epochs,
-    #     split_path=split_path,
-    #     scaler_path=scaler_paths,
-    #     num_node_features=omics_dims,
-    #     model_dir=save_model_dir,
-    #     conv="GCNConv",
-    #     n_works=8,
-    #     batch_size=32,
-    #     BayesGNN=False,
-    #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "SISIR"][1],
-    #     sampling_rate=0.1
-    # )
+    training(
+        num_epochs=args.epochs,
+        split_path=split_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        model_dir=save_model_dir,
+        conv="GCNConv",
+        n_works=32,
+        batch_size=32,
+        BayesGNN=False,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "SISIR"][1],
+        sampling_rate=0.1
+    )
 
     # inference
     # inference(
@@ -2392,7 +2392,7 @@ if __name__ == "__main__":
     #     scaler_path=scaler_paths,
     #     num_node_features=omics_dims,
     #     pretrained_dir=save_model_dir,
-    #     n_works=8,
+    #     n_works=32,
     #     BayesGNN=False,
     #     conv="GCNConv",
     #     omic_keys=list(omics_modes.keys()),

@@ -508,7 +508,7 @@ class SurvivalGraphArch(nn.Module):
             input_emb_dim = hid_emb_dim
             self.gate_nn = Attn_Net_Gated(
                 L=input_emb_dim, 
-                D=64, 
+                D=256, 
                 dropout=0.25, 
                 n_classes=2
             )
@@ -896,7 +896,7 @@ class ScalarMovingAverage:
 class VILoss(nn.Module):
     """ variational inference loss
     """
-    def __init__(self, tau_ae=1e-3):
+    def __init__(self, tau_ae=1):
         super(VILoss, self).__init__()
         self.tau_ae = tau_ae
 
