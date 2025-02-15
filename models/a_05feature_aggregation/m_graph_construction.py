@@ -549,8 +549,8 @@ def visualize_pathomic_graph(
     else:
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
         PLOT_RESOLUTION = {"resolution": resolution / 16, "units": units}
-        NODE_SIZE = 24
-        EDGE_SIZE = 4
+        NODE_SIZE = 12
+        EDGE_SIZE = 2
     graph_dict = load_json(graph_path)
     if show_map:
         cluster_points = graph_dict["cluster_points"]

@@ -718,10 +718,11 @@ class SurvivalGraphArch(nn.Module):
         wsi_outputs = wsi_outputs.cpu().numpy()
         features = features.cpu().numpy()
         wsi_labels = None
-        if hasattr(wsi_graphs, "y_dict"):
-            if wsi_graphs.y_dict is not None:
-                wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
-        elif hasattr(wsi_graphs, "y"):
+        try:
+            wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
+        except:
+            print("no y dict!")
+        if hasattr(wsi_graphs, "y"):
             if wsi_graphs.y is not None:
                 wsi_labels = wsi_graphs.y.cpu().numpy()
         if wsi_labels is not None:
@@ -896,7 +897,7 @@ class ScalarMovingAverage:
 class VILoss(nn.Module):
     """ variational inference loss
     """
-    def __init__(self, tau_ae=1):
+    def __init__(self, tau_ae=1e-3):
         super(VILoss, self).__init__()
         self.tau_ae = tau_ae
 
@@ -982,7 +983,7 @@ class CFLoss(nn.Module):
         return mmd_loss + self.beta*mse_loss
     
 class CoxSurvLoss(nn.Module):
-    def __init__(self, tau_vi=1, tau_ka=1e-2):
+    def __init__(self, tau_vi=1e-3, tau_ka=1e-2):
         super(CoxSurvLoss, self).__init__()
         self.tau_vi = tau_vi
         self.tau_ka = tau_ka

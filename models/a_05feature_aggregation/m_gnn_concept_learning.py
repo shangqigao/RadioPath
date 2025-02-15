@@ -411,8 +411,8 @@ class ConceptGraphArch(nn.Module):
             if wsi_labels is not None:
                 return [wsi_outputs, wsi_labels, concept_logits, concept_labels]
             else:
-                # return [wsi_outputs, concept_logits, attention]
-                return [wsi_outputs, concept_logits]
+                return [wsi_outputs, concept_logits, attention]
+                # return [wsi_outputs, concept_logits]
         else:
             if wsi_labels is not None:
                 return [wsi_outputs, wsi_labels]

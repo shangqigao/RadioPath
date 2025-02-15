@@ -835,7 +835,7 @@ def coxph(split_idx, tr_X, tr_y, scorer, n_jobs):
     non_zero_coefs.loc[top10].plot.barh(ax=ax, legend=False)
     ax.set_xlabel("coefficient")
     ax.grid(True)
-    plt.subplots_adjust(left=0.3)
+    plt.subplots_adjust(left=0.4)
     plt.savefig(f"a_07explainable_AI/best_coefficients_fold{split_idx}.jpg") 
 
     # perform prediction using the best params
@@ -1830,8 +1830,8 @@ if __name__ == "__main__":
     parser.add_argument('--save_clinical_dir', default="/home/sg2162/rds/hpc-work/Experiments/clinical", type=str)
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=20, type=int)
-    parser.add_argument('--pathomics_mode', default="chief", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
-    parser.add_argument('--pathomics_dim', default=768, choices=[2048, 384, 1024, 512, 768], type=int)
+    parser.add_argument('--pathomics_mode', default="conch", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--pathomics_dim', default=512, choices=[2048, 384, 1024, 512, 768], type=int)
     parser.add_argument('--pathomics_aggregated_mode', default="CBM", choices=["None", "ABMIL", "CBM"], type=str, 
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
@@ -1876,6 +1876,7 @@ if __name__ == "__main__":
     args.num_concepts = len(concept_weight)
     concept_names = list(df_concepts.columns)
     concept_names = [concept_names[i] for i, v in enumerate(selected.tolist()) if v]
+    # for name in concept_names: print(name)
 
     # split data set
     num_folds = 5
@@ -1912,19 +1913,19 @@ if __name__ == "__main__":
     logging.info(f"Number of testing samples: {num_test}.")
 
     # survival analysis
-    # survival(
-    #     split_path=split_path,
-    #     concepts=concept_names,
-    #     pathomics_keys=None,
-    #     pathomics_aggregation=False,
-    #     pathomics_aggregated_mode=args.pathomics_aggregated_mode,
-    #     used=["concepts", "pathomics"][1], 
-    #     n_jobs=8,
-    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
-    #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0],
-    #     feature_selection=False,
-    #     n_bootstraps=0
-    # )
+    survival(
+        split_path=split_path,
+        concepts=concept_names,
+        pathomics_keys=None,
+        pathomics_aggregation=False,
+        pathomics_aggregated_mode=args.pathomics_aggregated_mode,
+        used=["concepts", "pathomics"][1], 
+        n_jobs=8,
+        model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
+        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0],
+        feature_selection=False,
+        n_bootstraps=0
+    )
 
     # compute mean and std on training data for normalization 
     # splits = joblib.load(split_path)
@@ -1971,31 +1972,35 @@ if __name__ == "__main__":
     # )
 
     # visualize concept attention
-    # splits = joblib.load(split_path)
-    # graph_path = splits[0]["test"][0][0]
-    # graph_name = pathlib.Path(graph_path["pathomics"]).stem
-    # print("Visualizing on wsi:", graph_name)
-    # wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
-    # pretrained_model = f"{save_model_dir}/CL_weighted_Survival_Prediction_GATConv_CBM/00/epoch=049.weights.pth"
+    splits = joblib.load(split_path)
+    graph_path = splits[0]["test"][1][0]
+    graph_name = pathlib.Path(graph_path["pathomics"]).stem
+    print("Visualizing on wsi:", graph_name)
+    wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
+    # pretrained_dir = save_model_dir / "30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_/00"
+    # chkpts = [
+    #     pretrained_dir / "epoch=019.weights.pth",
+    #     pretrained_dir / "epoch=019.aux.dat"
+    # ]
     # hazard, concept_label, attention = test(
     #     graph_path=graph_path,
     #     scaler_path=scaler_paths,
     #     num_node_features=omics_dims,
     #     num_concepts=args.num_concepts,
-    #     pretrained_model=pretrained_model,
+    #     pretrained_model=chkpts,
     #     conv="GATConv",
     #     dropout=0.5,
     #     omic_keys=list(omics_modes.keys()),
     #     aggregation=["ABMIL", "CBM"][1],
     #     use_histopath=False
     # )
-    # concepts = list(df_concepts.columns)
-    # for i, concept in enumerate(concepts):
+    # for i, concept in enumerate(concept_names):
     #     if concept_label[i] == 1:
     #         visualize_pathomic_graph(
     #             wsi_path=wsi_path,
     #             graph_path=graph_path["pathomics"],
     #             label=attention[:, i],
+    #             show_map=True,
     #             save_name=f"concept{i}",
     #             save_title=concept,
     #             resolution=args.resolution,
@@ -2008,9 +2013,11 @@ if __name__ == "__main__":
     # visualize_pathomic_graph(
     #     wsi_path=wsi_path,
     #     graph_path=graph_path,
-    #     label=label_path,
-    #     save_name=f"conch",
-    #     save_title="CONCH Prediction",
+    #     magnify=False,
+    #     # label=label_path,
+    #     # show_map=True,
+    #     # save_name=f"conch",
+    #     # save_title="CONCH classification",
     #     resolution=args.resolution,
     #     units=args.units
     # )
@@ -2069,85 +2076,85 @@ if __name__ == "__main__":
     # print("AP", {k: v for k, v in zip(sorted_names[-3:], sorted_ap[-3:])})
 
     # plot radar chart
-    import plotly.graph_objects as go
-    metric = "AUC"
-    save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models")
-    pretrained_dir = save_model_dir / "uni" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
-    json_path = pretrained_dir / f"concept_classification_results.json"
-    outputs = load_json(json_path)
-    acc = np.array(outputs[metric])
-    sorted_index = np.argsort(acc).tolist()
-    sorted_names = [concept_names[i] for i in sorted_index]
-    uni_sorted_acc = acc[sorted_index].tolist()
+    # import plotly.graph_objects as go
+    # metric = "AUC"
+    # save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models")
+    # pretrained_dir = save_model_dir / "uni" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # json_path = pretrained_dir / f"concept_classification_results.json"
+    # outputs = load_json(json_path)
+    # acc = np.array(outputs[metric])
+    # sorted_index = np.argsort(acc).tolist()
+    # sorted_names = [concept_names[i] for i in sorted_index]
+    # uni_sorted_acc = acc[sorted_index].tolist()
 
-    pretrained_dir = save_model_dir / "vit" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
-    json_path = pretrained_dir / f"concept_classification_results.json"
-    outputs = load_json(json_path)
-    acc = np.array(outputs[metric])
-    vit_sorted_acc = acc[sorted_index].tolist()
+    # pretrained_dir = save_model_dir / "vit" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # json_path = pretrained_dir / f"concept_classification_results.json"
+    # outputs = load_json(json_path)
+    # acc = np.array(outputs[metric])
+    # vit_sorted_acc = acc[sorted_index].tolist()
 
-    pretrained_dir = save_model_dir / "conch" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
-    json_path = pretrained_dir / f"concept_classification_results.json"
-    outputs = load_json(json_path)
-    acc = np.array(outputs[metric])
-    conch_sorted_acc = acc[sorted_index].tolist()
+    # pretrained_dir = save_model_dir / "conch" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # json_path = pretrained_dir / f"concept_classification_results.json"
+    # outputs = load_json(json_path)
+    # acc = np.array(outputs[metric])
+    # conch_sorted_acc = acc[sorted_index].tolist()
 
-    pretrained_dir = save_model_dir / "chief" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
-    json_path = pretrained_dir / f"concept_classification_results.json"
-    outputs = load_json(json_path)
-    acc = np.array(outputs[metric])
-    chief_sorted_acc = acc[sorted_index].tolist()
+    # pretrained_dir = save_model_dir / "chief" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # json_path = pretrained_dir / f"concept_classification_results.json"
+    # outputs = load_json(json_path)
+    # acc = np.array(outputs[metric])
+    # chief_sorted_acc = acc[sorted_index].tolist()
 
-    fig = go.Figure()
+    # fig = go.Figure()
 
-    fig.add_trace(go.Scatter(
-        x=sorted_names, 
-        y=vit_sorted_acc,
-        mode='lines+markers',
-        name='HIPT+CBM'
-    ))
-    fig.add_trace(go.Scatter(
-        x=sorted_names, 
-        y=uni_sorted_acc,
-        mode='lines+markers',
-        name='UNI+CBM'
-    ))
-    fig.add_trace(go.Scatter(
-        x=sorted_names, 
-        y=conch_sorted_acc,
-        mode='lines+markers',
-        name='CONCH+CBM'
-    ))
-    fig.add_trace(go.Scatter(
-        x=sorted_names, 
-        y=chief_sorted_acc,
-        mode='lines+markers',
-        name='CHIEF+CBM'
-    ))
+    # fig.add_trace(go.Scatter(
+    #     x=sorted_names, 
+    #     y=vit_sorted_acc,
+    #     mode='lines+markers',
+    #     name='HIPT+CBM'
+    # ))
+    # fig.add_trace(go.Scatter(
+    #     x=sorted_names, 
+    #     y=uni_sorted_acc,
+    #     mode='lines+markers',
+    #     name='UNI+CBM'
+    # ))
+    # fig.add_trace(go.Scatter(
+    #     x=sorted_names, 
+    #     y=conch_sorted_acc,
+    #     mode='lines+markers',
+    #     name='CONCH+CBM'
+    # ))
+    # fig.add_trace(go.Scatter(
+    #     x=sorted_names, 
+    #     y=chief_sorted_acc,
+    #     mode='lines+markers',
+    #     name='CHIEF+CBM'
+    # ))
 
-    fig.update_layout(
-            xaxis=dict(
-                title=dict(
-                    text='Kidney Pathological Concept'
-                ),
-                tickangle=30,
-                tickfont=dict(
-                size=8
-                ),
-            ),
-            yaxis=dict(
-                title=dict(
-                    text='AUC'
-                )
-            ),
-            margin=dict(t=10, l=50, r=30),
-            legend=dict(
-                x=0.1, y=0.9,
-                xanchor='left', yanchor='top'
-            )
-    )
+    # fig.update_layout(
+    #         xaxis=dict(
+    #             title=dict(
+    #                 text='Kidney Pathological Concept'
+    #             ),
+    #             tickangle=30,
+    #             tickfont=dict(
+    #             size=8
+    #             ),
+    #         ),
+    #         yaxis=dict(
+    #             title=dict(
+    #                 text='AUC'
+    #             )
+    #         ),
+    #         margin=dict(t=10, l=50, r=30),
+    #         legend=dict(
+    #             x=0.1, y=0.9,
+    #             xanchor='left', yanchor='top'
+    #         )
+    # )
 
-    fig.write_image(f"a_07explainable_AI/concept_learning_metric.png", width=1000, height=500, scale=2)
+    # fig.write_image(f"a_07explainable_AI/concept_learning_metric.png", width=1000, height=500, scale=2)
 
 
     

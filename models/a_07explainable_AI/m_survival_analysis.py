@@ -1273,7 +1273,7 @@ def survival(
 
 
         # Prepare pathomics
-        if pathomics_aggregated_mode in ["ABMIL", "SISIR"]:
+        if pathomics_aggregated_mode in ["ABMIL", "SISIR", "radiopathomics_SISIR"]:
             pathomics_tr_paths = []
             for p in data_tr:
                 tr_path = pathlib.Path(p[0]["pathomics"])
@@ -1300,7 +1300,7 @@ def survival(
         print("Selected training pathomics:", pathomics_tr_X.shape)
         print(pathomics_tr_X.head())
 
-        if pathomics_aggregated_mode in ["ABMIL", "SISIR"]:
+        if pathomics_aggregated_mode in ["ABMIL", "SISIR", "radiopathomics_SISIR"]:
             pathomics_te_paths = []
             for p in data_te:
                 te_path = pathlib.Path(p[0]["pathomics"])
@@ -2011,7 +2011,7 @@ def training(
         "dim_target": 1,
         "layers": [256, 128, 256],
         "dropout": 0.5,
-        "pool_ratio": 0.1,
+        "pool_ratio": 0.2,
         "conv": conv,
         "keys": omic_keys,
         "aggregation": aggregation
@@ -2020,7 +2020,7 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"{omics_name}_Bayes_Survival_Prediction_{conv}_{aggregation}"
     else:
-        model_dir = model_dir / f"{omics_name}_Survival_Prediction_{conv}_{aggregation}"
+        model_dir = model_dir / f"{omics_name}_Survival_Prediction_{conv}_{aggregation}_1e-3"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": {"ABMIL": 1.0e-5, "SISIR": 0.0}[aggregation],
@@ -2077,7 +2077,7 @@ def inference(
         "dim_target": 1,
         "layers": [256, 128, 256],
         "dropout": 0.5,
-        "pool_ratio": 0.5,
+        "pool_ratio": 0.2,
         "conv": conv,
         "keys": omic_keys,
         "aggregation": aggregation
@@ -2089,6 +2089,7 @@ def inference(
         pretrained_dir = pretrained_dir / f"{omics_name}_Survival_Prediction_{conv}_{aggregation}"
 
     cum_stats = []
+    if "radiomics_pathomics" == omics_name: aggregation = f"radiopathomics_{aggregation}"
     for split_idx, split in enumerate(splits):
         if save_features:
             all_samples = splits[split_idx]["train"] + splits[split_idx]["valid"] + splits[split_idx]["test"]
@@ -2119,6 +2120,8 @@ def inference(
             if "radiomics" == omics_name:
                 graph_paths = [d["radiomics"] for d in new_split["infer"]]
             elif "pathomics" == omics_name:
+                graph_paths = [d["pathomics"] for d in new_split["infer"]]
+            elif "radiomics_pathomics" == omics_name:
                 graph_paths = [d["pathomics"] for d in new_split["infer"]]
 
             save_dir = pathlib.Path(graph_paths[0]).parents[0] / aggregation / f"0{split_idx}"
@@ -2171,7 +2174,7 @@ if __name__ == "__main__":
     parser.add_argument('--radiomics_aggregated_mode', default="SISIR", choices=["None", "Mean", "ABMIL", "SISIR"], type=str, 
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
-    parser.add_argument('--pathomics_aggregated_mode', default="SISIR", choices=["None", "Mean", "ABMIL", "SISIR"], type=str, 
+    parser.add_argument('--pathomics_aggregated_mode', default="radiopathomics_SISIR", choices=["None", "Mean", "ABMIL", "SISIR", "radiopathomics_SISIR"], type=str, 
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
     args = parser.parse_args()
@@ -2322,7 +2325,7 @@ if __name__ == "__main__":
     #     pathomics_aggregated_mode=args.pathomics_aggregated_mode,
     #     radiomics_keys=None, #radiomic_propereties,
     #     pathomics_keys=None, #["TUM", "NORM", "DEB"],
-    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][3],
+    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
     #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
     #     feature_selection=False,
     #     n_bootstraps=0
@@ -2365,10 +2368,10 @@ if __name__ == "__main__":
     # training
     # omics_modes = {"radiomics": args.radiomics_mode, "pathomics": args.pathomics_mode}
     # omics_dims = {"radiomics": args.radiomics_dim, "pathomics": args.pathomics_dim}
-    # omics_modes = {"radiomics": args.radiomics_mode}
-    # omics_dims = {"radiomics": args.radiomics_dim}
-    omics_modes = {"pathomics": args.pathomics_mode}
-    omics_dims = {"pathomics": args.pathomics_dim}
+    omics_modes = {"radiomics": args.radiomics_mode}
+    omics_dims = {"radiomics": args.radiomics_dim}
+    # omics_modes = {"pathomics": args.pathomics_mode}
+    # omics_dims = {"pathomics": args.pathomics_dim}
     split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
     scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
     training(
@@ -2383,7 +2386,7 @@ if __name__ == "__main__":
         BayesGNN=False,
         omic_keys=list(omics_modes.keys()),
         aggregation=["ABMIL", "SISIR"][1],
-        sampling_rate=0.1
+        sampling_rate=1
     )
 
     # inference
