@@ -21,7 +21,8 @@ from torch_geometric.loader import DataLoader
 from tiatoolbox import logger
 from tiatoolbox.utils.misc import save_as_json
 
-from lifelines import CoxPHFitter
+from lifelines import CoxPHFitter, KaplanMeierFitter
+from lifelines.statistics import logrank_test
 from sksurv.nonparametric import kaplan_meier_estimator
 from sksurv.linear_model import CoxPHSurvivalAnalysis, CoxnetSurvivalAnalysis, IPCRidge
 from sksurv.ensemble import RandomSurvivalForest, GradientBoostingSurvivalAnalysis
@@ -1027,6 +1028,7 @@ def survival(
         ):
     splits = joblib.load(split_path)
     predict_results = {}
+    risk_results = {"risk": [], "event": [], "duration": []}
     for split_idx, split in enumerate(splits):
         print(f"Performing cross-validation on fold {split_idx}...")
         data_tr, data_va, data_te = split["train"], split["valid"], split["test"]
@@ -1198,6 +1200,9 @@ def survival(
             predictor.fit(tr_X, tr_y)
 
         risk_scores = predictor.predict(te_X)
+        risk_results["risk"] += risk_scores.tolist()
+        risk_results["event"] += te_y["event"].astype(int).tolist()
+        risk_results["duration"] += te_y["duration"].tolist()
         C_index = concordance_index_censored(te_y["event"], te_y["duration"], risk_scores)[0]
         C_index_ipcw = concordance_index_ipcw(tr_y, te_y, risk_scores)[0]
 
@@ -1232,6 +1237,28 @@ def survival(
     for k in scores_dict.keys():
         arr = np.array([v[k] for v in predict_results.values()])
         print(f"CV {k} mean+std", arr.mean(), arr.std())
+    # plot survival curve
+    pd_risk = pd.DataFrame(risk_results)
+    mean_risk = pd_risk["risk"].mean()
+    dem = pd_risk["risk"] > mean_risk
+    ax = plt.subplot(111)
+    kmf = KaplanMeierFitter()
+    kmf.fit(pd_risk["duration"][dem], event_observed=pd_risk["event"][dem], label="High risk")
+    kmf.plot_survival_function(ax=ax)
+
+    kmf.fit(pd_risk["duration"][~dem], event_observed=pd_risk["event"][~dem], label="Low risk")
+    kmf.plot_survival_function(ax=ax)
+
+    # logrank test
+    test_results = logrank_test(
+        pd_risk["duration"][dem], pd_risk["duration"][~dem], 
+        pd_risk["event"][dem], pd_risk["event"][~dem], 
+        alpha=.99
+    )
+    test_results.print_summary()
+    pvalue = test_results.p_value
+    ax.text(0, 0, f'p-value: {pvalue}', fontsize=12, color='orange')
+    plt.savefig("a_07explainable_AI/CL_survival_curve.png")
     return
 
 def generate_data_split(
