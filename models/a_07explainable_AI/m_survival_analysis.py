@@ -53,6 +53,7 @@ from common.m_utils import mkdir, select_wsi, load_json, create_pbar, rm_n_mkdir
 
 from models.a_05feature_aggregation.m_gnn_survival_analysis import SurvivalGraphDataset, SurvivalGraphArch, SurvivalBayesGraphArch
 from models.a_05feature_aggregation.m_gnn_survival_analysis import ScalarMovingAverage, CoxSurvLoss
+from models.a_05feature_aggregation.m_graph_construction import visualize_radiomic_graph, visualize_pathomic_graph
 
 
 
@@ -154,12 +155,38 @@ def plot_survival_curve(save_dir):
     plt.savefig("a_07explainable_AI/survival_curve.jpg")
     return
 
-def prepare_graph_properties(data_dict, prop_keys):
+def prepare_graph_properties(data_dict, prop_keys=None, subgraphs=False, omics="radiomics"):
+    if prop_keys == None: 
+        prop_keys = [
+            "num_nodes", 
+            "num_edges", 
+            "num_components", 
+            "degree", 
+            "closeness", 
+            "graph_diameter",
+            "graph_assortativity",
+            "mean_neighbor_degree"
+        ]
     properties = {}
-    for subgraph, prop_dict in data_dict.items():
-        if subgraph == "MUC": continue
+    if subgraphs:
+        for subgraph, prop_dict in data_dict.items():
+            if subgraph == "MUC": continue
+            for k in prop_keys:
+                key = f"{omics}.{subgraph}.{k}"
+                if prop_dict is None or len(prop_dict[k]) == 0:
+                    properties[key] = -1 if k == "graph_assortativity" else 0
+                else:
+                    if len(prop_dict[k]) == 1:
+                        if np.isnan(prop_dict[k][0]):
+                            properties[key] = -1 if k == "graph_assortativity" else 0
+                        else:
+                            properties[key] = prop_dict[k][0]
+                    else:
+                        properties[key] = np.std(prop_dict[k])
+    else:
+        prop_dict = data_dict
         for k in prop_keys:
-            key = f"{subgraph}.{k}"
+            key = f"{omics}.{k}"
             if prop_dict is None or len(prop_dict[k]) == 0:
                 properties[key] = -1 if k == "graph_assortativity" else 0
             else:
@@ -1200,7 +1227,8 @@ def survival(
         model="CoxPH",
         scorer="cindex",
         feature_selection=True,
-        n_bootstraps=100
+        n_bootstraps=100,
+        use_graph_properties=False
         ):
     splits = joblib.load(split_path)
     predict_results = {}
@@ -1241,6 +1269,15 @@ def survival(
         for d in dict_list: radiomics_dict.update(d)
         radiomics_tr_X = [radiomics_dict[f"{i}"] for i in range(len(radiomics_tr_paths))]
         radiomics_tr_X = pd.DataFrame(radiomics_tr_X)
+
+        if use_graph_properties:
+            tr_prop_paths = [p[0]["radiomics"] for p in data_tr]
+            tr_prop_paths = [f"{p}".replace(".json", ".graph.properties.json") for p in tr_prop_paths]
+            prop_dict_list = [load_json(p) for p in tr_prop_paths]
+            prop_tr_X = [prepare_graph_properties(d, omics="radiomics") for d in prop_dict_list]
+            prop_tr_X = pd.DataFrame(prop_tr_X)
+            radiomics_tr_X = pd.concat([radiomics_tr_X, prop_tr_X], axis=1)
+
         print("Selected training radiomics:", radiomics_tr_X.shape)
         print(radiomics_tr_X.head())
 
@@ -1268,6 +1305,15 @@ def survival(
         for d in dict_list: radiomics_dict.update(d)
         radiomics_te_X = [radiomics_dict[f"{i}"] for i in range(len(radiomics_te_paths))]
         radiomics_te_X = pd.DataFrame(radiomics_te_X)
+
+        if use_graph_properties:
+            te_prop_paths = [p[0]["radiomics"] for p in data_te]
+            te_prop_paths = [f"{p}".replace(".json", ".graph.properties.json") for p in te_prop_paths]
+            prop_te_X = [load_json(p) for p in te_prop_paths]
+            prop_te_X = [prepare_graph_properties(d, omics="radiomics") for d in prop_te_X]
+            prop_te_X = pd.DataFrame(prop_te_X)
+            radiomics_te_X = pd.concat([radiomics_te_X, prop_te_X], axis=1)
+
         print("Selected testing radiomics:", radiomics_te_X.shape)
         print(radiomics_te_X.head())
 
@@ -1297,6 +1343,15 @@ def survival(
         for d in dict_list: pathomics_dict.update(d)
         pathomics_tr_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_tr_paths))]
         pathomics_tr_X = pd.DataFrame(pathomics_tr_X)
+
+        if use_graph_properties:
+            tr_prop_paths = [p[0]["pathomics"] for p in data_tr]
+            tr_prop_paths = [f"{p}".replace(".json", ".graph.properties.json") for p in tr_prop_paths]
+            prop_dict_list = [load_json(p) for p in tr_prop_paths]
+            prop_tr_X = [prepare_graph_properties(d, omics="pathomics") for d in prop_dict_list]
+            prop_tr_X = pd.DataFrame(prop_tr_X)
+            pathomics_tr_X = pd.concat([pathomics_tr_X, prop_tr_X], axis=1)
+
         print("Selected training pathomics:", pathomics_tr_X.shape)
         print(pathomics_tr_X.head())
 
@@ -1324,6 +1379,15 @@ def survival(
         for d in dict_list: pathomics_dict.update(d)
         pathomics_te_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_te_paths))]
         pathomics_te_X = pd.DataFrame(pathomics_te_X)
+
+        if use_graph_properties:
+            te_prop_paths = [p[0]["pathomics"] for p in data_te]
+            te_prop_paths = [f"{p}".replace(".json", ".graph.properties.json") for p in te_prop_paths]
+            prop_te_X = [load_json(p) for p in te_prop_paths]
+            prop_te_X = [prepare_graph_properties(d, omics="pathomics") for d in prop_te_X]
+            prop_te_X = pd.DataFrame(prop_te_X)
+            pathomics_te_X = pd.concat([pathomics_te_X, prop_te_X], axis=1)
+
         print("Selected testing pathomics:", pathomics_te_X.shape)
         print(pathomics_te_X.head())
 
@@ -2011,7 +2075,7 @@ def training(
         "dim_target": 1,
         "layers": [256, 128, 256],
         "dropout": 0.5,
-        "pool_ratio": 0.2,
+        "pool_ratio": 0.7,
         "conv": conv,
         "keys": omic_keys,
         "aggregation": aggregation
@@ -2020,7 +2084,7 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"{omics_name}_Bayes_Survival_Prediction_{conv}_{aggregation}"
     else:
-        model_dir = model_dir / f"{omics_name}_Survival_Prediction_{conv}_{aggregation}_1e-3"
+        model_dir = model_dir / f"{omics_name}_Survival_Prediction_{conv}_{aggregation}_1e-1"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": {"ABMIL": 1.0e-5, "SISIR": 0.0}[aggregation],
@@ -2160,6 +2224,8 @@ if __name__ == "__main__":
     ## argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument('--wsi_dir', default="/home/sg2162/rds/rds-ge-sow2-imaging-MRNJucHuBik/TCGA/WSI")
+    parser.add_argument('--img_dir', default="/home/s/sg2162/projects/TCIA_NIFTI/image")
+    parser.add_argument('--lab_dir', default="/home/s/sg2162/projects/TCIA_NIFTI/binary_label")
     parser.add_argument('--dataset', default="TCGA-RCC", type=str)
     parser.add_argument('--modality', default="CT", type=str)
     parser.add_argument('--save_pathomics_dir', default="/home/sg2162/rds/hpc-work/Experiments/pathomics", type=str)
@@ -2174,9 +2240,11 @@ if __name__ == "__main__":
     parser.add_argument('--radiomics_aggregated_mode', default="SISIR", choices=["None", "Mean", "ABMIL", "SISIR"], type=str, 
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
-    parser.add_argument('--pathomics_aggregated_mode', default="radiopathomics_SISIR", choices=["None", "Mean", "ABMIL", "SISIR", "radiopathomics_SISIR"], type=str, 
+    parser.add_argument('--pathomics_aggregated_mode', default="SISIR", choices=["None", "Mean", "ABMIL", "SISIR", "radiopathomics_SISIR"], type=str, 
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
+    parser.add_argument('--resolution', default=20, type=float)
+    parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
 
     ## get wsi path
@@ -2188,6 +2256,15 @@ if __name__ == "__main__":
         wsi_name = f"{path}".split("/")[-1].split(".")[0]
         if wsi_name not in excluded_wsi: wsi_paths.append(path)
     logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
+
+    ## get image and label paths
+    class_name = ["kidney_and_mass", "mass", "tumour"][2]
+    lab_dir = pathlib.Path(f"{args.lab_dir}/{args.dataset}/{args.modality}")
+    lab_paths = lab_dir.rglob(f"{class_name}.nii.gz")
+    lab_paths = [f"{p}" for p in lab_paths]
+    img_paths = [p.replace(args.lab_dir, args.img_dir) for p in lab_paths]
+    img_paths = [p.replace(f"_ensemble/{class_name}.nii.gz", ".nii.gz") for p in img_paths]
+    logging.info("The number of images on {}: {}".format(args.dataset, len(img_paths)))
     
     
     ## set save dir
@@ -2213,7 +2290,6 @@ if __name__ == "__main__":
     # stages = ["Stage I", "Stage II"]
 
     # use radiomics and pathomics
-    class_name = ["kidney_and_mass", "mass", "tumour"][2]
     radiomics_aggregation = True # false if load image-level features else true
     if radiomics_aggregation:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.json"))
@@ -2317,7 +2393,7 @@ if __name__ == "__main__":
     # survival analysis from the splits
     # survival(
     #     split_path=split_path,
-    #     used=["radiomics", "pathomics", "radiopathomics"][1],
+    #     used=["radiomics", "pathomics", "radiopathomics"][2],
     #     n_jobs=8,
     #     radiomics_aggregation=radiomics_aggregation,
     #     radiomics_aggregated_mode=args.radiomics_aggregated_mode,
@@ -2325,10 +2401,11 @@ if __name__ == "__main__":
     #     pathomics_aggregated_mode=args.pathomics_aggregated_mode,
     #     radiomics_keys=None, #radiomic_propereties,
     #     pathomics_keys=None, #["TUM", "NORM", "DEB"],
-    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
+    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][3],
     #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
-    #     feature_selection=False,
-    #     n_bootstraps=0
+    #     feature_selection=True,
+    #     n_bootstraps=0,
+    #     use_graph_properties=True
     # )
 
     # survival_plus(
@@ -2401,4 +2478,38 @@ if __name__ == "__main__":
     #     omic_keys=list(omics_modes.keys()),
     #     aggregation=["ABMIL", "SISIR"][1],
     #     save_features=True
+    # )
+
+    # visualize radiomics
+    # splits = joblib.load(split_path)
+    # graph_path = splits[0]["test"][8][0]
+    # radiomics_graph_name = pathlib.Path(graph_path["radiomics"]).stem
+    # print("Visualizing radiological graph:", radiomics_graph_name)
+    # img_path, lab_path = [
+    #     (p, v) for p, v in zip(img_paths, lab_paths) 
+    #     if pathlib.Path(p).stem == radiomics_graph_name.replace(f"_{class_name}", ".nii")
+    # ][0]
+    # pathomics_graph_name = pathlib.Path(graph_path["pathomics"]).stem
+    # print("Visualizing pathological graph:", pathomics_graph_name)
+    # wsi_path = [p for p in wsi_paths if pathlib.Path(p).stem == pathomics_graph_name][0]
+
+    # # visualize radiomic graph
+    # visualize_radiomic_graph(
+    #     img_path=img_path,
+    #     lab_path=lab_path,
+    #     save_graph_dir=save_radiomics_dir,
+    #     class_name=class_name
+    # )
+
+    # # visualize pathomic graph
+    # visualize_pathomic_graph(
+    #     wsi_path=wsi_path,
+    #     graph_path=graph_path["pathomics"],
+    #     magnify=True,
+    #     # label=label_path,
+    #     # show_map=True,
+    #     # save_name=f"conch",
+    #     # save_title="CONCH classification",
+    #     resolution=args.resolution,
+    #     units=args.units
     # )
