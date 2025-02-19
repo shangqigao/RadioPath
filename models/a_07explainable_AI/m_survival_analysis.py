@@ -1916,7 +1916,7 @@ def run_once(
         optim_kwargs=None,
         BayesGNN=False,
         data_types=["radiomics", "pathomics"],
-        sampling_rate=0.1
+        sampling_rate=1.0
 ):
     """running the inference or training loop once"""
     if loader_kwargs is None:
@@ -2161,7 +2161,7 @@ def inference(
             all_samples = split["test"]
 
         new_split = {"infer": [v[0] for v in all_samples]}
-        chkpts = pretrained_dir / f"0{split_idx}/epoch=019.weights.pth",
+        chkpts = pretrained_dir / f"0{split_idx}/epoch=019.weights.pth"
         print(str(chkpts))
         # Perform ensembling by averaging probabilities
         # across checkpoint predictions
@@ -2219,6 +2219,55 @@ def inference(
     print(f"Avg:", avg_stat)
 
     return avg_stat
+
+def test(
+    graph_path,
+    scaler_path,
+    num_node_features,
+    pretrained_model,
+    conv="MLP",
+    dropout=0,
+    omic_keys=["radiomics", "pathomics"],
+    aggregation="SISIR",
+):
+    """node classification 
+    """
+    node_scalers = [joblib.load(scaler_path[k]) for k in omic_keys] 
+    transform_dict = {k: s.transform for k, s in zip(omic_keys, node_scalers)}
+    
+    loader_kwargs = {
+        "num_workers": 1,
+        "batch_size": 1,
+    }
+    arch_kwargs = {
+        "dim_features": num_node_features,
+        "dim_target": 1,
+        "layers": [256, 128, 256],
+        "dropout": dropout,
+        "pool_ratio": 0.7,
+        "conv": conv,
+        "keys": omic_keys,
+        "aggregation": aggregation
+    }
+
+    # BayesGNN = True
+    new_split = {"infer": [graph_path]}
+    outputs = run_once(
+        new_split,
+        num_epochs=1,
+        save_dir=None,
+        on_gpu=True,
+        pretrained=pretrained_model,
+        arch_kwargs=arch_kwargs,
+        loader_kwargs=loader_kwargs,
+        preproc_func=transform_dict,
+        data_types=omic_keys,
+    )
+
+    pred_logit, _, attention = list(zip(*outputs))
+    hazard = np.exp(np.array(pred_logit).squeeze())
+    attention = np.array(attention).squeeze()
+    return hazard, attention
 
 if __name__ == "__main__":
     ## argument parser
@@ -2451,20 +2500,20 @@ if __name__ == "__main__":
     # omics_dims = {"pathomics": args.pathomics_dim}
     split_path = f"{save_model_dir}/survival_radiopathomics_{args.radiomics_mode}_{args.pathomics_mode}_splits.dat"
     scaler_paths = {k: f"{save_model_dir}/survival_{k}_{v}_scaler.dat" for k, v in omics_modes.items()}
-    training(
-        num_epochs=args.epochs,
-        split_path=split_path,
-        scaler_path=scaler_paths,
-        num_node_features=omics_dims,
-        model_dir=save_model_dir,
-        conv="GCNConv",
-        n_works=32,
-        batch_size=32,
-        BayesGNN=False,
-        omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "SISIR"][1],
-        sampling_rate=1
-    )
+    # training(
+    #     num_epochs=args.epochs,
+    #     split_path=split_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     model_dir=save_model_dir,
+    #     conv="GCNConv",
+    #     n_works=32,
+    #     batch_size=32,
+    #     BayesGNN=False,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "SISIR"][1],
+    #     sampling_rate=1
+    # )
 
     # inference
     # inference(
@@ -2513,3 +2562,31 @@ if __name__ == "__main__":
     #     resolution=args.resolution,
     #     units=args.units
     # )
+
+    # visualize attention on WSI
+    splits = joblib.load(split_path)
+    graph_path = splits[0]["test"][8][0]
+    graph_name = pathlib.Path(graph_path["pathomics"]).stem
+    print("Visualizing on wsi:", graph_name)
+    wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
+    label_path = f"{graph_path}".replace(".json", ".label.npy")
+    pretrained_model = save_model_dir / "pathomics_Survival_Prediction_GCNConv_SISIR/00/epoch=019.weights.pth"
+    hazard, attention = test(
+        graph_path=graph_path,
+        scaler_path=scaler_paths,
+        num_node_features=omics_dims,
+        pretrained_model=pretrained_model,
+        conv="GCNConv",
+        dropout=0,
+        omic_keys=list(omics_modes.keys()),
+        aggregation=["ABMIL", "SISIR"][1],
+    )
+    visualize_pathomic_graph(
+        wsi_path=wsi_path,
+        graph_path=graph_path["pathomics"],
+        label=attention,
+        show_map=True,
+        save_title="Attention map",
+        resolution=args.resolution,
+        units=args.units
+    )
