@@ -1241,7 +1241,7 @@ def survival(
     pd_risk = pd.DataFrame(risk_results)
     mean_risk = pd_risk["risk"].mean()
     dem = pd_risk["risk"] > mean_risk
-    ax = plt.subplot(111)
+    fig, ax = plt.subplots()
     kmf = KaplanMeierFitter()
     kmf.fit(pd_risk["duration"][dem], event_observed=pd_risk["event"][dem], label="High risk")
     kmf.plot_survival_function(ax=ax)
@@ -1257,7 +1257,9 @@ def survival(
     )
     test_results.print_summary()
     pvalue = test_results.p_value
-    ax.text(0, 0, f'p-value: {pvalue}', fontsize=12, color='orange')
+    print(f"p-value: {pvalue}")
+    ax.text(1, 2, f'p-value: {pvalue}', fontsize=12, color='black', ha='left', va='bottom')
+    ax.set_ylabel("Survival Probability")
     plt.savefig("a_07explainable_AI/CL_survival_curve.png")
     return
 
