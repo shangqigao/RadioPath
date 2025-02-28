@@ -539,6 +539,7 @@ def visualize_pathomic_graph(
         units="mpp",
         save_name="pathomics",
         save_title="pathomics graph",
+        save_wsi=False
     ):
     if pathlib.Path(wsi_path).suffix == ".jpg":
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
@@ -619,6 +620,11 @@ def visualize_pathomic_graph(
         POINT_SIZE = np.array(POINT_SIZE) / fx
 
     thumb = reader.slide_thumbnail(**PLOT_RESOLUTION)
+    if save_wsi:
+        wsi = reader.slide_thumbnail(resolution=10, units="power")
+        wsi_path = "a_05feature_aggregation/wsi.jpg"
+        imwrite(wsi_path, wsi)
+        
     thumb_bbox = None
     if magnify:
         tile_node_coordinates = node_coordinates * fx / 4
@@ -767,6 +773,7 @@ def visualize_radiomic_graph(
         img_path,
         lab_path, 
         save_graph_dir,
+        attention=None,
         class_name="tumour",
         save_name="radiomics",
         keys=["image", "label"],
@@ -787,15 +794,21 @@ def visualize_radiomic_graph(
     image, label = data[0]["image"].squeeze(), data[0]["label"].squeeze()
     label = get_largest_connected_component_mask(label)
     s, e = generate_spatial_bounding_box(np.expand_dims(label, 0))
+    padding = (4, 8, 8)
+    s = np.array(s) - np.array(padding)
+    e = np.array(e) + np.array(padding)
+    print(s, e)
 
     img_name = pathlib.Path(img_path).name.replace(".nii.gz", "")
     logging.info(f"loading graph of {img_name}")
     graph_path = pathlib.Path(f"{save_graph_dir}/{img_name}_{class_name}.json")
     graph_dict = load_json(graph_path)
+    cluster_points = graph_dict["cluster_points"]
     graph_dict = {k: v for k, v in graph_dict.items() if k != "cluster_points"}
     node_coordinates = graph_dict["coordinates"]
     print(f"The number of nodes: {len(node_coordinates)}")
     node_label = [label[int(c[0]), int(c[1]), int(c[2])] for c in node_coordinates]
+
     edges = graph_dict["edge_index"]
     c = (np.array(e) + np.array(s)) // 2
     def _condition(n, c): return any([n[0]<c[0], n[1]<c[1], n[2]<c[2]])
@@ -804,7 +817,25 @@ def visualize_radiomic_graph(
     kept_edges = [all([_condition(s, c), _condition(e, c)]) for s, e in edge_nodes]
     logging.info(f"loaded graph !!!")
     
-    voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
+    if attention is None:
+        voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
+    else:
+        def _assign_attention(points, value):
+            voi = np.zeros((e[0]-s[0], e[1]-s[1], e[2]-s[2]))
+            for p in points: 
+                p[0] = p[0] - s[0]
+                p[1] = p[1] - s[1]
+                p[2] = p[2] - s[2]
+                voi[p[0], p[1], p[2]] = value
+            return voi
+        # assign attention in parallel
+        voi_list = joblib.Parallel(n_jobs=n_jobs)(
+            joblib.delayed(_assign_attention)(points, value)
+            for points, value in zip(cluster_points, attention.tolist())
+        )
+        voi = sum(voi_list)
+        voi /= voi.max()
+
     X, Y, Z = np.mgrid[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
     fig = go.Figure(data=go.Volume(
         x=X.flatten(),

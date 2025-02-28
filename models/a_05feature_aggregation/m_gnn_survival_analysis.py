@@ -414,7 +414,7 @@ class SurvivalGraphArch(nn.Module):
             dim_target,
             layers=None,
             dropout=0.0,
-            pool_ratio=0.1,
+            pool_ratio={"radiomics": 0.7, "pathomics": 0.2},
             conv="GINConv",
             keys=["radiomics", "pathomics"],
             aggregation="SISIR",
@@ -498,7 +498,7 @@ class SurvivalGraphArch(nn.Module):
                         dim_features=input_emb_dim,
                         dim_hidden=hid_emb_dim,
                         dropout=0.0,
-                        pool_ratio=self.pool_ratio,
+                        pool_ratio=self.pool_ratio[k],
                         conv=self.conv_name
                     )
                     for k in self.keys
@@ -747,8 +747,8 @@ class SurvivalGraphArch(nn.Module):
         if wsi_labels is not None:
             return [wsi_outputs, wsi_labels]
         else:
-            return [wsi_outputs, features]
-            # return [wsi_outputs, features, attention]
+            # return [wsi_outputs, features]
+            return [wsi_outputs, features, attention]
 
 class SurvivalBayesGraphArch(nn.Module):
     """define Graph architecture for survival analysis
