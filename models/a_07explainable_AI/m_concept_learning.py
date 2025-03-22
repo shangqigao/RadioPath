@@ -66,9 +66,13 @@ def request_survival_data(project_ids, save_dir):
         "case_id",
         "submitter_id",
         "project.project_id",
+        "demographic.gender",
+        "demographic.race",
+        "demographic.age_at_index",
         "demographic.vital_status",
         "demographic.days_to_death",
         "diagnoses.days_to_last_follow_up",
+        "diagnoses.days_to_recurrence",
         "diagnoses.ajcc_pathologic_stage"
         ]
 
@@ -123,9 +127,13 @@ def request_survival_data(project_ids, save_dir):
             'submitter_id': case['submitter_id'],
             'project_id': case['project']['project_id'],
             'days_to_last_follow_up': case['diagnoses'][0].get('days_to_last_follow_up', None),
+            'days_to_recurrence': case['diagnoses'][0].get('days_to_recurrence', None),
             'ajcc_pathologic_stage': case['diagnoses'][0].get('ajcc_pathologic_stage', None),
             'days_to_death': case['demographic'].get('days_to_death', None),
-            'vital_status': case['demographic'].get('vital_status', None)
+            'vital_status': case['demographic'].get('vital_status', None),
+            'gender': case['demographic'].get('gender', None),
+            'race': case['demographic'].get('race', None),
+            'age': case['demographic'].get('age_at_index', None)
         })
 
     df = pd.DataFrame(survival_data)
@@ -300,13 +308,19 @@ def plot_coefficients(coefs, n_highlight):
     plt.subplots_adjust(left=0.2)
     plt.savefig("a_07explainable_AI/coefficients.jpg")
 
-def matched_survival_graph(save_clinical_dir, save_graph_paths, dataset="TCGA-RCC", stages=None):
+def matched_survival_graph(save_clinical_dir, save_graph_paths, dataset="TCGA-RCC", stages=None, survival="OS"):
     df = pd.read_csv(f"{save_clinical_dir}/{dataset}_survival_data.csv")
     
     # Prepare the survival data
-    df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
-    df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
-    df = df[df['duration'].notna()]
+    if survival == "OS":
+        df['event'] = df['vital_status'].apply(lambda x: True if x == 'Dead' else False)
+        df['duration'] = df['days_to_death'].fillna(df['days_to_last_follow_up'])
+        df = df[df['duration'].notna()]
+    elif survival == "DFS":
+        df.fillna(float('inf'), inplace=True)
+        df['event'] = df.apply(lambda row: 1 if row['days_to_recurrence'] < float('inf') or 
+                               row['days_to_death'] < float('inf') else 0, axis=1)
+        df['duration'] = df[['days_to_recurrence', 'days_to_death', 'days_to_last_follow_up']].min(axis=1)
     if stages is not None:
         df = df[df['ajcc_pathologic_stage'].isin(stages)]
     print("Survival data strcuture:", df.shape)
@@ -1891,6 +1905,7 @@ if __name__ == "__main__":
 
     # request survial data by GDC API
     # project_ids = ["TCGA-KIRP", "TCGA-KIRC", "TCGA-KICH"]
+    # project_ids = ["TCGA-KIRC"]
     # request_survival_data(project_ids, save_clinical_dir)
 
     # plot survival curve
@@ -1902,6 +1917,7 @@ if __name__ == "__main__":
     df_concepts, matched_i = matched_concepts_graph(save_clinical_dir, pathomics_paths)
     matched_pathomics_paths = [pathomics_paths[i] for i in matched_i]
     # df_concepts = df_concepts[["Tumor type: clear cell", "Tumor type: papillary", "Tumor type: chromophobe"]]
+    df_concepts = df_concepts.drop(columns=["Tumor type: papillary", "Tumor type: chromophobe"])
     concepts = df_concepts.to_numpy(dtype=np.float32)
     selected = np.array(concepts).sum(axis=0) > 50
     concepts = concepts[:, selected].tolist()
@@ -1918,7 +1934,8 @@ if __name__ == "__main__":
     valid_ratio = 0.8 * 0.1
     data_types = ["pathomics"]
     # stages=["Stage I", "Stage II"]
-    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    # df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
+    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths, dataset="TCGA-KIRC", survival="DFS")
     labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
     concepts = [concepts[i] for i in matched_i]
     print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
@@ -2112,85 +2129,85 @@ if __name__ == "__main__":
     # print("AP", {k: v for k, v in zip(sorted_names[-3:], sorted_ap[-3:])})
 
     # plot radar chart
-    import plotly.graph_objects as go
-    metric = "AUC"
-    save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models")
-    pretrained_dir = save_model_dir / "uni" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
-    json_path = pretrained_dir / f"concept_classification_results.json"
-    outputs = load_json(json_path)
-    acc = np.array(outputs[metric])
-    sorted_index = np.argsort(acc).tolist()
-    sorted_names = [concept_names[i] for i in sorted_index]
-    uni_sorted_acc = acc[sorted_index].tolist()
+    # import plotly.graph_objects as go
+    # metric = "AUC"
+    # save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models")
+    # pretrained_dir = save_model_dir / "uni" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # json_path = pretrained_dir / f"concept_classification_results.json"
+    # outputs = load_json(json_path)
+    # acc = np.array(outputs[metric])
+    # sorted_index = np.argsort(acc).tolist()
+    # sorted_names = [concept_names[i] for i in sorted_index]
+    # uni_sorted_acc = acc[sorted_index].tolist()
 
-    pretrained_dir = save_model_dir / "vit" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
-    json_path = pretrained_dir / f"concept_classification_results.json"
-    outputs = load_json(json_path)
-    acc = np.array(outputs[metric])
-    vit_sorted_acc = acc[sorted_index].tolist()
+    # pretrained_dir = save_model_dir / "vit" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # json_path = pretrained_dir / f"concept_classification_results.json"
+    # outputs = load_json(json_path)
+    # acc = np.array(outputs[metric])
+    # vit_sorted_acc = acc[sorted_index].tolist()
 
-    pretrained_dir = save_model_dir / "conch" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
-    json_path = pretrained_dir / f"concept_classification_results.json"
-    outputs = load_json(json_path)
-    acc = np.array(outputs[metric])
-    conch_sorted_acc = acc[sorted_index].tolist()
+    # pretrained_dir = save_model_dir / "conch" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # json_path = pretrained_dir / f"concept_classification_results.json"
+    # outputs = load_json(json_path)
+    # acc = np.array(outputs[metric])
+    # conch_sorted_acc = acc[sorted_index].tolist()
 
-    pretrained_dir = save_model_dir / "chief" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
-    json_path = pretrained_dir / f"concept_classification_results.json"
-    outputs = load_json(json_path)
-    acc = np.array(outputs[metric])
-    chief_sorted_acc = acc[sorted_index].tolist()
+    # pretrained_dir = save_model_dir / "chief" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # json_path = pretrained_dir / f"concept_classification_results.json"
+    # outputs = load_json(json_path)
+    # acc = np.array(outputs[metric])
+    # chief_sorted_acc = acc[sorted_index].tolist()
 
-    fig = go.Figure()
+    # fig = go.Figure()
 
-    fig.add_trace(go.Scatter(
-        x=sorted_names, 
-        y=vit_sorted_acc,
-        mode='lines+markers',
-        name='HIPT+CBM'
-    ))
-    fig.add_trace(go.Scatter(
-        x=sorted_names, 
-        y=uni_sorted_acc,
-        mode='lines+markers',
-        name='UNI+CBM'
-    ))
-    fig.add_trace(go.Scatter(
-        x=sorted_names, 
-        y=conch_sorted_acc,
-        mode='lines+markers',
-        name='CONCH+CBM'
-    ))
-    fig.add_trace(go.Scatter(
-        x=sorted_names, 
-        y=chief_sorted_acc,
-        mode='lines+markers',
-        name='CHIEF+CBM'
-    ))
+    # fig.add_trace(go.Scatter(
+    #     x=sorted_names, 
+    #     y=vit_sorted_acc,
+    #     mode='lines+markers',
+    #     name='HIPT+CBM'
+    # ))
+    # fig.add_trace(go.Scatter(
+    #     x=sorted_names, 
+    #     y=uni_sorted_acc,
+    #     mode='lines+markers',
+    #     name='UNI+CBM'
+    # ))
+    # fig.add_trace(go.Scatter(
+    #     x=sorted_names, 
+    #     y=conch_sorted_acc,
+    #     mode='lines+markers',
+    #     name='CONCH+CBM'
+    # ))
+    # fig.add_trace(go.Scatter(
+    #     x=sorted_names, 
+    #     y=chief_sorted_acc,
+    #     mode='lines+markers',
+    #     name='CHIEF+CBM'
+    # ))
 
-    fig.update_layout(
-            xaxis=dict(
-                title=dict(
-                    text='Kidney Pathological Concept'
-                ),
-                tickangle=30,
-                tickfont=dict(
-                size=12
-                ),
-            ),
-            yaxis=dict(
-                title=dict(
-                    text='AUC'
-                )
-            ),
-            margin=dict(t=10, l=50, r=30),
-            legend=dict(
-                x=0.1, y=0.9,
-                xanchor='left', yanchor='top'
-            )
-    )
+    # fig.update_layout(
+    #         xaxis=dict(
+    #             title=dict(
+    #                 text='Kidney Pathological Concept'
+    #             ),
+    #             tickangle=30,
+    #             tickfont=dict(
+    #             size=12
+    #             ),
+    #         ),
+    #         yaxis=dict(
+    #             title=dict(
+    #                 text='AUC'
+    #             )
+    #         ),
+    #         margin=dict(t=10, l=50, r=30),
+    #         legend=dict(
+    #             x=0.1, y=0.9,
+    #             xanchor='left', yanchor='top'
+    #         )
+    # )
 
-    fig.write_image(f"a_07explainable_AI/concept_learning_metric.png", width=1000, height=500, scale=2)
+    # fig.write_image(f"a_07explainable_AI/concept_learning_metric.png", width=1000, height=500, scale=2)
 
 
     
