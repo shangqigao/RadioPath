@@ -71,9 +71,10 @@ def request_survival_data(project_ids, save_dir):
         "demographic.age_at_index",
         "demographic.vital_status",
         "demographic.days_to_death",
-        "diagnoses.days_to_last_follow_up",
-        "diagnoses.days_to_recurrence",
-        "diagnoses.ajcc_pathologic_stage"
+        "follow_ups.days_to_follow_up",
+        "follow_ups.days_to_recurrence",
+        "diagnoses.ajcc_pathologic_stage",
+        "diagnoses.ajcc_pathologic_m"
         ]
 
     fields = ",".join(fields)
@@ -122,13 +123,21 @@ def request_survival_data(project_ids, save_dir):
     survival_data = []
 
     for case in cases:
+        print(case['follow_ups'])
+        follow_ups = case['follow_ups']
+        days_to_follow_up = [c.get('days_to_follow_up', None) for c in follow_ups]
+        days_to_last_follow_up = max([d for d in days_to_follow_up if d is not None])
+        days_to_recurrence = [c.get('days_to_recurrence', None) for c in follow_ups]
+        days_to_recurrence = [d for d in days_to_recurrence if d is not None]
+        days_to_recurrence = min(days_to_recurrence) if len(days_to_recurrence) > 0 else None
         survival_data.append({
             'case_id': case['case_id'],
             'submitter_id': case['submitter_id'],
             'project_id': case['project']['project_id'],
-            'days_to_last_follow_up': case['diagnoses'][0].get('days_to_last_follow_up', None),
-            'days_to_recurrence': case['diagnoses'][0].get('days_to_recurrence', None),
+            'days_to_last_follow_up': days_to_last_follow_up,
+            'days_to_recurrence': days_to_recurrence,
             'ajcc_pathologic_stage': case['diagnoses'][0].get('ajcc_pathologic_stage', None),
+            'ajcc_pathologic_m': case['diagnoses'][0].get('ajcc_pathologic_m', None),
             'days_to_death': case['demographic'].get('days_to_death', None),
             'vital_status': case['demographic'].get('vital_status', None),
             'gender': case['demographic'].get('gender', None),
@@ -308,7 +317,7 @@ def plot_coefficients(coefs, n_highlight):
     plt.subplots_adjust(left=0.2)
     plt.savefig("a_07explainable_AI/coefficients.jpg")
 
-def matched_survival_graph(save_clinical_dir, save_graph_paths, dataset="TCGA-RCC", stages=None, survival="OS"):
+def matched_survival_graph(save_clinical_dir, save_graph_paths, dataset="TCGA-RCC", stages=None, survival="OS", metastasis=None):
     df = pd.read_csv(f"{save_clinical_dir}/{dataset}_survival_data.csv")
     
     # Prepare the survival data
@@ -318,11 +327,14 @@ def matched_survival_graph(save_clinical_dir, save_graph_paths, dataset="TCGA-RC
         df = df[df['duration'].notna()]
     elif survival == "DFS":
         df.fillna(float('inf'), inplace=True)
-        df['event'] = df.apply(lambda row: 1 if row['days_to_recurrence'] < float('inf') or 
-                               row['days_to_death'] < float('inf') else 0, axis=1)
+        df['event'] = df.apply(lambda row: True if row['days_to_recurrence'] < float('inf') or 
+                               row['days_to_death'] < float('inf') else False, axis=1)
         df['duration'] = df[['days_to_recurrence', 'days_to_death', 'days_to_last_follow_up']].min(axis=1)
+        df = df[df['duration'].notna()]
     if stages is not None:
         df = df[df['ajcc_pathologic_stage'].isin(stages)]
+    if metastasis is not None:
+        df = df[df['ajcc_pathologic_m'].isin(metastasis)]
     print("Survival data strcuture:", df.shape)
 
     # filter graph properties 
@@ -1091,7 +1103,9 @@ def survival(
         for d in dict_list: pathomics_dict.update(d)
         pathomics_tr_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_tr_paths))]
         pathomics_tr_X = pd.DataFrame(pathomics_tr_X)
-        if pathomics_aggregated_mode == "CBM": pathomics_tr_X.columns = concepts
+        if pathomics_aggregated_mode == "CBM":
+            if len(pathomics_tr_X.columns) == len(concepts): 
+                pathomics_tr_X.columns = concepts
         print("Selected training pathomics:", pathomics_tr_X.shape)
         print(pathomics_tr_X.head())
 
@@ -1119,7 +1133,9 @@ def survival(
         for d in dict_list: pathomics_dict.update(d)
         pathomics_te_X = [pathomics_dict[f"{i}"] for i in range(len(pathomics_te_paths))]
         pathomics_te_X = pd.DataFrame(pathomics_te_X)
-        if pathomics_aggregated_mode == "CBM": pathomics_te_X.columns = concepts
+        if pathomics_aggregated_mode == "CBM": 
+            if len(pathomics_te_X.columns) == len(concepts):
+                pathomics_te_X.columns = concepts
         print("Selected testing pathomics:", pathomics_te_X.shape)
         print(pathomics_te_X.head())
 
@@ -1127,7 +1143,6 @@ def survival(
         if used == "pathomics":
             tr_X, te_X = pathomics_tr_X, pathomics_te_X
         elif used == "concepts":
-
             tr_X, te_X = concept_tr_X, concept_te_X
         else:
             raise NotImplementedError
@@ -1462,7 +1477,7 @@ def run_once(
                     concept_logit, concept_true = output[2], output[3]
                     concept_logit = np.array(concept_logit).squeeze()
                     concept_true = np.array(concept_true).squeeze().astype(np.int8)
-                    if "valid-A" in loader_name:
+                    if "infer-train" in loader_name:
                         for i in range(concept_logit.shape[1]):
                             scaler = PlattScaling(solver="liblinear")
                             logit = concept_logit[:, i:i+1]
@@ -1492,8 +1507,9 @@ def run_once(
                     logging_dict[f"{loader_name}-bottom10_acc"] = sum(acc_list[:10]) / 10
 
                     concept_sum = concept_true.sum(axis=0)
-                    concept_true = concept_true[:, concept_sum > 0]
-                    concept_prob = concept_prob[:, concept_sum > 0]
+                    selected = (concept_sum > 0) & (concept_sum < len(concept_true))
+                    concept_true = concept_true[:, selected]
+                    concept_prob = concept_prob[:, selected]
                     auroc_list = []
                     for i in range(concept_true.shape[1]):
                         auroc_list.append(auroc_scorer(concept_true[:, i], concept_prob[:, i]))
@@ -1600,7 +1616,7 @@ def training(
     if BayesGNN:
         model_dir = model_dir / f"{CL}_Bayes_Survival_Prediction_{conv}_{aggregation}_{HP}"
     else:
-        model_dir = model_dir / f"30{CL}_calibrated_Survival_Prediction_{conv}_{aggregation}_{HP}"
+        model_dir = model_dir / f"28{CL}_calibrated_DFS_Prediction_{conv}_{aggregation}_{HP}"
     optim_kwargs = {
         "lr": 3e-4,
         "weight_decay": 1.0e-5,  # 1.0e-4
@@ -1671,7 +1687,7 @@ def inference(
         "keys": omic_keys,
         "aggregation": aggregation
     }
-    pretrained_dir = pretrained_dir / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_{aggregation}_"
+    pretrained_dir = pretrained_dir / f"28CL_unweighted_calibrated_DFS_Prediction_GATConv_{aggregation}_"
     cum_stats = []
     cum_prob, cum_label, cum_true = [], [], []
     for split_idx, split in enumerate(splits):
@@ -1923,6 +1939,7 @@ if __name__ == "__main__":
     concepts = concepts[:, selected].tolist()
     concept_weight = len(concepts) / np.array(concepts).sum(axis=0)
     args.num_concepts = len(concept_weight)
+    print("The number of selected concepts:", args.num_concepts)
     concept_names = list(df_concepts.columns)
     concept_names = [concept_names[i] for i, v in enumerate(selected.tolist()) if v]
     # for name in concept_names: print(name)
@@ -1935,7 +1952,11 @@ if __name__ == "__main__":
     data_types = ["pathomics"]
     # stages=["Stage I", "Stage II"]
     # df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
-    df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths, dataset="TCGA-KIRC", survival="DFS")
+
+    # TCGA-KIRC, Disease Free Survival, M0 patients
+    df_clinical, matched_i = matched_survival_graph(
+        save_clinical_dir, matched_pathomics_paths, 
+        dataset="TCGA-KIRC", survival="DFS", metastasis=["M0"])
     labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
     concepts = [concepts[i] for i in matched_i]
     print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
@@ -1963,19 +1984,19 @@ if __name__ == "__main__":
     logging.info(f"Number of testing samples: {num_test}.")
 
     # survival analysis
-    # survival(
-    #     split_path=split_path,
-    #     concepts=concept_names,
-    #     pathomics_keys=None,
-    #     pathomics_aggregation=False,
-    #     pathomics_aggregated_mode=args.pathomics_aggregated_mode,
-    #     used=["concepts", "pathomics"][1], 
-    #     n_jobs=8,
-    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
-    #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0],
-    #     feature_selection=False,
-    #     n_bootstraps=0
-    # )
+    survival(
+        split_path=split_path,
+        concepts=concept_names,
+        pathomics_keys=None,
+        pathomics_aggregation=False,
+        pathomics_aggregated_mode=args.pathomics_aggregated_mode,
+        used=["concepts", "pathomics"][1], 
+        n_jobs=8,
+        model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
+        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0],
+        feature_selection=False,
+        n_bootstraps=0
+    )
 
     # compute mean and std on training data for normalization 
     # splits = joblib.load(split_path)
@@ -2016,7 +2037,7 @@ if __name__ == "__main__":
     #     dropout=0.5,
     #     BayesGNN=False,
     #     omic_keys=list(omics_modes.keys()),
-    #     aggregation=["ABMIL", "CBM"][0],
+    #     aggregation=["ABMIL", "CBM"][1],
     #     concept_weight=None,
     #     use_histopath=False
     # )
@@ -2132,7 +2153,7 @@ if __name__ == "__main__":
     # import plotly.graph_objects as go
     # metric = "AUC"
     # save_model_dir = pathlib.Path(f"{args.save_pathomics_dir}/{args.dataset}_{args.mode}_models")
-    # pretrained_dir = save_model_dir / "uni" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # pretrained_dir = save_model_dir / "uni" / f"28CL_unweighted_calibrated_DFS_Prediction_GATConv_CBM_"
     # json_path = pretrained_dir / f"concept_classification_results.json"
     # outputs = load_json(json_path)
     # acc = np.array(outputs[metric])
@@ -2140,19 +2161,19 @@ if __name__ == "__main__":
     # sorted_names = [concept_names[i] for i in sorted_index]
     # uni_sorted_acc = acc[sorted_index].tolist()
 
-    # pretrained_dir = save_model_dir / "vit" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # pretrained_dir = save_model_dir / "vit" / f"28CL_unweighted_calibrated_DFS_Prediction_GATConv_CBM_"
     # json_path = pretrained_dir / f"concept_classification_results.json"
     # outputs = load_json(json_path)
     # acc = np.array(outputs[metric])
     # vit_sorted_acc = acc[sorted_index].tolist()
 
-    # pretrained_dir = save_model_dir / "conch" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # pretrained_dir = save_model_dir / "conch" / f"28CL_unweighted_calibrated_DFS_Prediction_GATConv_CBM_"
     # json_path = pretrained_dir / f"concept_classification_results.json"
     # outputs = load_json(json_path)
     # acc = np.array(outputs[metric])
     # conch_sorted_acc = acc[sorted_index].tolist()
 
-    # pretrained_dir = save_model_dir / "chief" / f"30CL_unweighted_calibrated_Survival_Prediction_GATConv_CBM_"
+    # pretrained_dir = save_model_dir / "chief" / f"28CL_unweighted_calibrated_DFS_Prediction_GATConv_CBM_"
     # json_path = pretrained_dir / f"concept_classification_results.json"
     # outputs = load_json(json_path)
     # acc = np.array(outputs[metric])
