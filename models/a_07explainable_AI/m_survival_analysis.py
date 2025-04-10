@@ -2314,7 +2314,7 @@ if __name__ == "__main__":
     # survival analysis from the splits
     survival(
         split_path=split_path,
-        used=["radiomics", "pathomics", "radiopathomics"][0],
+        used=["radiomics", "pathomics", "radiopathomics"][1],
         n_jobs=8,
         radiomics_aggregation=radiomics_aggregation,
         radiomics_aggregated_mode=args.radiomics_aggregated_mode,
@@ -2322,7 +2322,7 @@ if __name__ == "__main__":
         pathomics_aggregated_mode=args.pathomics_aggregated_mode,
         radiomics_keys=None, #radiomic_propereties,
         pathomics_keys=None, #["TUM", "NORM", "DEB"],
-        model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
+        model=["RSF", "CoxPH", "Coxnet", "FastSVM"][0],
         scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
         feature_selection=False,
         n_bootstraps=0
