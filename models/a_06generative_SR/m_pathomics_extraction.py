@@ -35,8 +35,8 @@ if __name__ == "__main__":
     parser.add_argument('--mask_method', default='otsu', choices=["otsu", "morphological"], help='method of tissue masking')
     parser.add_argument('--mode', default="wsi", choices=["tile", "wsi"], type=str)
     parser.add_argument('--epochs', default=50, type=int)
-    parser.add_argument('--feature_mode', default="conch", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
-    parser.add_argument('--node_features', default=768, choices=[2048, 384, 1024, 35, 768], type=int)
+    parser.add_argument('--feature_mode', default="uni", choices=["cnn", "vit", "uni", "conch", "chief"], type=str)
+    parser.add_argument('--node_features', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
@@ -161,38 +161,38 @@ if __name__ == "__main__":
     # )
 
     # label graph node
-    wsi_cls_paths = [save_classification_dir / f"{p.stem}.SimilarityScores.npy" for p in wsi_paths]
-    wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
-    generate_node_label(
-        wsi_paths=wsi_paths,
-        wsi_annot_paths=wsi_cls_paths,
-        wsi_graph_paths=wsi_graph_paths,
-        save_lab_dir=save_feature_dir,
-        anno_type="classification",
-        n_jobs=8
-    )
+    # wsi_cls_paths = [save_classification_dir / f"{p.stem}.SimilarityScores.npy" for p in wsi_paths]
+    # wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
+    # generate_node_label(
+    #     wsi_paths=wsi_paths,
+    #     wsi_annot_paths=wsi_cls_paths,
+    #     wsi_graph_paths=wsi_graph_paths,
+    #     save_lab_dir=save_feature_dir,
+    #     anno_type="classification",
+    #     n_jobs=8
+    # )
 
     # measure graph properties
-    # wsi_graph_paths = [save_feature_dir / f"{p.stem}.MST.json" for p in wsi_paths]
-    # wsi_label_paths = [save_feature_dir / f"{p.stem}.label.npy" for p in wsi_paths]
-    # subgraph_dict = {
-    #     "ADI": [0, 4],
-    #     "BACK": [5, 8],
-    #     "DEB": [9, 11],
-    #     "LYM": [12, 16],
-    #     "MUC": [17, 20],
-    #     "MUS": [21, 25],
-    #     "NORM": [26, 26],
-    #     "STR": [27, 31],
-    #     "TUM": [32, 34]
-    # }
-    # measure_graph_properties(
-    #     graph_paths=wsi_graph_paths,
-    #     label_paths=wsi_label_paths,
-    #     save_dir=save_feature_dir,
-    #     subgraph_dict=subgraph_dict,
-    #     n_jobs=32
-    # )
+    wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
+    wsi_label_paths = [save_feature_dir / f"{p.stem}.label.npy" for p in wsi_paths]
+    subgraph_dict = {
+        "ADI": [0, 4],
+        "BACK": [5, 8],
+        "DEB": [9, 11],
+        "LYM": [12, 16],
+        "MUC": [17, 20],
+        "MUS": [21, 25],
+        "NORM": [26, 26],
+        "STR": [27, 31],
+        "TUM": [32, 34]
+    }
+    measure_graph_properties(
+        graph_paths=wsi_graph_paths,
+        label_paths=wsi_label_paths,
+        save_dir=save_feature_dir,
+        subgraph_dict=None,
+        n_jobs=32
+    )
 
     # visualize feature
     # graph_feature = True

@@ -370,9 +370,6 @@ def measure_subgraph_properties(
     label_path,
     subgraph_ids=None,    
     ):
-    label = np.load(label_path)
-    if label.ndim == 2:
-        label = np.argmax(label, axis=1)
     graph_dict = load_json(graph_path)
     
     if subgraph_ids is None:
@@ -381,6 +378,8 @@ def measure_subgraph_properties(
         edge_index = graph_dict["edge_index"]
     else:
         graph_dict = {k: torch.tensor(v) for k, v in graph_dict.items() if k != "cluster_points"}
+        label = np.load(label_path)
+        if label.ndim == 2: label = np.argmax(label, axis=1)
         label = torch.tensor(label).squeeze()
         subset = torch.logical_and(label >= subgraph_ids[0], label <= subgraph_ids[1])
         if subset.sum().item() < 2: return None
@@ -540,6 +539,7 @@ def visualize_pathomic_graph(
         units="mpp",
         save_name="pathomics",
         save_title="pathomics graph",
+        save_wsi=False
     ):
     if pathlib.Path(wsi_path).suffix == ".jpg":
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
@@ -549,8 +549,8 @@ def visualize_pathomic_graph(
     else:
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
         PLOT_RESOLUTION = {"resolution": resolution / 16, "units": units}
-        NODE_SIZE = 24
-        EDGE_SIZE = 4
+        NODE_SIZE = 12
+        EDGE_SIZE = 2
     graph_dict = load_json(graph_path)
     if show_map:
         cluster_points = graph_dict["cluster_points"]
@@ -620,6 +620,11 @@ def visualize_pathomic_graph(
         POINT_SIZE = np.array(POINT_SIZE) / fx
 
     thumb = reader.slide_thumbnail(**PLOT_RESOLUTION)
+    if save_wsi:
+        wsi = reader.slide_thumbnail(resolution=10, units="power")
+        wsi_path = "a_05feature_aggregation/wsi.jpg"
+        imwrite(wsi_path, wsi)
+        
     thumb_bbox = None
     if magnify:
         tile_node_coordinates = node_coordinates * fx / 4
@@ -768,6 +773,7 @@ def visualize_radiomic_graph(
         img_path,
         lab_path, 
         save_graph_dir,
+        attention=None,
         class_name="tumour",
         save_name="radiomics",
         keys=["image", "label"],
@@ -778,32 +784,58 @@ def visualize_radiomic_graph(
         remove_front_corner=True,
         n_jobs=32
     ):
-    from models.a_04feature_extraction.m_feature_extraction import image_transforms
+    from models.a_04feature_extraction.m_feature_extraction import SegVol_image_transforms
     from monai.transforms.utils import generate_spatial_bounding_box
     from monai.transforms.utils import get_largest_connected_component_mask
 
-    transform = image_transforms(keys, spacing, padding)
+    transform = SegVol_image_transforms(keys, spacing, padding)
     case_dict = [{"image": img_path, "label": lab_path}]
     data = transform(case_dict)
     image, label = data[0]["image"].squeeze(), data[0]["label"].squeeze()
     label = get_largest_connected_component_mask(label)
     s, e = generate_spatial_bounding_box(np.expand_dims(label, 0))
+    padding = (4, 8, 8)
+    s = np.array(s) - np.array(padding)
+    e = np.array(e) + np.array(padding)
+    print(s, e)
 
     img_name = pathlib.Path(img_path).name.replace(".nii.gz", "")
     logging.info(f"loading graph of {img_name}")
     graph_path = pathlib.Path(f"{save_graph_dir}/{img_name}_{class_name}.json")
     graph_dict = load_json(graph_path)
+    cluster_points = graph_dict["cluster_points"]
     graph_dict = {k: v for k, v in graph_dict.items() if k != "cluster_points"}
     node_coordinates = graph_dict["coordinates"]
+    print(f"The number of nodes: {len(node_coordinates)}")
     node_label = [label[int(c[0]), int(c[1]), int(c[2])] for c in node_coordinates]
+
     edges = graph_dict["edge_index"]
     c = (np.array(e) + np.array(s)) // 2
     def _condition(n, c): return any([n[0]<c[0], n[1]<c[1], n[2]<c[2]])
     kept_nodes = [_condition(n, c) for n in node_coordinates]
     edge_nodes = [(node_coordinates[p1], node_coordinates[p2]) for p1, p2 in edges]
     kept_edges = [all([_condition(s, c), _condition(e, c)]) for s, e in edge_nodes]
+    logging.info(f"loaded graph !!!")
     
-    voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
+    if attention is None:
+        voi = image[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
+    else:
+        def _assign_attention(points, value):
+            voi = np.zeros((e[0]-s[0], e[1]-s[1], e[2]-s[2]))
+            for p in points: 
+                p[0] = p[0] - s[0]
+                p[1] = p[1] - s[1]
+                p[2] = p[2] - s[2]
+                voi[p[0], p[1], p[2]] = value
+            return voi
+        # assign attention in parallel
+        voi_list = joblib.Parallel(n_jobs=n_jobs)(
+            joblib.delayed(_assign_attention)(points, value)
+            for points, value in zip(cluster_points, attention.tolist())
+        )
+        voi = sum(voi_list)
+        voi /= voi.max()
+
     X, Y, Z = np.mgrid[s[0]:e[0], s[1]:e[1], s[2]:e[2]]
     fig = go.Figure(data=go.Volume(
         x=X.flatten(),

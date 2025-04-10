@@ -414,7 +414,7 @@ class SurvivalGraphArch(nn.Module):
             dim_target,
             layers=None,
             dropout=0.0,
-            pool_ratio=0.1,
+            pool_ratio={"radiomics": 0.7, "pathomics": 0.2},
             conv="GINConv",
             keys=["radiomics", "pathomics"],
             aggregation="SISIR",
@@ -498,7 +498,7 @@ class SurvivalGraphArch(nn.Module):
                         dim_features=input_emb_dim,
                         dim_hidden=hid_emb_dim,
                         dropout=0.0,
-                        pool_ratio=self.pool_ratio,
+                        pool_ratio=self.pool_ratio[k],
                         conv=self.conv_name
                     )
                     for k in self.keys
@@ -508,7 +508,7 @@ class SurvivalGraphArch(nn.Module):
             input_emb_dim = hid_emb_dim
             self.gate_nn = Attn_Net_Gated(
                 L=input_emb_dim, 
-                D=64, 
+                D=256, 
                 dropout=0.25, 
                 n_classes=2
             )
@@ -592,6 +592,7 @@ class SurvivalGraphArch(nn.Module):
                 gate_dict.update({k: gate})
             VIparas = None
             KAparas = None
+            atte_dict = gate_dict
         elif self.aggregation == "SISIR":
             # encoder
             feature_list, edge_index_list, batch_list = [], [], []
@@ -667,11 +668,26 @@ class SurvivalGraphArch(nn.Module):
 
             # get references of downsampled graphs
             ds_enc_list = []
+            atte_dict = {}
             for i, k in enumerate(self.keys):
                 enc = enc_list[i]
+                msk_list = []
+                msk = torch.zeros(enc.shape[0], 1).to(enc.device)
+                msk_list.append(msk)
                 perm_list = perm_dict[k]
-                for p in perm_list: enc = enc[p]
+                for p in perm_list: 
+                    enc = enc[p]
+                    msk = torch.zeros(enc.shape[0], 1).to(enc.device)
+                    msk_list.append(msk)
                 ds_enc_list.append(enc)
+                for n, msk in enumerate(msk_list[::-1]):
+                    if n == 0:
+                        atte = gate_dict[k]
+                    else:
+                        perm = perm_list[-n]
+                        msk[perm] = atte
+                        atte = msk
+                atte_dict.update({k: atte})
             VIparas.append(ds_enc_list)
             VIparas.append(dec_list)
         feature_list = []
@@ -680,8 +696,10 @@ class SurvivalGraphArch(nn.Module):
                 self.Aggregation(feature_dict[k] * gate_dict[k], index=batch_dict[k])
             )
         feature = torch.concat(feature_list, dim=-1)
+        atte_list = [atte_dict[k] for k in self.keys]
+        attention = torch.concat(atte_list, dim=0)
         output = self.classifier(feature)
-        return output, VIparas, KAparas, feature
+        return output, VIparas, KAparas, feature, attention
     
     @staticmethod
     def train_batch(model, batch_data, on_gpu, loss, optimizer, kl=None):
@@ -690,7 +708,7 @@ class SurvivalGraphArch(nn.Module):
 
         model.train()
         optimizer.zero_grad()
-        wsi_outputs, VIparas, KAparas, _ = model(wsi_graphs)
+        wsi_outputs, VIparas, KAparas, _, _ = model(wsi_graphs)
         wsi_outputs = wsi_outputs.squeeze()
         if hasattr(wsi_graphs, "y_dict"):
             wsi_labels = wsi_graphs.y_dict[model.keys[0]].squeeze()
@@ -714,20 +732,23 @@ class SurvivalGraphArch(nn.Module):
 
         model.eval()
         with torch.inference_mode():
-            wsi_outputs, _, _, features = model(wsi_graphs)
+            wsi_outputs, _, _, features, attention = model(wsi_graphs)
         wsi_outputs = wsi_outputs.cpu().numpy()
         features = features.cpu().numpy()
+        attention = attention.cpu().numpy()
         wsi_labels = None
-        if hasattr(wsi_graphs, "y_dict"):
-            if wsi_graphs.y_dict is not None:
-                wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
-        elif hasattr(wsi_graphs, "y"):
+        try:
+            wsi_labels = wsi_graphs.y_dict[model.keys[0]].cpu().numpy()
+        except:
+            print("no y dict!")
+        if hasattr(wsi_graphs, "y"):
             if wsi_graphs.y is not None:
                 wsi_labels = wsi_graphs.y.cpu().numpy()
         if wsi_labels is not None:
             return [wsi_outputs, wsi_labels]
         else:
-            return [wsi_outputs, features]
+            # return [wsi_outputs, features]
+            return [wsi_outputs, features, attention]
 
 class SurvivalBayesGraphArch(nn.Module):
     """define Graph architecture for survival analysis
@@ -982,7 +1003,7 @@ class CFLoss(nn.Module):
         return mmd_loss + self.beta*mse_loss
     
 class CoxSurvLoss(nn.Module):
-    def __init__(self, tau_vi=1, tau_ka=1e-2):
+    def __init__(self, tau_vi=1e-1, tau_ka=1e-2):
         super(CoxSurvLoss, self).__init__()
         self.tau_vi = tau_vi
         self.tau_ka = tau_ka
