@@ -23,6 +23,7 @@ from tiatoolbox.utils.misc import save_as_json
 
 from lifelines import CoxPHFitter, KaplanMeierFitter
 from lifelines.statistics import logrank_test
+from lifelines.plotting import add_at_risk_counts
 from sksurv.nonparametric import kaplan_meier_estimator
 from sksurv.linear_model import CoxPHSurvivalAnalysis, CoxnetSurvivalAnalysis, IPCRidge
 from sksurv.ensemble import RandomSurvivalForest, GradientBoostingSurvivalAnalysis
@@ -123,21 +124,28 @@ def request_survival_data(project_ids, save_dir):
     survival_data = []
 
     for case in cases:
-        print(case['follow_ups'])
         follow_ups = case['follow_ups']
         days_to_follow_up = [c.get('days_to_follow_up', None) for c in follow_ups]
-        days_to_last_follow_up = max([d for d in days_to_follow_up if d is not None])
+        days_to_follow_up = [d for d in days_to_follow_up if d is not None]
+        print(f"Days to follow up: {days_to_follow_up}")
+        days_to_last_follow_up = max(days_to_follow_up) if len(days_to_follow_up) > 0 else None
         days_to_recurrence = [c.get('days_to_recurrence', None) for c in follow_ups]
         days_to_recurrence = [d for d in days_to_recurrence if d is not None]
         days_to_recurrence = min(days_to_recurrence) if len(days_to_recurrence) > 0 else None
+        if 'diagnoses' in list(case.keys()):
+            ajcc_pathologic_stage = case['diagnoses'][0].get('ajcc_pathologic_stage', None)
+            ajcc_pathologic_m = case['diagnoses'][0].get('ajcc_pathologic_m', None)
+        else:
+            ajcc_pathologic_stage = None
+            ajcc_pathologic_m = None
         survival_data.append({
             'case_id': case['case_id'],
             'submitter_id': case['submitter_id'],
             'project_id': case['project']['project_id'],
             'days_to_last_follow_up': days_to_last_follow_up,
             'days_to_recurrence': days_to_recurrence,
-            'ajcc_pathologic_stage': case['diagnoses'][0].get('ajcc_pathologic_stage', None),
-            'ajcc_pathologic_m': case['diagnoses'][0].get('ajcc_pathologic_m', None),
+            'ajcc_pathologic_stage': ajcc_pathologic_stage,
+            'ajcc_pathologic_m': ajcc_pathologic_m,
             'days_to_death': case['demographic'].get('days_to_death', None),
             'vital_status': case['demographic'].get('vital_status', None),
             'gender': case['demographic'].get('gender', None),
@@ -1055,7 +1063,7 @@ def survival(
         ):
     splits = joblib.load(split_path)
     predict_results = {}
-    risk_results = {"risk": [], "event": [], "duration": []}
+    risk_results = {"risk": [], "event": [], "duration": [], "gender": [], "race": []}
     for split_idx, split in enumerate(splits):
         print(f"Performing cross-validation on fold {split_idx}...")
         data_tr, data_va, data_te = split["train"], split["valid"], split["test"]
@@ -1067,6 +1075,13 @@ def survival(
         te_y = np.array([p[1]["label"] for p in data_te])
         te_y = pd.DataFrame({'event': te_y[:, 1].astype(bool), 'duration': te_y[:, 0]})
         te_y = te_y.to_records(index=False)
+
+        gender = [p[1]["demographic"][0] for p in data_tr]
+        race = [p[1]["demographic"][1] for p in data_tr]
+        tr_demographic = pd.DataFrame({'gender': gender, 'race': race})
+        gender = [p[1]["demographic"][0] for p in data_te]
+        race = [p[1]["demographic"][1] for p in data_te]
+        te_demographic = pd.DataFrame({'gender': gender, 'race': race})
         
         # prepare concepts
         concept_tr_X = np.array([p[1]["concept"] for p in data_tr])
@@ -1083,7 +1098,7 @@ def survival(
             pathomics_tr_paths = []
             for p in data_tr:
                 tr_path = pathlib.Path(p[0]["pathomics"])
-                tr_dir = tr_path.parents[0] / f"CL_{pathomics_aggregated_mode}" / f"0{split_idx}"
+                tr_dir = tr_path.parents[0] / f"CL_{pathomics_aggregated_mode}_MICCAI" / f"0{split_idx}"
                 tr_name = tr_path.name.replace(".json", ".npy")
                 pathomics_tr_paths.append(tr_dir / tr_name)
         else:
@@ -1113,7 +1128,7 @@ def survival(
             pathomics_te_paths = []
             for p in data_te:
                 te_path = pathlib.Path(p[0]["pathomics"])
-                te_dir = te_path.parents[0] / f"CL_{pathomics_aggregated_mode}" / f"0{split_idx}"
+                te_dir = te_path.parents[0] / f"CL_{pathomics_aggregated_mode}_MICCAI" / f"0{split_idx}"
                 te_name = te_path.name.replace(".json", ".npy")
                 pathomics_te_paths.append(te_dir / te_name)
         else:
@@ -1233,6 +1248,8 @@ def survival(
         risk_results["risk"] += risk_scores.tolist()
         risk_results["event"] += te_y["event"].astype(int).tolist()
         risk_results["duration"] += te_y["duration"].tolist()
+        risk_results["gender"] += te_demographic["gender"].tolist()
+        risk_results["race"] += te_demographic["race"].tolist()
         C_index = concordance_index_censored(te_y["event"], te_y["duration"], risk_scores)[0]
         C_index_ipcw = concordance_index_ipcw(tr_y, te_y, risk_scores)[0]
 
@@ -1268,18 +1285,23 @@ def survival(
     for k in scores_dict.keys():
         arr = np.array([v[k] for v in predict_results.values()])
         print(f"CV {k} mean+std", arr.mean(), arr.std())
-    # plot survival curve
+
+    # plot survival curve on risk
     pd_risk = pd.DataFrame(risk_results)
     mean_risk = pd_risk["risk"].mean()
     dem = pd_risk["risk"] > mean_risk
-    fig, ax = plt.subplots()
-    plt.rcParams.update({'font.size': 16})
-    kmf = KaplanMeierFitter()
-    kmf.fit(pd_risk["duration"][dem], event_observed=pd_risk["event"][dem], label="High risk")
-    kmf.plot_survival_function(ax=ax)
+    fig, ax = plt.subplots(figsize=(10, 8))
+    plt.rcParams.update({'font.size': 12})
+    kmf1 = KaplanMeierFitter()
+    kmf1.fit(pd_risk["duration"][dem], event_observed=pd_risk["event"][dem], label="High risk")
+    kmf1.plot_survival_function(ax=ax)
 
-    kmf.fit(pd_risk["duration"][~dem], event_observed=pd_risk["event"][~dem], label="Low risk")
-    kmf.plot_survival_function(ax=ax)
+    kmf2 = KaplanMeierFitter()
+    kmf2.fit(pd_risk["duration"][~dem], event_observed=pd_risk["event"][~dem], label="Low risk")
+    # kmf.plot_survival_function(ax=ax)
+    kmf2.plot_survival_function(ax=ax)
+    add_at_risk_counts(kmf1, kmf2, ax=ax)
+    plt.tight_layout()
 
     # logrank test
     test_results = logrank_test(
@@ -1289,11 +1311,131 @@ def survival(
     )
     test_results.print_summary()
     pvalue = test_results.p_value
-    print(f"p-value: {pvalue}")
+    print(f"Overall p-value: {pvalue}")
+    # ax.text(1, 2, f'p-value: {pvalue}', fontsize=12, color='black', ha='left', va='bottom')
+    ax.set_ylabel("Survival Probability")
+    # plt.subplots_adjust(left=0.2, bottom=0.2)
+    plt.savefig("a_07explainable_AI/CL_survival_curve.png")
+
+    # plot survival curve on race
+    pd_white = pd_risk[pd_risk['race'] == 'white']
+    print(f"Totally {len(pd_white)} white patients")
+    pd_black = pd_risk[pd_risk['race'] == 'black or african american']
+    print(f"Totally {len(pd_black)} black patients")
+    pd_asian = pd_risk[pd_risk['race'] == 'asian']
+    print(f"Totally {len(pd_asian)} asian patients")
+    dem_white = pd_white["risk"] > mean_risk
+    dem_black = pd_black["risk"] > mean_risk
+    fig, ax = plt.subplots(figsize=(10, 8))
+    plt.rcParams.update({'font.size': 12})
+    kmf1 = KaplanMeierFitter()
+    kmf1.fit(pd_white["duration"][dem_white], event_observed=pd_white["event"][dem_white], label="White High risk")
+    kmf1.plot_survival_function(ax=ax)
+
+    kmf2 = KaplanMeierFitter()
+    kmf2.fit(pd_black["duration"][dem_black], event_observed=pd_black["event"][dem_black], label="Black High risk")
+    kmf2.plot_survival_function(ax=ax)
+    add_at_risk_counts(kmf1, kmf2, ax=ax)
+    plt.tight_layout()
+
+    # logrank test
+    test_results = logrank_test(
+        pd_white["duration"][dem_white], pd_black["duration"][dem_black], 
+        pd_white["event"][dem_white], pd_black["event"][dem_black], 
+        alpha=.99
+    )
+    test_results.print_summary()
+    pvalue = test_results.p_value
+    print(f"Race high-risk p-value: {pvalue}")
     ax.text(1, 2, f'p-value: {pvalue}', fontsize=12, color='black', ha='left', va='bottom')
     ax.set_ylabel("Survival Probability")
-    plt.subplots_adjust(left=0.2, bottom=0.2)
-    plt.savefig("a_07explainable_AI/CL_survival_curve.png")
+    # plt.subplots_adjust(left=0.2, bottom=0.2)
+    plt.savefig("a_07explainable_AI/CL_survival_race_high_risk.png")
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    plt.rcParams.update({'font.size': 12})
+    kmf1 = KaplanMeierFitter()
+    kmf1.fit(pd_white["duration"][~dem_white], event_observed=pd_white["event"][~dem_white], label="White Low risk")
+    kmf1.plot_survival_function(ax=ax)
+
+    kmf2 = KaplanMeierFitter()
+    kmf2.fit(pd_black["duration"][~dem_black], event_observed=pd_black["event"][~dem_black], label="Black Low risk")
+    kmf2.plot_survival_function(ax=ax)
+    add_at_risk_counts(kmf1, kmf2, ax=ax)
+    plt.tight_layout()
+
+    # logrank test
+    test_results = logrank_test(
+        pd_white["duration"][~dem_white], pd_black["duration"][~dem_black], 
+        pd_white["event"][~dem_white], pd_black["event"][~dem_black], 
+        alpha=.99
+    )
+    test_results.print_summary()
+    pvalue = test_results.p_value
+    print(f"Race low-risk p-value: {pvalue}")
+    ax.text(1, 2, f'p-value: {pvalue}', fontsize=12, color='black', ha='left', va='bottom')
+    ax.set_ylabel("Survival Probability")
+    # plt.subplots_adjust(left=0.2, bottom=0.2)
+    plt.savefig("a_07explainable_AI/CL_survival_race_low_risk.png")
+
+    # plot survival curve on gender
+    pd_female = pd_risk[pd_risk['gender'] == 'female']
+    print(f"Totally {len(pd_female)} female patients")
+    pd_male = pd_risk[pd_risk['gender'] == 'male']
+    print(f"Totally {len(pd_male)} male patients")
+    dem_famale = pd_female["risk"] > mean_risk
+    dem_male = pd_male["risk"] > mean_risk
+    fig, ax = plt.subplots(figsize=(10, 8))
+    plt.rcParams.update({'font.size': 12})
+    kmf1 = KaplanMeierFitter()
+    kmf1.fit(pd_female["duration"][dem_famale], event_observed=pd_female["event"][dem_famale], label="Female High risk")
+    kmf1.plot_survival_function(ax=ax)
+
+    kmf2 = KaplanMeierFitter()
+    kmf2.fit(pd_male["duration"][dem_male], event_observed=pd_male["event"][dem_male], label="Male High risk")
+    kmf2.plot_survival_function(ax=ax)
+    add_at_risk_counts(kmf1, kmf2, ax=ax)
+    plt.tight_layout()
+
+    # logrank test
+    test_results = logrank_test(
+        pd_female["duration"][dem_famale], pd_male["duration"][dem_male], 
+        pd_female["event"][dem_famale], pd_male["event"][dem_male], 
+        alpha=.99
+    )
+    test_results.print_summary()
+    pvalue = test_results.p_value
+    print(f"Gender high-risk p-value: {pvalue}")
+    ax.text(1, 2, f'p-value: {pvalue}', fontsize=12, color='black', ha='left', va='bottom')
+    ax.set_ylabel("Survival Probability")
+    # plt.subplots_adjust(left=0.2, bottom=0.2)
+    plt.savefig("a_07explainable_AI/CL_survival_gender_high_risk.png")
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    plt.rcParams.update({'font.size': 12})
+    kmf1 = KaplanMeierFitter()
+    kmf1.fit(pd_female["duration"][~dem_famale], event_observed=pd_female["event"][~dem_famale], label="Female Low risk")
+    kmf1.plot_survival_function(ax=ax)
+
+    kmf2 = KaplanMeierFitter()
+    kmf2.fit(pd_male["duration"][~dem_male], event_observed=pd_male["event"][~dem_male], label="Male Low risk")
+    kmf2.plot_survival_function(ax=ax)
+    add_at_risk_counts(kmf1, kmf2, ax=ax)
+    plt.tight_layout()
+
+    # logrank test
+    test_results = logrank_test(
+        pd_female["duration"][~dem_famale], pd_male["duration"][~dem_male], 
+        pd_female["event"][~dem_famale], pd_male["event"][~dem_male], 
+        alpha=.99
+    )
+    test_results.print_summary()
+    pvalue = test_results.p_value
+    print(f"Gender low-risk p-value: {pvalue}")
+    ax.text(1, 2, f'p-value: {pvalue}', fontsize=12, color='black', ha='left', va='bottom')
+    ax.set_ylabel("Survival Probability")
+    # plt.subplots_adjust(left=0.2, bottom=0.2)
+    plt.savefig("a_07explainable_AI/CL_survival_gender_low_risk.png")
     return
 
 def generate_data_split(
@@ -1899,6 +2041,7 @@ if __name__ == "__main__":
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
     parser.add_argument('--num_concepts', default=39, type=int)
+    parser.add_argument('--survival', default="OS", choices=["OS", "DFS"], type=str)
     parser.add_argument('--resolution', default=20, type=float)
     parser.add_argument('--units', default="power", type=str)
     args = parser.parse_args()
@@ -1933,7 +2076,7 @@ if __name__ == "__main__":
     df_concepts, matched_i = matched_concepts_graph(save_clinical_dir, pathomics_paths)
     matched_pathomics_paths = [pathomics_paths[i] for i in matched_i]
     # df_concepts = df_concepts[["Tumor type: clear cell", "Tumor type: papillary", "Tumor type: chromophobe"]]
-    df_concepts = df_concepts.drop(columns=["Tumor type: papillary", "Tumor type: chromophobe"])
+    # df_concepts = df_concepts.drop(columns=["Tumor type: papillary", "Tumor type: chromophobe"])
     concepts = df_concepts.to_numpy(dtype=np.float32)
     selected = np.array(concepts).sum(axis=0) > 50
     concepts = concepts[:, selected].tolist()
@@ -1951,16 +2094,19 @@ if __name__ == "__main__":
     valid_ratio = 0.8 * 0.1
     data_types = ["pathomics"]
     # stages=["Stage I", "Stage II"]
-    # df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
 
+    if args.survival == "OS":
+        df_clinical, matched_i = matched_survival_graph(save_clinical_dir, matched_pathomics_paths)
     # TCGA-KIRC, Disease Free Survival, M0 patients
-    df_clinical, matched_i = matched_survival_graph(
-        save_clinical_dir, matched_pathomics_paths, 
-        dataset="TCGA-KIRC", survival="DFS", metastasis=["M0"])
+    elif args.survival == "DFS":
+        df_clinical, matched_i = matched_survival_graph(
+            save_clinical_dir, matched_pathomics_paths, 
+            dataset="TCGA-KIRC", survival="DFS", metastasis=["M0"])
     labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
     concepts = [concepts[i] for i in matched_i]
     print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
-    y = [{"concept": c, "label": l} for c, l in zip(concepts, labels)]
+    demographics = df_clinical[['gender', 'race']].values.tolist()
+    y = [{"concept": c, "label": l, "demographic": d} for c, l, d in zip(concepts, labels, demographics)]
     matched_pathomics_paths = [matched_pathomics_paths[i] for i in matched_i]
     kp = data_types[0]
     matched_graph_paths = [{kp : p} for p in matched_pathomics_paths]
