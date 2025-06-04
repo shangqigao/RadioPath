@@ -5,13 +5,13 @@
 #SBATCH -o log.%x.job_%j
 #SBATCH --nodes=1
 ##SBATCH --cpus-per-task=32
-##SBATCH --time=0-12:00:00
-#SBATCH --time=0-00:08:00
+#SBATCH --time=0-01:00:00
+##SBATCH --time=0-00:08:00
 ##SBATCH -p cclake
 ##SBATCH -p cclake-himem
 #SBATCH -p ampere
 #SBATCH --gres=gpu:1
-#SBATCH --qos=intr
+##SBATCH --qos=intr
 
 ## activate environment
 source ~/.bashrc
@@ -21,7 +21,7 @@ conda activate radiopath
 wsi_dir="/home/sg2162/rds/rds-ge-sow2-imaging-MRNJucHuBik/OV04/Digital_Pathology"
 dataset='ICM'
 prompts='./a_06generative_SR/NeOv_prompts.json'
-save_dir="/home/s/sg2162/projects/Experiments/pathomics"
+save_dir="/home/sg2162/rds/hpc-work/Experiments/pathomics"
 python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --dataset $dataset --prompts $prompts --save_dir $save_dir
 
 ## extract radiomics

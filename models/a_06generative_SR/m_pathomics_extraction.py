@@ -46,10 +46,11 @@ if __name__ == "__main__":
     if args.dataset == 'TCGA-RCC':
         excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1"]
         wsi_paths = select_wsi(wsi_dir, excluded_wsi)
-    if args.dataset == 'NeOv':
+    if args.dataset == 'ICM':
         included_wsi = ['853635', '853745', '853865', '853891', '854066', '854224', '854350', '854364', '854496', '854956']
         wsi_paths = pathlib.Path(wsi_dir).rglob('*.svs')
-        wsi_paths = [p for p in wsi_paths if p.stem in included_wsi]
+        wsi_paths = [p for p in wsi_paths if p.stem in included_wsi and p.stem != '854350']
+        wsi_paths += [pathlib.Path(f'{wsi_dir}/missed/854350.svs')]
     logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
     
     ## set save dir
@@ -61,29 +62,6 @@ if __name__ == "__main__":
     
 
     # generate wsi tissue mask batch by batch
-    if args.mode == "wsi":
-        bs = 32
-        nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-        for i in range(0, nb):
-            logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
-            start = i * bs
-            end = min(len(wsi_paths), (i + 1) * bs)
-            batch_wsi_paths = wsi_paths[start:end]
-            generate_wsi_tissue_mask(
-                wsi_paths=batch_wsi_paths,
-                save_msk_dir=save_msk_dir,
-                n_jobs=32,
-                method=args.mask_method,
-                resolution=1.25,
-                units="power"
-            )
-
-    # extract wsi feature patch by patch
-    # if args.mode == "wsi":
-    #     msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
-    #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
-    # else:
-    #     msk_paths = None
     # if args.mode == "wsi":
     #     bs = 32
     #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
@@ -92,16 +70,39 @@ if __name__ == "__main__":
     #         start = i * bs
     #         end = min(len(wsi_paths), (i + 1) * bs)
     #         batch_wsi_paths = wsi_paths[start:end]
-    #         batch_msk_paths = msk_paths[start:end]
-    #         extract_pathomic_feature(
+    #         generate_wsi_tissue_mask(
     #             wsi_paths=batch_wsi_paths,
-    #             wsi_msk_paths=batch_msk_paths,
-    #             feature_mode=args.feature_mode,
-    #             save_dir=save_feature_dir,
-    #             mode=args.mode,
-    #             resolution=args.resolution,
-    #             units=args.units
+    #             save_msk_dir=save_msk_dir,
+    #             n_jobs=1,
+    #             method=args.mask_method,
+    #             resolution=1.25,
+    #             units="power"
     #         )
+
+    # extract wsi feature patch by patch
+    if args.mode == "wsi":
+        msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
+        logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
+    else:
+        msk_paths = None
+    if args.mode == "wsi":
+        bs = 32
+        nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
+        for i in range(0, nb):
+            logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+            start = i * bs
+            end = min(len(wsi_paths), (i + 1) * bs)
+            batch_wsi_paths = wsi_paths[start:end]
+            batch_msk_paths = msk_paths[start:end]
+            extract_pathomic_feature(
+                wsi_paths=batch_wsi_paths,
+                wsi_msk_paths=batch_msk_paths,
+                feature_mode=args.feature_mode,
+                save_dir=save_feature_dir,
+                mode=args.mode,
+                resolution=args.resolution,
+                units=args.units
+            )
 
     # extract WSI-level features
     # label_dict = {
