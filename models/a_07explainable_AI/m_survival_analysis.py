@@ -1534,6 +1534,8 @@ def survival(
     pd_risk = pd.DataFrame(risk_results)
     mean_risk = pd_risk["risk"].mean()
     dem = pd_risk["risk"] > mean_risk
+    print("The number of high-risk subjects:", len(pd_risk["event"][dem]))
+    print("The number of low-risk subjects:", len(pd_risk["event"][~dem]))
     plt.rcParams.update({'font.size': 16})
     fig, ax = plt.subplots()
     kmf = KaplanMeierFitter()
@@ -2024,10 +2026,10 @@ if __name__ == "__main__":
     parser.add_argument('--pathomics_dim', default=1024, choices=[2048, 384, 1024, 35, 768], type=int)
     parser.add_argument('--radiomics_mode', default="SegVol", choices=["pyradiomics", "SegVol", "M3D-CLIP"], type=str)
     parser.add_argument('--radiomics_dim', default=768, choices=[107, 768, 768], type=int)
-    parser.add_argument('--radiomics_aggregated_mode', default="SISIR", choices=["None", "Mean", "ABMIL", "SISIR"], type=str, 
+    parser.add_argument('--radiomics_aggregated_mode', default="Mean", choices=["None", "Mean", "ABMIL", "SISIR"], type=str, 
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
-    parser.add_argument('--pathomics_aggregated_mode', default="SISIR", choices=["None", "Mean", "ABMIL", "SISIR", "radiopathomics_SISIR"], type=str, 
+    parser.add_argument('--pathomics_aggregated_mode', default="Mean", choices=["None", "Mean", "ABMIL", "SISIR", "radiopathomics_SISIR"], type=str, 
                         help="if graph has been aggregated, specify which mode, defaut is none"
                         )
     parser.add_argument('--resolution', default=20, type=float)
@@ -2069,7 +2071,8 @@ if __name__ == "__main__":
 
     # survival analysis
     pathomics_aggregation = True # false if load wsi-level features else true
-    pathomics_paths = [save_pathomics_dir / f"{p.stem}.json" for p in wsi_paths]
+    pathomics_paths = sorted(save_pathomics_dir.glob('*.json'))
+    pathomics_paths = [p for p in pathomics_paths if len(p.name.split('.')) == 3]
 
     # only use pathomics
     # matched_pathomics_paths = pathomics_paths
@@ -2077,7 +2080,7 @@ if __name__ == "__main__":
     # stages = ["Stage I", "Stage II"]
 
     # use radiomics and pathomics
-    radiomics_aggregation = True # false if load image-level features else true
+    radiomics_aggregation = False # false if load image-level features else true
     if radiomics_aggregation:
         radiomics_paths = list(save_radiomics_dir.glob(f"*{class_name}.json"))
     else:
@@ -2178,22 +2181,22 @@ if __name__ == "__main__":
     logging.info(f"Number of testing samples: {num_test}.")
 
     # survival analysis from the splits
-    # survival(
-    #     split_path=split_path,
-    #     used=["radiomics", "pathomics", "radiopathomics"][2],
-    #     n_jobs=8,
-    #     radiomics_aggregation=radiomics_aggregation,
-    #     radiomics_aggregated_mode=args.radiomics_aggregated_mode,
-    #     pathomics_aggregation=pathomics_aggregation,
-    #     pathomics_aggregated_mode=args.pathomics_aggregated_mode,
-    #     radiomics_keys=None, #radiomic_propereties,
-    #     pathomics_keys=None, #["TUM", "NORM", "DEB"],
-    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
-    #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
-    #     feature_selection=True,
-    #     n_bootstraps=0,
-    #     use_graph_properties=False
-    # )
+    survival(
+        split_path=split_path,
+        used=["radiomics", "pathomics", "radiopathomics"][2],
+        n_jobs=8,
+        radiomics_aggregation=radiomics_aggregation,
+        radiomics_aggregated_mode=args.radiomics_aggregated_mode,
+        pathomics_aggregation=pathomics_aggregation,
+        pathomics_aggregated_mode=args.pathomics_aggregated_mode,
+        radiomics_keys=None, #radiomic_propereties,
+        pathomics_keys=None, #["TUM", "NORM", "DEB"],
+        model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
+        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][2],
+        feature_selection=True,
+        n_bootstraps=0,
+        use_graph_properties=False
+    )
 
     # compute mean and std on training data for normalization 
     # splits = joblib.load(split_path)
@@ -2295,33 +2298,33 @@ if __name__ == "__main__":
 
 
     # visualize attention on WSI
-    splits = joblib.load(split_path)
-    graph_path = splits[0]["test"][15][0] # 
-    graph_name = pathlib.Path(graph_path["pathomics"]).stem
-    print("Visualizing on wsi:", graph_name)
-    wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
-    label_path = f"{graph_path}".replace(".json", ".label.npy")
-    pretrained_model = save_model_dir / "pathomics_Survival_Prediction_GCNConv_SISIR/00/epoch=019.weights.pth"
-    hazard, attention = test(
-        graph_path=graph_path,
-        scaler_path=scaler_paths,
-        num_node_features=omics_dims,
-        pretrained_model=pretrained_model,
-        conv="GCNConv",
-        dropout=0,
-        pool_ratio=omics_pool_ratio,
-        omic_keys=list(omics_modes.keys()),
-        aggregation=["ABMIL", "SISIR"][1],
-    )
-    visualize_pathomic_graph(
-        wsi_path=wsi_path,
-        graph_path=graph_path["pathomics"],
-        label=attention,
-        show_map=True,
-        save_title="Normalized Inverse Precision",
-        resolution=args.resolution,
-        units=args.units
-    )
+    # splits = joblib.load(split_path)
+    # graph_path = splits[0]["test"][15][0] # 
+    # graph_name = pathlib.Path(graph_path["pathomics"]).stem
+    # print("Visualizing on wsi:", graph_name)
+    # wsi_path = [p for p in wsi_paths if p.stem == graph_name][0]
+    # label_path = f"{graph_path}".replace(".json", ".label.npy")
+    # pretrained_model = save_model_dir / "pathomics_Survival_Prediction_GCNConv_SISIR/00/epoch=019.weights.pth"
+    # hazard, attention = test(
+    #     graph_path=graph_path,
+    #     scaler_path=scaler_paths,
+    #     num_node_features=omics_dims,
+    #     pretrained_model=pretrained_model,
+    #     conv="GCNConv",
+    #     dropout=0,
+    #     pool_ratio=omics_pool_ratio,
+    #     omic_keys=list(omics_modes.keys()),
+    #     aggregation=["ABMIL", "SISIR"][1],
+    # )
+    # visualize_pathomic_graph(
+    #     wsi_path=wsi_path,
+    #     graph_path=graph_path["pathomics"],
+    #     label=attention,
+    #     show_map=True,
+    #     save_title="Normalized Inverse Precision",
+    #     resolution=args.resolution,
+    #     units=args.units
+    # )
 
     # visualize attention on CT
     # splits = joblib.load(split_path)
