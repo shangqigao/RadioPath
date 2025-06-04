@@ -196,9 +196,9 @@ def extract_cnn_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
     model.postproc_func = _postproc_func
     
     extractor = DeepFeatureExtractor(
-        batch_size=128, 
+        batch_size=32, 
         model=model, 
-        num_loader_workers=32, 
+        num_loader_workers=8, 
     )
 
     # create temporary dir
@@ -298,9 +298,9 @@ def extract_vit_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
     model.postproc_func = _postproc_func
 
     extractor = DeepFeatureExtractor(
-        batch_size=128, 
+        batch_size=32, 
         model=model, 
-        num_loader_workers=32, 
+        num_loader_workers=8, 
     )
 
     # create temporary dir
@@ -383,9 +383,9 @@ def extract_uni_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resoluti
     model.postproc_func = _postproc_func
 
     extractor = DeepFeatureExtractor(
-        batch_size=128, 
+        batch_size=32, 
         model=model, 
-        num_loader_workers=32, 
+        num_loader_workers=8, 
     )
 
     # create temporary dir
@@ -461,9 +461,9 @@ def extract_conch_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolu
     model.postproc_func = _postproc_func
 
     extractor = DeepFeatureExtractor(
-        batch_size=128, 
+        batch_size=32, 
         model=model, 
-        num_loader_workers=32, 
+        num_loader_workers=8, 
     )
 
     # create temporary dir
@@ -547,9 +547,9 @@ def extract_chief_pathomic_features(wsi_paths, msk_paths, save_dir, mode, resolu
     model.postproc_func = _postproc_func
 
     extractor = DeepFeatureExtractor(
-        batch_size=128, 
+        batch_size=32, 
         model=model, 
-        num_loader_workers=32, 
+        num_loader_workers=8, 
     )
 
     # create temporary dir
