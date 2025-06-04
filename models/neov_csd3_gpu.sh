@@ -16,14 +16,11 @@ source ~/.bashrc
 conda activate radiopath
 
 ## extract pathomics
-# wsi_dir="/home/shared/su123/TCGA_ORI"
-# save_dir="/home/s/sg2162/projects/Experiments/pathomics"
-# python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --save_dir $save_dir
-
-## pathomic diffusion prior
-# wsi_dir="/home/shared/su123/TCGA_ORI"
-# save_pathomics_dir="/home/s/sg2162/projects/Experiments/pathomics"
-# python a_06generative_SR/m_pathomics_representation.py --wsi_dir $wsi_dir --save_pathomics_dir $save_pathomics_dir
+wsi_dir="/home/sg2162/rds/rds-ge-sow2-imaging-MRNJucHuBik/OV04/Digital_Pathology"
+dataset='ICM'
+prompts='./a_06generative_SR/NeOv_prompts.json'
+save_dir="/home/s/sg2162/projects/Experiments/pathomics"
+python a_06generative_SR/m_pathomics_extraction.py --wsi_dir $wsi_dir --dataset $dataset --prompts $prompts --save_dir $save_dir
 
 ## extract radiomics
 # img_dir="/home/sg2162/rds/hpc-work/TCIA_NIFTI/image"
