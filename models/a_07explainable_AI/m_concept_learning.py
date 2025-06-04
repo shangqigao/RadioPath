@@ -123,7 +123,6 @@ def request_survival_data(project_ids, save_dir):
     survival_data = []
 
     for case in cases:
-        print(case['follow_ups'])
         follow_ups = case['follow_ups']
         days_to_follow_up = [c.get('days_to_follow_up', None) for c in follow_ups]
         days_to_last_follow_up = max([d for d in days_to_follow_up if d is not None])
