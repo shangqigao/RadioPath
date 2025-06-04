@@ -4,8 +4,9 @@ sys.path.append('../')
 import pathlib
 import logging
 import torch
-import argparse
+torch.multiprocessing.set_sharing_strategy("file_system")
 
+import argparse
 from common.m_utils import select_wsi
 
 from models.a_02tissue_masking.m_tissue_masking import generate_wsi_tissue_mask
@@ -19,8 +20,6 @@ from models.a_05feature_aggregation.m_graph_construction import extract_minimum_
 from models.a_05feature_aggregation.m_graph_construction import measure_graph_properties
 from models.a_05feature_aggregation.m_graph_construction import plot_graph_properties
 from models.a_06generative_SR.m_zeroshot_classification import pathology_zeroshot_classification, load_prompts
-
-torch.multiprocessing.set_sharing_strategy("file_system")
 
 import warnings
 warnings.filterwarnings('ignore')
