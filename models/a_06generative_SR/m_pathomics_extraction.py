@@ -45,6 +45,9 @@ if __name__ == "__main__":
     wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
     excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1"]
     wsi_paths = select_wsi(wsi_dir, excluded_wsi)
+    if args.dataset == 'NeOv':
+        included_wsi = ['853635', '853745', '853865', '853891', '854066', '854224', '854350', '854364', '854496', '854956']
+        wsi_paths = [p for p in wsi_paths if pathlib.Path(p).stem in included_wsi]
     logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
     
     ## set save dir
@@ -56,22 +59,22 @@ if __name__ == "__main__":
     
 
     # generate wsi tissue mask batch by batch
-    # if args.mode == "wsi":
-    #     bs = 32
-    #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-    #     for i in range(0, nb):
-    #         logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
-    #         start = i * bs
-    #         end = min(len(wsi_paths), (i + 1) * bs)
-    #         batch_wsi_paths = wsi_paths[start:end]
-    #         generate_wsi_tissue_mask(
-    #             wsi_paths=batch_wsi_paths,
-    #             save_msk_dir=save_msk_dir,
-    #             n_jobs=32,
-    #             method=args.mask_method,
-    #             resolution=1.25,
-    #             units="power"
-    #         )
+    if args.mode == "wsi":
+        bs = 32
+        nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
+        for i in range(0, nb):
+            logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+            start = i * bs
+            end = min(len(wsi_paths), (i + 1) * bs)
+            batch_wsi_paths = wsi_paths[start:end]
+            generate_wsi_tissue_mask(
+                wsi_paths=batch_wsi_paths,
+                save_msk_dir=save_msk_dir,
+                n_jobs=32,
+                method=args.mask_method,
+                resolution=1.25,
+                units="power"
+            )
 
     # extract wsi feature patch by patch
     # if args.mode == "wsi":
@@ -117,7 +120,7 @@ if __name__ == "__main__":
     #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
     # else:
     #     msk_paths = None
-    # prompts = load_prompts(args.prompts)
+    # prompts = load_prompts(args.prompts, index=17)
     # if args.mode == "wsi":
     #     bs = 32
     #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
