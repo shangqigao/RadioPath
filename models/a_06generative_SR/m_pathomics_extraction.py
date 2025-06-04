@@ -43,11 +43,13 @@ if __name__ == "__main__":
 
     ## get wsi path
     wsi_dir = pathlib.Path(args.wsi_dir) / args.dataset
-    excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1"]
-    wsi_paths = select_wsi(wsi_dir, excluded_wsi)
+    if args.dataset == 'TCGA-RCC':
+        excluded_wsi = ["TCGA-5P-A9KC-01Z-00-DX1", "TCGA-5P-A9KA-01Z-00-DX1"]
+        wsi_paths = select_wsi(wsi_dir, excluded_wsi)
     if args.dataset == 'NeOv':
         included_wsi = ['853635', '853745', '853865', '853891', '854066', '854224', '854350', '854364', '854496', '854956']
-        wsi_paths = [p for p in wsi_paths if pathlib.Path(p).stem in included_wsi]
+        wsi_paths = pathlib.Path(wsi_dir).rglob('*.svs')
+        wsi_paths = [p for p in wsi_paths if p.stem in included_wsi]
     logging.info("The number of selected WSIs on {}: {}".format(args.dataset, len(wsi_paths)))
     
     ## set save dir
