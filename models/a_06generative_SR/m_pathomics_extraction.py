@@ -176,26 +176,26 @@ if __name__ == "__main__":
     # )
 
     # measure graph properties
-    wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
-    wsi_label_paths = [save_feature_dir / f"{p.stem}.label.npy" for p in wsi_paths]
-    subgraph_dict = {
-        "ADI": [0, 4],
-        "BACK": [5, 8],
-        "DEB": [9, 11],
-        "LYM": [12, 16],
-        "MUC": [17, 20],
-        "MUS": [21, 25],
-        "NORM": [26, 26],
-        "STR": [27, 31],
-        "TUM": [32, 34]
-    }
-    measure_graph_properties(
-        graph_paths=wsi_graph_paths,
-        label_paths=wsi_label_paths,
-        save_dir=save_feature_dir,
-        subgraph_dict=None,
-        n_jobs=32
-    )
+    # wsi_graph_paths = [save_feature_dir / f"{p.stem}.json" for p in wsi_paths]
+    # wsi_label_paths = [save_feature_dir / f"{p.stem}.label.npy" for p in wsi_paths]
+    # subgraph_dict = {
+    #     "ADI": [0, 4],
+    #     "BACK": [5, 8],
+    #     "DEB": [9, 11],
+    #     "LYM": [12, 16],
+    #     "MUC": [17, 20],
+    #     "MUS": [21, 25],
+    #     "NORM": [26, 26],
+    #     "STR": [27, 31],
+    #     "TUM": [32, 34]
+    # }
+    # measure_graph_properties(
+    #     graph_paths=wsi_graph_paths,
+    #     label_paths=wsi_label_paths,
+    #     save_dir=save_feature_dir,
+    #     subgraph_dict=None,
+    #     n_jobs=32
+    # )
 
     # visualize feature
     # graph_feature = True
