@@ -580,11 +580,11 @@ def visualize_pathomic_graph(
 
     if subgraph_id is not None:
         act_tensor = torch.tensor(node_activations).squeeze()
-        subset = torch.logical_and(act_tensor >= subgraph_id[0], act_tensor <= subgraph_id[1])
+        subset = torch.logical_and(act_tensor >= subgraph_id[0], act_tensor < subgraph_id[1])
         edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=True)
         subset = subset.numpy().tolist()
         node_activations = node_activations[subset]
-        if show_map: cluster_points = cluster_points[subset]
+        if show_map: cluster_points = [c for c, s in zip(cluster_points, subset) if s]
         graph_dict = {k: v[subset] for k, v in graph_dict.items() if k != "edge_index"}
         graph_dict["edge_index"] = edge_index
 

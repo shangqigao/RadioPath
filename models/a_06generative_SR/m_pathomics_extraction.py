@@ -79,29 +79,29 @@ if __name__ == "__main__":
     #         )
 
     # extract wsi feature patch by patch
-    if args.mode == "wsi":
-        msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
-        logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
-    else:
-        msk_paths = None
-    if args.mode == "wsi":
-        bs = 32
-        nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-        for i in range(0, nb):
-            logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
-            start = i * bs
-            end = min(len(wsi_paths), (i + 1) * bs)
-            batch_wsi_paths = wsi_paths[start:end]
-            batch_msk_paths = msk_paths[start:end]
-            extract_pathomic_feature(
-                wsi_paths=batch_wsi_paths,
-                wsi_msk_paths=batch_msk_paths,
-                feature_mode=args.feature_mode,
-                save_dir=save_feature_dir,
-                mode=args.mode,
-                resolution=args.resolution,
-                units=args.units
-            )
+    # if args.mode == "wsi":
+    #     msk_paths = [save_msk_dir / f"{p.stem}.jpg" for p in wsi_paths]
+    #     logging.info("The number of extracted tissue masks on {}: {}".format(args.dataset, len(msk_paths)))
+    # else:
+    #     msk_paths = None
+    # if args.mode == "wsi":
+    #     bs = 32
+    #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
+    #     for i in range(0, nb):
+    #         logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
+    #         start = i * bs
+    #         end = min(len(wsi_paths), (i + 1) * bs)
+    #         batch_wsi_paths = wsi_paths[start:end]
+    #         batch_msk_paths = msk_paths[start:end]
+    #         extract_pathomic_feature(
+    #             wsi_paths=batch_wsi_paths,
+    #             wsi_msk_paths=batch_msk_paths,
+    #             feature_mode=args.feature_mode,
+    #             save_dir=save_feature_dir,
+    #             mode=args.mode,
+    #             resolution=args.resolution,
+    #             units=args.units
+    #         )
 
     # extract WSI-level features
     # label_dict = {
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     # if args.mode == "wsi":
     #     bs = 32
     #     nb = len(wsi_paths) // bs if len(wsi_paths) % bs == 0 else len(wsi_paths) // bs + 1
-    #     for i in range(29, nb):
+    #     for i in range(0, nb):
     #         logging.info(f"Processing WSIs of batch [{i+1}/{nb}] ...")
     #         start = i * bs
     #         end = min(len(wsi_paths), (i + 1) * bs)
@@ -252,24 +252,33 @@ if __name__ == "__main__":
 
 
     ## visualize graph on wsi
-    # wsi_path = wsi_paths[2]
-    # wsi_name = pathlib.Path(wsi_path).stem 
-    # logging.info(f"Visualizing graph of {wsi_name}...")
-    # graph_path = save_feature_dir / f"{wsi_name}.MST.json"
-    # label_path = save_feature_dir / f"{wsi_name}.label.npy"
-    # subgraph_id = None #[32, 34]
-    # if subgraph_id is not None: 
-    #     prompts = load_prompts(args.prompts, index=0)
-    #     class_start = prompts[subgraph_id[0]]
-    #     class_end = prompts[subgraph_id[1]]
-    #     logging.info(f"Visualizing subgraph from {class_start} to {class_end}...")
-    # visualize_graph(
-    #     wsi_path=wsi_path,
-    #     graph_path=graph_path,
-    #     label=label_path,
-    #     subgraph_id=subgraph_id,
-    #     show_map=False,
-    #     magnify=True,
-    #     resolution=args.resolution,
-    #     units=args.units
-    # )
+    wsi_path = wsi_paths[0]
+    wsi_name = pathlib.Path(wsi_path).stem 
+    logging.info(f"Visualizing graph of {wsi_name}...")
+    graph_path = save_feature_dir / f"{wsi_name}.json"
+    label_path = save_feature_dir / f"{wsi_name}.label.npy"
+    subgraph = None #[32, 34]
+    if subgraph is not None: 
+        prompts = load_prompts(args.prompts, index=0)
+        if isinstance(subgraph, list) and len(subgraph) == 2:
+            class_name = ",".join(prompts[subgraph[0]:subgraph[1]])
+            subgraph_id = subgraph
+        else:
+            class_name = prompts[subgraph]
+            subgraph_id = [subgraph, subgraph + 1]
+        logging.info(f"Visualizing subgraph for {class_name} of {wsi_name}...")
+    else:
+        class_name = "pathomics"
+        subgraph_id = None
+        logging.info(f"Visualizing slide graph for {wsi_name}...")
+    visualize_pathomic_graph(
+        wsi_path=wsi_path,
+        graph_path=graph_path,
+        label=label_path,
+        subgraph_id=subgraph_id,
+        show_map=False,
+        magnify=False,
+        save_title=f"{wsi_name}:{class_name}",
+        resolution=args.resolution,
+        units=args.units
+    )
