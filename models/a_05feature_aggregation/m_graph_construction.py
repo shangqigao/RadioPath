@@ -585,7 +585,7 @@ def visualize_pathomic_graph(
         subsets = []
         for idx in subgraph_id.values(): 
             selected = torch.logical_and(act_tensor >= idx[0], act_tensor < idx[1])
-            node_activations[selected.numpy.tolist()] = idx[0] # reassign labels
+            node_activations[selected.numpy().tolist()] = idx[0] # reassign labels
             subsets.append(selected)
         if len(subsets) == 1:
             subset = subsets[0]
