@@ -281,12 +281,13 @@ if __name__ == "__main__":
             graph_path=graph_path,
             label=label_path,
             label_min=0,
-            label_max=len(prompts),
+            label_max=len(prompts) - 1,
             subgraph_id=subgraph_id,
             show_map=False,
             magnify=False,
             save_title=f"{wsi_name}:{class_name}",
             save_name=wsi_name,
+            cmap_type='Set3',
             resolution=args.resolution,
             units=args.units
         )
