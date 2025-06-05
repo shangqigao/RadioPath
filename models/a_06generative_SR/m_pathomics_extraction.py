@@ -253,7 +253,6 @@ if __name__ == "__main__":
 
     ## visualize graph on wsi
     for wsi_path in wsi_paths:
-        wsi_path = wsi_paths[0]
         wsi_name = pathlib.Path(wsi_path).stem 
         logging.info(f"Visualizing graph of {wsi_name}...")
         graph_path = save_feature_dir / f"{wsi_name}.json"
@@ -261,6 +260,7 @@ if __name__ == "__main__":
         # subgraph can be {key: int, ..., key: int}, a dict of mutiple classes
         # {key: [int, int], ..., key: [int, int]}, a dict of mutiple class ranges
         subgraph = {'immune': [12, 17], 'stroma': [27, 32], 'tumor': [32, 35]}
+        # subgraph = {'psammoma': [35, 37]}
         prompts = load_prompts(args.prompts, index=0)
         if subgraph is not None: 
             assert len(subgraph) > 0, "Empty subgraph!"
@@ -283,7 +283,7 @@ if __name__ == "__main__":
             label_min=0,
             label_max=len(prompts),
             subgraph_id=subgraph_id,
-            show_map=False,
+            show_map=True,
             magnify=False,
             save_title=f"{wsi_name}:{class_name}",
             save_name=wsi_name,

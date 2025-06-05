@@ -587,7 +587,7 @@ def visualize_pathomic_graph(
         if len(subsets) == 1:
             subset = subsets[0]
         else:
-            subset = torch.all(torch.stack(subsets), dim=0)
+            subset = torch.any(torch.stack(subsets), dim=0)
         edge_index, _ = subgraph(subset, graph_dict["edge_index"], relabel_nodes=True)
         subset = subset.numpy().tolist()
         node_activations = node_activations[subset]
@@ -726,7 +726,7 @@ def visualize_pathomic_graph(
         # sm = ScalarMappable(cmap=cmap, norm=norm)
         # cbar = fig.colorbar(sm, ax=ax, extend="both")
         # cbar.minorticks_on()
-        plt.savefig("a_05feature_aggregation/wsi_graph.jpg")
+        plt.savefig("a_05feature_aggregation/wsi_graph.png", dpi=300, bbox_inches='tight')
     else:
         if not show_map:
             thumb_overlaid = plot_graph(
@@ -782,7 +782,7 @@ def visualize_pathomic_graph(
             cbar.minorticks_on()
         plt.subplot(2,2,3)
         plt.imshow(thumb_tile)
-        plt.savefig(f"a_05feature_aggregation/wsi_graph_{save_name}.jpg")
+        plt.savefig(f"a_05feature_aggregation/wsi_graph_{save_name}.png", dpi=300, bbox_inches='tight')
 
 def visualize_radiomic_graph(
         img_path,
