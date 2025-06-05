@@ -601,14 +601,13 @@ def visualize_pathomic_graph(
     graph_dict = {k: v.numpy() for k, v in graph_dict.items()}
     graph = Data(**graph_dict)
 
-    cmap = get_cmap(cmap_type)
     if cmap_type in continuous_cmap_types:
+        cmap = get_cmap(cmap_type)
         norm_node_activations = (node_activations - label_min) / (label_max - label_min + 1e-10)
         node_colors = (cmap(norm_node_activations)[..., :3] * 255).astype(np.uint8)
     elif cmap_type in discrete_cmap_types:
-        colors = cmap.colors
-        full_colors = (colors * 5)[:label_max + 1]
-        cmap = ListedColormap(full_colors)
+        colors = sns.color_palette("husl", label_max + 1)
+        cmap = ListedColormap(colors)
         node_colors = (cmap(node_activations)[..., :3] * 255).astype(np.uint8)
     else:
         raise ValueError(f"Unsupported color map: {cmap_type}")
