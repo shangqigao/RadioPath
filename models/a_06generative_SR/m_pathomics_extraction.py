@@ -288,7 +288,7 @@ if __name__ == "__main__":
             magnify=False,
             save_title=f"{wsi_name}:{class_name}",
             save_name=wsi_name,
-            cmap_type='tab10',
+            cmap_type='husl',
             resolution=args.resolution,
             units=args.units
         )

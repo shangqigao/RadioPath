@@ -541,7 +541,6 @@ def visualize_pathomic_graph(
         save_title="pathomics graph",
         save_wsi=False,
         cmap_type='Set3',
-        discrete_cmap_types=["Set1", "Set2", "Set3", "Paired", "tab10", "tab20", "Accent"],
         continuous_cmap_types=["viridis", "plasma", "magma", "inferno"]
     ):
     if pathlib.Path(wsi_path).suffix == ".jpg":
@@ -605,12 +604,10 @@ def visualize_pathomic_graph(
         cmap = get_cmap(cmap_type)
         norm_node_activations = (node_activations - label_min) / (label_max - label_min + 1e-10)
         node_colors = (cmap(norm_node_activations)[..., :3] * 255).astype(np.uint8)
-    elif cmap_type in discrete_cmap_types:
+    else:
         colors = sns.color_palette("husl", label_max + 1)
         cmap = ListedColormap(colors)
         node_colors = (cmap(node_activations)[..., :3] * 255).astype(np.uint8)
-    else:
-        raise ValueError(f"Unsupported color map: {cmap_type}")
 
     if uncertainty_map is not None:
         norm_uncertainty_map = (uncertainty_map - uncertainty_map.min()) / (uncertainty_map.max() - uncertainty_map.min() + 1e-10)
@@ -727,7 +724,7 @@ def visualize_pathomic_graph(
         if cmap_type in continuous_cmap_types:
             norm = Normalize(label_min, label_max)
             sm = ScalarMappable(cmap=cmap, norm=norm)
-        elif cmap_type in discrete_cmap_types:
+        else:
             boundaries = np.arange(label_min, label_max + 2)  # +2 to make bins for each class
             norm = BoundaryNorm(boundaries, cmap.N)
             sm = ScalarMappable(cmap=cmap, norm=norm)
@@ -789,7 +786,7 @@ def visualize_pathomic_graph(
         if cmap_type in continuous_cmap_types:
             norm = Normalize(label_min, label_max)
             sm = ScalarMappable(cmap=cmap, norm=norm)
-        elif cmap_type in discrete_cmap_types:
+        else:
             boundaries = np.arange(label_min, label_max + 2)  # +2 to make bins for each class
             norm = BoundaryNorm(boundaries, cmap.N)
             sm = ScalarMappable(cmap=cmap, norm=norm)
