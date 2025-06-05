@@ -29,7 +29,7 @@ from scipy.sparse.csgraph import minimum_spanning_tree
 import numpy as np
 import networkx as nx
 import plotly.graph_objects as go
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, BoundaryNorm
 from matplotlib.cm import ScalarMappable, get_cmap
 from torch_geometric.data import Data
 from torch_geometric.utils import subgraph
@@ -539,7 +539,10 @@ def visualize_pathomic_graph(
         units="mpp",
         save_name="pathomics",
         save_title="pathomics graph",
-        save_wsi=False
+        save_wsi=False,
+        cmap_type='Set3',
+        discrete_cmap_types=["Set1", "Set2", "Set3", "Paired", "tab10", "tab20", "Accent"],
+        continuous_cmap_types=["viridis", "plasma", "magma", "inferno"]
     ):
     if pathlib.Path(wsi_path).suffix == ".jpg":
         NODE_RESOLUTION = {"resolution": resolution, "units": units}
@@ -598,9 +601,16 @@ def visualize_pathomic_graph(
     graph_dict = {k: v.numpy() for k, v in graph_dict.items()}
     graph = Data(**graph_dict)
 
-    cmap = get_cmap("viridis")
-    norm_node_activations = (node_activations - label_min) / (label_max - label_min + 1e-10)
-    node_colors = (cmap(norm_node_activations)[..., :3] * 255).astype(np.uint8)
+    if cmap_type in continuous_cmap_types:
+        cmap = get_cmap(cmap_type)
+        norm_node_activations = (node_activations - label_min) / (label_max - label_min + 1e-10)
+        node_colors = (cmap(norm_node_activations)[..., :3] * 255).astype(np.uint8)
+    elif cmap_type in discrete_cmap_types:
+        cmap = get_cmap(cmap_type, label_max + 1)
+        node_colors = (cmap(node_activations)[..., :3] * 255).astype(np.uint8)
+    else:
+        raise ValueError(f"Unsupported color map: {cmap_type}")
+
     if uncertainty_map is not None:
         norm_uncertainty_map = (uncertainty_map - uncertainty_map.min()) / (uncertainty_map.max() - uncertainty_map.min() + 1e-10)
         uncertainty_colors = (cmap(norm_uncertainty_map)[..., :3] * 255).astype(np.uint8)
@@ -713,9 +723,16 @@ def visualize_pathomic_graph(
         plt.imshow(thumb_overlaid)
         plt.axis("off")
         fig = plt.gcf()
-        norm = Normalize(label_min, label_max)
-        sm = ScalarMappable(cmap=cmap, norm=norm)
-        cbar = fig.colorbar(sm, ax=ax, extend="both")
+        if cmap_type in continuous_cmap_types:
+            norm = Normalize(label_min, label_max)
+            sm = ScalarMappable(cmap=cmap, norm=norm)
+        elif cmap_type in discrete_cmap_types:
+            boundaries = np.arange(label_min, label_max + 2)  # +2 to make bins for each class
+            norm = BoundaryNorm(boundaries, cmap.N)
+            sm = ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])  # Required for ScalarMappable to work with colorbar
+        cbar = fig.colorbar(sm, ax=ax, ticks=np.arange(label_min, label_max + 1))
+        cbar.set_label("Class")
         cbar.minorticks_on()
         
         # ax = plt.subplot(1,2,2)
@@ -768,9 +785,16 @@ def visualize_pathomic_graph(
         plt.title(f"{save_title}")
         plt.axis("off")
         fig = plt.gcf()
-        norm = Normalize(label_min, label_max)
-        sm = ScalarMappable(cmap=cmap, norm=norm)
-        cbar = fig.colorbar(sm, ax=ax, extend="both")
+        if cmap_type in continuous_cmap_types:
+            norm = Normalize(label_min, label_max)
+            sm = ScalarMappable(cmap=cmap, norm=norm)
+        elif cmap_type in discrete_cmap_types:
+            boundaries = np.arange(label_min, label_max + 2)  # +2 to make bins for each class
+            norm = BoundaryNorm(boundaries, cmap.N)
+            sm = ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])  # Required for ScalarMappable to work with colorbar
+        cbar = fig.colorbar(sm, ax=ax, ticks=np.arange(label_min, label_max + 1))
+        cbar.set_label("Class")
         if subgraph_id is not None:
             for label, (start, end) in subgraph_id.items():
                 # Calculate center of the range for label placement
