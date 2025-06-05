@@ -581,7 +581,7 @@ def visualize_pathomic_graph(
     if subgraph_id is not None:
         act_tensor = torch.tensor(node_activations).squeeze()
         subsets = []
-        for idx in subgraph_id: 
+        for idx in subgraph_id.values(): 
             selected = torch.logical_and(act_tensor >= idx[0], act_tensor < idx[1])
             subsets.append(selected)
         if len(subsets) == 1:
@@ -771,7 +771,15 @@ def visualize_pathomic_graph(
         norm = Normalize(label_min, label_max)
         sm = ScalarMappable(cmap=cmap, norm=norm)
         cbar = fig.colorbar(sm, ax=ax, extend="both")
-        cbar.minorticks_on()
+        if subgraph_id is not None:
+            for label, (start, end) in subgraph_id.items():
+                # Calculate center of the range for label placement
+                y_pos = (start + end - 1) / 2
+                cbar.ax.text(1.1, y_pos, label, va='center', ha='left', transform=cbar.ax.transData)
+                cbar.ax.hlines([start, end], xmin=0, xmax=1, colors='white')
+            cbar.set_ticks([])
+        else:
+            cbar.minorticks_on()
         plt.subplot(2,2,3)
         plt.imshow(thumb_tile)
         plt.savefig(f"a_05feature_aggregation/wsi_graph_{save_name}.jpg")

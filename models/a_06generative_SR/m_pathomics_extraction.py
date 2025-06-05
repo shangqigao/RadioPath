@@ -258,25 +258,19 @@ if __name__ == "__main__":
         logging.info(f"Visualizing graph of {wsi_name}...")
         graph_path = save_feature_dir / f"{wsi_name}.json"
         label_path = save_feature_dir / f"{wsi_name}.label.npy"
-        # subgraph can be int, the id of one class
-        # [int, ..., int], the ids of multiple classes
-        # or [[int, int], ..., [int, int]], the ids of mutiple class ranges
-        subgraph = [[12, 17], [27, 32], [32, 35]]
+        # subgraph can be {key: int, ..., key: int}, a dict of mutiple classes
+        # {key: [int, int], ..., key: [int, int]}, a dict of mutiple class ranges
+        subgraph = {'immune': [12, 17], 'stroma': [27, 32], 'tumor': [32, 35]}
+        prompts = load_prompts(args.prompts, index=0)
         if subgraph is not None: 
-            prompts = load_prompts(args.prompts, index=0)
-            if isinstance(subgraph, list):
-                assert len(subgraph) > 0, "Empty subgraph!"
-                if isinstance(subgraph[0], list):
-                    assert len(subgraph[0]) == 2
-                    class_name = ","
-                    for idx in subgraph: class_name.join(prompts[idx[0]:idx[1]])
-                    subgraph_id = subgraph
-                else:
-                    class_name = ",".join([prompts[i] for i in subgraph])
-                    subgraph_id = [[i, i + 1] for i in subgraph]
+            assert len(subgraph) > 0, "Empty subgraph!"
+            class_name = ",".join(list(subgraph.keys()))
+            values = list(subgraph.values())
+            if isinstance(values[0], list):
+                assert len(values[0]) == 2
+                subgraph_id = subgraph
             else:
-                class_name = prompts[subgraph]
-                subgraph_id = [[subgraph, subgraph + 1]]
+                subgraph_id = {k: [v, v + 1] for k, v in subgraph.items()}
             logging.info(f"Visualizing subgraph for {class_name} of {wsi_name}...")
         else:
             class_name = "pathomics"
@@ -286,11 +280,12 @@ if __name__ == "__main__":
             wsi_path=wsi_path,
             graph_path=graph_path,
             label=label_path,
+            label_min=0,
+            label_max=len(prompts),
             subgraph_id=subgraph_id,
             show_map=False,
             magnify=False,
-            # save_title=f"{wsi_name}:{class_name}",
-            save_title=f"{wsi_name}:immune-stroma-tumor",
+            save_title=f"{wsi_name}:{class_name}",
             save_name=wsi_name,
             resolution=args.resolution,
             units=args.units
