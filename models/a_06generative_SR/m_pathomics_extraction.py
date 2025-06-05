@@ -259,7 +259,8 @@ if __name__ == "__main__":
         label_path = save_feature_dir / f"{wsi_name}.label.npy"
         # subgraph can be {key: int, ..., key: int}, a dict of mutiple classes
         # {key: [int, int], ..., key: [int, int]}, a dict of mutiple class ranges
-        subgraph = {'immune': [12, 17], 'stroma': [27, 32], 'tumor': [32, 35]}
+        subgraph = None
+        # subgraph = {'immune': [12, 17], 'stroma': [27, 32], 'tumor': [32, 35]}
         # subgraph = {'psammoma': [35, 37]}
         prompts = load_prompts(args.prompts, index=0)
         if subgraph is not None: 
@@ -287,7 +288,7 @@ if __name__ == "__main__":
             magnify=False,
             save_title=f"{wsi_name}:{class_name}",
             save_name=wsi_name,
-            cmap_type='Set3',
+            cmap_type='tab10',
             resolution=args.resolution,
             units=args.units
         )

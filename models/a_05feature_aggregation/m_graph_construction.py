@@ -732,7 +732,7 @@ def visualize_pathomic_graph(
             sm = ScalarMappable(cmap=cmap, norm=norm)
             sm.set_array([])  # Required for ScalarMappable to work with colorbar
         cbar = fig.colorbar(sm, ax=ax, ticks=np.arange(label_min, label_max + 1))
-        cbar.set_label("Class")
+        cbar.ax.tick_params(labelsize=8)
         cbar.minorticks_on()
         
         # ax = plt.subplot(1,2,2)
@@ -794,7 +794,7 @@ def visualize_pathomic_graph(
             sm = ScalarMappable(cmap=cmap, norm=norm)
             sm.set_array([])  # Required for ScalarMappable to work with colorbar
         cbar = fig.colorbar(sm, ax=ax, ticks=np.arange(label_min, label_max + 1))
-        cbar.set_label("Class")
+        cbar.ax.tick_params(labelsize=8)
         if subgraph_id is not None:
             for label, (start, end) in subgraph_id.items():
                 # Calculate center of the range for label placement
