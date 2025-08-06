@@ -2102,6 +2102,33 @@ if __name__ == "__main__":
         df_clinical, matched_i = matched_survival_graph(
             save_clinical_dir, matched_pathomics_paths, 
             dataset="TCGA-KIRC", survival="DFS", metastasis=["M0"])
+
+    # summarize demographics
+    # gender
+    counts = df_clinical['gender'].str.lower().value_counts()
+    percentages = df_clinical['gender'].str.lower().value_counts(normalize=True) * 100
+    summary = pd.DataFrame({'Count': counts, 'Percentage': percentages.round(2)})
+    print('>>>>>>>Gender>>>>>')
+    print(summary)
+
+    # race
+    counts = df_clinical['race'].str.lower().value_counts()
+    percentages = df_clinical['race'].str.lower().value_counts(normalize=True) * 100
+    summary = pd.DataFrame({'Count': counts, 'Percentage': percentages.round(2)})
+    print('>>>>>>>Race>>>>>')
+    print(summary)
+
+    # age
+    print('>>>>>>>Age>>>>>')
+    print(df_clinical['age'].describe())
+
+    # subtype
+    counts = df_clinical['project_id'].str.lower().value_counts()
+    percentages = df_clinical['project_id'].str.lower().value_counts(normalize=True) * 100
+    summary = pd.DataFrame({'Count': counts, 'Percentage': percentages.round(2)})
+    print('>>>>>>>Subtype>>>>>')
+    print(summary)
+
     labels = df_clinical[['duration', 'event']].to_numpy(dtype=np.float32).tolist()
     concepts = [concepts[i] for i in matched_i]
     print("The number of samples for each class:", np.sum(np.array(concepts) == 1.0, axis=0))
@@ -2130,19 +2157,19 @@ if __name__ == "__main__":
     logging.info(f"Number of testing samples: {num_test}.")
 
     # survival analysis
-    survival(
-        split_path=split_path,
-        concepts=concept_names,
-        pathomics_keys=None,
-        pathomics_aggregation=False,
-        pathomics_aggregated_mode=args.pathomics_aggregated_mode,
-        used=["concepts", "pathomics"][1], 
-        n_jobs=8,
-        model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
-        scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0],
-        feature_selection=False,
-        n_bootstraps=0
-    )
+    # survival(
+    #     split_path=split_path,
+    #     concepts=concept_names,
+    #     pathomics_keys=None,
+    #     pathomics_aggregation=False,
+    #     pathomics_aggregated_mode=args.pathomics_aggregated_mode,
+    #     used=["concepts", "pathomics"][1], 
+    #     n_jobs=8,
+    #     model=["RSF", "CoxPH", "Coxnet", "FastSVM"][1],
+    #     scorer=["cindex", "cindex-ipcw", "auc", "ibs"][0],
+    #     feature_selection=False,
+    #     n_bootstraps=0
+    # )
 
     # compute mean and std on training data for normalization 
     # splits = joblib.load(split_path)
